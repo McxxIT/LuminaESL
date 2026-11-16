@@ -2,7 +2,6 @@ import type {
   Account,
   CreditTransaction,
   CurriculumUnit,
-  Lesson,
   PracticeActivity,
   StudentAchievement,
   StudentAssignment,
@@ -10,8 +9,11 @@ import type {
   StudentProfile,
   StudentSettings,
   StudentSkill,
-  TeacherAvailability,
   TeacherLesson,
+  TeacherLessonMaterial,
+  TeacherLessonRating,
+  TeacherSlotClosure,
+  TeacherSlotOpening,
   TeacherProfile,
   TeacherSettings,
   TeacherStudent,
@@ -19,18 +21,27 @@ import type {
 } from "./types";
 import { addMinutes, isoDaysFromNow } from "./student";
 
-export const accounts: Account[] = [
-  { email: "admin@lumina.school", role: "admin", name: "Jamie Smith" },
-  { email: "teacher@lumina.school", role: "teacher", name: "Alex Johnson" },
-  { email: "student@lumina.school", role: "student", name: "Mia Chen" },
+/** Manager sidebar. The admin gets the same pages school-wide, plus Managers and School settings. */
+export const managerNavItems = [
+  { label: "Overview", icon: "grid" as const },
+  { label: "Teachers", icon: "users" as const },
+  { label: "Students", icon: "user" as const },
+  { label: "Curriculum", icon: "book" as const },
+  { label: "Schedule", icon: "calendar" as const },
+  { label: "Approvals", icon: "check" as const },
+  { label: "Performance", icon: "chart" as const },
 ];
 
-export const navItems = [
+export const adminNavItems = [
   { label: "Overview", icon: "grid" as const },
-  { label: "Schedule", icon: "calendar" as const },
-  { label: "Students", icon: "users" as const },
+  { label: "Managers", icon: "shield" as const },
+  { label: "Teachers", icon: "users" as const },
+  { label: "Students", icon: "user" as const },
   { label: "Curriculum", icon: "book" as const },
-  { label: "Analytics", icon: "chart" as const },
+  { label: "Schedule", icon: "calendar" as const },
+  { label: "Approvals", icon: "check" as const },
+  { label: "Performance", icon: "chart" as const },
+  { label: "School settings", icon: "sliders" as const },
 ];
 
 export const studentNavItems = [
@@ -44,47 +55,10 @@ export const studentNavItems = [
 
 export const teacherNavItems = [
   { label: "Overview", icon: "grid" as const },
-  { label: "Schedule", icon: "calendar" as const },
+  { label: "Booking slots", icon: "clock" as const },
+  { label: "Lessons", icon: "video" as const },
   { label: "Students", icon: "users" as const },
-  { label: "Curriculum", icon: "book" as const },
   { label: "Analytics", icon: "chart" as const },
-];
-
-export const days = [
-  { day: "MON", date: "14" },
-  { day: "TUE", date: "15" },
-  { day: "WED", date: "16" },
-  { day: "THU", date: "17" },
-  { day: "FRI", date: "18" },
-  { day: "SAT", date: "19" },
-  { day: "SUN", date: "20" },
-];
-
-export const initialSchedule: Record<string, Lesson[]> = {
-  MON: [
-    { time: "09:00", title: "Conversation practice", student: "Mia Chen", state: "booked" },
-    { time: "11:30", title: "Available", student: "60 min", state: "open" },
-    { time: "15:00", title: "Business English", student: "Lucas Martin", state: "booked" },
-  ],
-  TUE: [
-    { time: "10:00", title: "IELTS Speaking", student: "Ava Rodriguez", state: "booked" },
-    { time: "13:30", title: "Available", student: "30 min", state: "open" },
-  ],
-  WED: [
-    { time: "09:30", title: "Grammar foundations", student: "Noah Williams", state: "booked" },
-    { time: "14:00", title: "Live conversation", student: "Sofia Patel", state: "live" },
-    { time: "16:00", title: "Available", student: "60 min", state: "open" },
-  ],
-  THU: [{ time: "11:00", title: "Academic writing", student: "Ethan Kim", state: "booked" }, { time: "15:30", title: "Available", student: "30 min", state: "open" }],
-  FRI: [{ time: "09:00", title: "Pronunciation clinic", student: "Olivia Smith", state: "booked" }, { time: "13:00", title: "Available", student: "60 min", state: "open" }],
-  SAT: [{ time: "10:30", title: "Available", student: "60 min", state: "open" }],
-  SUN: [],
-};
-
-export const upcomingLessons = [
-  { initials: "MC", name: "Mia Chen", lesson: "Conversation practice", time: "Today, 09:00", color: "lavender" },
-  { initials: "AR", name: "Ava Rodriguez", lesson: "IELTS Speaking", time: "Tomorrow, 10:00", color: "peach" },
-  { initials: "NW", name: "Noah Williams", lesson: "Grammar foundations", time: "Wed, 09:30", color: "mint" },
 ];
 
 export const studyTasks = [
@@ -391,7 +365,7 @@ export const defaultStudentSettings: StudentSettings = {
   autoJoinReminder: true,
   compactSchedule: false,
   showLocalTimezone: true,
-  defaultDuration: "60",
+  defaultDuration: "25",
   language: "English",
   theme: "light",
 };
@@ -404,9 +378,9 @@ export const studentTransactionSeed: CreditTransaction[] = [
 ];
 
 export const creditPackages = [
-  { hours: 5, price: 75, label: "5 lesson hours", detail: "10 half-hour sessions" },
-  { hours: 10, price: 140, label: "10 lesson hours", detail: "20 half-hour sessions · most popular" },
-  { hours: 20, price: 260, label: "20 lesson hours", detail: "40 half-hour sessions · best value" },
+  { hours: 5, price: 75, label: "5 lesson hours", detail: "12 twenty-five-minute sessions" },
+  { hours: 10, price: 140, label: "10 lesson hours", detail: "24 twenty-five-minute sessions · most popular" },
+  { hours: 20, price: 260, label: "20 lesson hours", detail: "48 twenty-five-minute sessions · best value" },
 ];
 
 export const studentTutors = [
@@ -415,8 +389,6 @@ export const studentTutors = [
   { name: "Ava Rodriguez", initials: "AR", color: "lavender", specialty: "IELTS and academic English" },
   { name: "Lucas Martin", initials: "LM", color: "mint", specialty: "Grammar and fluency" },
 ];
-
-export const lessonTimeOptions = ["08:00", "09:00", "09:30", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
 
 export const teacherFocusOptions = ["Conversation practice", "Business English", "IELTS speaking", "Pronunciation clinic", "Grammar foundations", "Academic writing", "Vocabulary workshop", "Interview preparation"];
 
@@ -447,22 +419,35 @@ export const defaultTeacherSettings: TeacherSettings = {
   autoAcceptBookings: false,
   compactSchedule: false,
   showLocalTimezone: true,
-  defaultDuration: "60",
+  defaultDuration: "25",
   bufferMinutes: "15",
   language: "English",
   theme: "light",
 };
 
-export const teacherAvailabilitySeed: TeacherAvailability[] = [
-  { id: "availability-1", day: "MON", startTime: "09:00", endTime: "12:00", active: true },
-  { id: "availability-2", day: "MON", startTime: "14:00", endTime: "17:00", active: true },
-  { id: "availability-3", day: "TUE", startTime: "10:00", endTime: "13:00", active: true },
-  { id: "availability-4", day: "WED", startTime: "09:00", endTime: "12:00", active: true },
-  { id: "availability-5", day: "WED", startTime: "14:00", endTime: "18:00", active: true },
-  { id: "availability-6", day: "THU", startTime: "11:00", endTime: "15:00", active: false },
-  { id: "availability-7", day: "FRI", startTime: "09:00", endTime: "13:00", active: true },
-  { id: "availability-8", day: "SAT", startTime: "10:00", endTime: "12:00", active: false },
+export const teacherClosedSlotsSeed: TeacherSlotClosure[] = [
+  {
+    id: "closure-seed-1",
+    date: isoDaysFromNow(1),
+    time: "15:30",
+    reason: "Medical appointment",
+    status: "pending",
+    requestedAt: new Date().toISOString(),
+    requestedBy: "Alex Johnson",
+  },
 ];
+
+const openedSlotTimes = ["09:00", "09:30", "10:00", "10:30", "11:30", "13:30", "14:00", "14:30", "15:00"];
+
+export const teacherOpenedSlotsSeed: TeacherSlotOpening[] = [0, 1, 2].flatMap((offset) =>
+  openedSlotTimes.map((time) => ({
+    id: `opening-${offset}-${time}`,
+    date: isoDaysFromNow(offset),
+    time,
+    openedAt: new Date().toISOString(),
+    openedBy: "Alex Johnson",
+  })),
+);
 
 export const teacherStudentsSeed: TeacherStudent[] = [
   {
@@ -648,6 +633,88 @@ function lessonRoomCode(id: string) {
   return `ESL-${1000 + (hash % 9000)}`;
 }
 
+const MANAGER_NAME = "Jamie Smith";
+
+const lessonMaterial = (
+  id: string,
+  title: string,
+  summary: string,
+  sections: TeacherLessonMaterial["sections"],
+  assignedDayOffset = -2,
+): TeacherLessonMaterial => ({
+  id,
+  title,
+  fileName: `${id}.txt`,
+  summary,
+  sections,
+  assignedBy: MANAGER_NAME,
+  assignedAt: isoDaysFromNow(assignedDayOffset),
+});
+
+/** Manager-assigned lesson plans keyed by lesson title. Pronunciation clinic is intentionally unassigned. */
+export const managerLessonMaterials: Record<string, TeacherLessonMaterial> = {
+  "Conversation practice": lessonMaterial("conversation-practice-plan", "Conversation practice: everyday fluency", "Build turn-taking and follow-up questions around a familiar topic.", [
+    { heading: "Warm-up (5 min)", items: ["Ask about the student's week and pick one topic to expand.", "Model two follow-up questions."] },
+    { heading: "Main task (15 min)", items: ["Role-play planning a weekend trip.", "Student must ask at least three follow-up questions.", "Note recurring errors for the wrap-up."] },
+    { heading: "Wrap-up (5 min)", items: ["Review three corrections.", "Set a short recording task as homework."] },
+  ]),
+  "IELTS Speaking": lessonMaterial("ielts-speaking-part-1-plan", "IELTS Speaking Part 1: first impressions", "Natural, extended Part 1 answers with band-score feedback.", [
+    { heading: "Warm-up (5 min)", items: ["Quick-fire familiar questions: home, work, hobbies."] },
+    { heading: "Main task (15 min)", items: ["Six Part 1 questions, timed.", "Push for reason + example in every answer.", "Score fluency, lexis, grammar, and pronunciation."] },
+    { heading: "Wrap-up (5 min)", items: ["Share an estimated band and one priority to improve."] },
+  ]),
+  "Grammar foundations": lessonMaterial("grammar-conditionals-plan", "Grammar foundations: conditionals", "Review form and use of first, second, and third conditionals.", [
+    { heading: "Warm-up (5 min)", items: ["Elicit 'What would you do if…' answers."] },
+    { heading: "Main task (15 min)", items: ["Controlled gap-fill, then free sentences about past regrets.", "Correct form errors on the spot."] },
+    { heading: "Wrap-up (5 min)", items: ["Student summarises the three patterns in their own words."] },
+  ]),
+  "Business English": lessonMaterial("business-stakeholder-update-plan", "Business English: stakeholder updates", "Write and edit a clear, concise status update.", [
+    { heading: "Warm-up (5 min)", items: ["Discuss what makes an update easy to read."] },
+    { heading: "Main task (15 min)", items: ["Edit a sample update down to three sentences.", "Student drafts their own update for a real project."] },
+    { heading: "Wrap-up (5 min)", items: ["Compare drafts and agree on one rewrite rule."] },
+  ]),
+  "Academic writing": lessonMaterial("academic-essay-introduction-plan", "Academic writing: argument introductions", "Rebuild a C1 essay introduction with a clear position.", [
+    { heading: "Warm-up (5 min)", items: ["Identify the thesis in two sample introductions."] },
+    { heading: "Main task (15 min)", items: ["Rewrite the student's introduction: hook, context, thesis.", "Add linking language between ideas."] },
+    { heading: "Wrap-up (5 min)", items: ["Checklist review and homework: rewrite one body paragraph."] },
+  ]),
+  "Negotiation practice": lessonMaterial("negotiation-supplier-roleplay-plan", "Negotiation practice: supplier role-play", "Hedged disagreement and conditional offers in a negotiation.", [
+    { heading: "Warm-up (5 min)", items: ["Review hedging phrases: 'I'm not sure that works for us…'"] },
+    { heading: "Main task (15 min)", items: ["Supplier negotiation role-play with a target price.", "Student must make two conditional offers."] },
+    { heading: "Wrap-up (5 min)", items: ["Debrief language used and what could be softer."] },
+  ]),
+  "Interview preparation": lessonMaterial("interview-star-stories-plan", "Interview preparation: STAR stories", "Structure concise, vivid answers to behavioural questions.", [
+    { heading: "Warm-up (5 min)", items: ["Review the STAR structure."] },
+    { heading: "Main task (15 min)", items: ["Three behavioural questions, 90 seconds each.", "Give feedback on structure and specificity."] },
+    { heading: "Wrap-up (5 min)", items: ["Pick one story to polish as homework."] },
+  ]),
+};
+managerLessonMaterials["IELTS speaking clinic"] = managerLessonMaterials["IELTS Speaking"];
+managerLessonMaterials["IELTS speaking mock"] = managerLessonMaterials["IELTS Speaking"];
+
+/** ISO timestamp relative to a seeded lesson's start, e.g. -40 = 40 minutes before it began. */
+function lessonStartISO(dayOffset: number, time: string, minutesFromStart = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
+  const [hours, minutes] = time.split(":").map(Number);
+  date.setHours(hours, minutes + minutesFromStart, 0, 0);
+  return date.toISOString();
+}
+
+const lessonRating = (
+  from: TeacherLessonRating["from"],
+  student: TeacherStudent,
+  score: TeacherLessonRating["score"],
+  dayOffset: number,
+  comment?: string,
+): TeacherLessonRating => ({
+  from,
+  name: from === "parent" ? `Parent of ${student.name.split(" ")[0]}` : student.name,
+  score,
+  comment,
+  ratedAt: isoDaysFromNow(dayOffset),
+});
+
 const teacherLessonSeed = (
   id: string,
   dayOffset: number,
@@ -672,71 +739,106 @@ const teacherLessonSeed = (
   studentColor: student.avatarColor,
   status,
   roomCode: lessonRoomCode(id),
+  material: managerLessonMaterials[title],
   ...extra,
 });
 
 export const teacherLessonsSeed: TeacherLesson[] = [
-  teacherLessonSeed("teacher-lesson-1", 0, "09:00", 60, "Conversation practice", teacherStudentsSeed[0], "completed", ["Speaking", "Fluency"], {
+  teacherLessonSeed("teacher-lesson-1", 0, "09:15", 25, "Conversation practice", teacherStudentsSeed[0], "completed", ["Speaking", "Fluency"], {
     attendance: "attended",
     notes: "Warm-up conversation, then a short discussion about weekend travel plans.",
     feedback: "Mia led the warm-up with much more confidence today. Keep working on past-modality phrases when reflecting on decisions.",
     homework: "Review five travel idioms before the next lesson.",
+    ratings: [
+      lessonRating("student", teacherStudentsSeed[0], 5, 0, "Really fun warm-up, I felt confident speaking."),
+      lessonRating("parent", teacherStudentsSeed[0], 5, 0, "Mia talks about her lessons every week. Thank you!"),
+    ],
   }),
-  teacherLessonSeed("teacher-lesson-2", 0, "11:30", 60, "IELTS Speaking", teacherStudentsSeed[1], "live", ["IELTS", "Speaking"], {
-    notes: "Full Part 1–3 speaking mock with band score feedback.",
+  teacherLessonSeed("teacher-lesson-2", 0, "11:20", 25, "IELTS Speaking", teacherStudentsSeed[1], "live", ["IELTS", "Speaking"], {
+    notes: "Focused Part 1 speaking practice with band score feedback.",
   }),
-  teacherLessonSeed("teacher-lesson-3", 0, "14:00", 45, "Grammar foundations", teacherStudentsSeed[2], "scheduled", ["Grammar", "Accuracy"], {
+  teacherLessonSeed("teacher-lesson-3", 0, "13:50", 25, "Grammar foundations", teacherStudentsSeed[2], "scheduled", ["Grammar", "Accuracy"], {
     notes: "Third conditional review and controlled practice.",
   }),
-  teacherLessonSeed("teacher-lesson-4", 1, "10:00", 60, "Business English", teacherStudentsSeed[3], "scheduled", ["Writing", "Business English"], {
+  teacherLessonSeed("teacher-lesson-4", 1, "10:05", 25, "Business English", teacherStudentsSeed[3], "scheduled", ["Writing", "Business English"], {
     notes: "Editing a stakeholder update for clarity and concision.",
   }),
-  teacherLessonSeed("teacher-lesson-5", 1, "13:30", 45, "Pronunciation clinic", teacherStudentsSeed[6], "scheduled", ["Pronunciation", "Listening"], {
+  teacherLessonSeed("teacher-lesson-5", 1, "13:25", 25, "Pronunciation clinic", teacherStudentsSeed[6], "scheduled", ["Pronunciation", "Listening"], {
     notes: "Connected speech and the sounds /θ/ and /ð/.",
   }),
-  teacherLessonSeed("teacher-lesson-6", 2, "09:30", 60, "Academic writing", teacherStudentsSeed[5], "scheduled", ["Writing", "Cohesion"], {
+  teacherLessonSeed("teacher-lesson-6", 2, "09:40", 25, "Academic writing", teacherStudentsSeed[5], "scheduled", ["Writing", "Cohesion"], {
     notes: "Rebuild the introduction to a C1 argument essay.",
   }),
-  teacherLessonSeed("teacher-lesson-7", 3, "11:00", 60, "IELTS speaking clinic", teacherStudentsSeed[1], "scheduled", ["IELTS", "Fluency"], {
+  teacherLessonSeed("teacher-lesson-7", 3, "10:55", 25, "IELTS speaking clinic", teacherStudentsSeed[1], "scheduled", ["IELTS", "Fluency"], {
     notes: "Part 3 follow-up questions and abstract topics.",
   }),
-  teacherLessonSeed("teacher-lesson-8", 4, "10:00", 60, "Negotiation practice", teacherStudentsSeed[4], "scheduled", ["Speaking", "Business English"], {
+  teacherLessonSeed("teacher-lesson-8", 4, "10:05", 25, "Negotiation practice", teacherStudentsSeed[4], "scheduled", ["Speaking", "Business English"], {
     notes: "Role-play a supplier negotiation with hedged disagreement.",
   }),
-  teacherLessonSeed("teacher-lesson-9", -1, "09:00", 60, "Conversation practice", teacherStudentsSeed[0], "completed", ["Speaking", "Fluency"], {
+  teacherLessonSeed("teacher-lesson-9", -1, "09:15", 25, "Conversation practice", teacherStudentsSeed[0], "completed", ["Speaking", "Fluency"], {
     attendance: "attended",
     feedback: "Clear improvement in turn-taking. Try recording a two-minute summary before Thursday.",
+    ratings: [lessonRating("student", teacherStudentsSeed[0], 4, -1)],
   }),
-  teacherLessonSeed("teacher-lesson-10", -1, "11:00", 60, "Grammar foundations", teacherStudentsSeed[2], "completed", ["Grammar"], {
+  teacherLessonSeed("teacher-lesson-10", -1, "11:20", 25, "Grammar foundations", teacherStudentsSeed[2], "completed", ["Grammar"], {
     attendance: "no-show",
     notes: "No-show. Follow up to confirm the next slot.",
   }),
-  teacherLessonSeed("teacher-lesson-11", -1, "14:00", 45, "Pronunciation clinic", teacherStudentsSeed[6], "cancelled", ["Pronunciation"], {
+  teacherLessonSeed("teacher-lesson-11", -1, "14:15", 25, "Pronunciation clinic", teacherStudentsSeed[6], "cancelled", ["Pronunciation"], {
     cancelReason: "Student rescheduled due to a work conflict.",
   }),
-  teacherLessonSeed("teacher-lesson-12", -2, "10:00", 60, "Business English", teacherStudentsSeed[3], "completed", ["Business English", "Writing"], {
+  teacherLessonSeed("teacher-lesson-12", -2, "10:05", 25, "Business English", teacherStudentsSeed[3], "completed", ["Business English", "Writing"], {
     attendance: "attended",
     feedback: "Tightened the stakeholder update well. Keep paragraphs under four lines.",
+    ratings: [lessonRating("student", teacherStudentsSeed[3], 5, -2, "Practical and directly useful for work.")],
   }),
-  teacherLessonSeed("teacher-lesson-13", -2, "13:30", 60, "Academic writing", teacherStudentsSeed[5], "completed", ["Writing", "Argument"], {
+  teacherLessonSeed("teacher-lesson-13", -2, "13:25", 25, "Academic writing", teacherStudentsSeed[5], "completed", ["Writing", "Argument"], {
     attendance: "attended",
     feedback: "The claim is clear. Add one more linking sentence between evidence and interpretation.",
+    ratings: [lessonRating("student", teacherStudentsSeed[5], 3, -2, "Helpful, but I wanted more time on my own essay.")],
   }),
-  teacherLessonSeed("teacher-lesson-14", -3, "09:30", 60, "IELTS speaking mock", teacherStudentsSeed[1], "completed", ["IELTS", "Speaking"], {
+  teacherLessonSeed("teacher-lesson-14", -3, "09:40", 25, "IELTS speaking mock", teacherStudentsSeed[1], "completed", ["IELTS", "Speaking"], {
     attendance: "attended",
     feedback: "Band 7.0 range. Part 3 answers need another layer of development and examples.",
+    ratings: [
+      lessonRating("student", teacherStudentsSeed[1], 5, -3, "The band score breakdown was exactly what I needed."),
+      lessonRating("parent", teacherStudentsSeed[1], 4, -3),
+    ],
   }),
-  teacherLessonSeed("teacher-lesson-15", -4, "15:00", 45, "Negotiation practice", teacherStudentsSeed[4], "completed", ["Speaking", "Negotiation"], {
+  teacherLessonSeed("teacher-lesson-15", -4, "15:05", 25, "Negotiation practice", teacherStudentsSeed[4], "completed", ["Speaking", "Negotiation"], {
     attendance: "attended",
     feedback: "Confident framing and excellent use of conditional offers.",
+    ratings: [lessonRating("student", teacherStudentsSeed[4], 2, -4, "The lesson felt rushed at the end.")],
   }),
-  teacherLessonSeed("teacher-lesson-16", -4, "16:00", 45, "Interview preparation", teacherStudentsSeed[7], "completed", ["Interview preparation", "Fluency"], {
+  teacherLessonSeed("teacher-lesson-16", -4, "16:20", 25, "Interview preparation", teacherStudentsSeed[7], "completed", ["Interview preparation", "Fluency"], {
     attendance: "attended",
     feedback: "Stories are vivid. Practise a 90-second version of the leadership example.",
+    ratings: [lessonRating("student", teacherStudentsSeed[7], 5, -4)],
   }),
-  teacherLessonSeed("teacher-lesson-17", -6, "11:00", 60, "Conversation practice", teacherStudentsSeed[0], "completed", ["Speaking", "Fluency"], {
+  teacherLessonSeed("teacher-lesson-17", -6, "11:20", 25, "Conversation practice", teacherStudentsSeed[0], "completed", ["Speaking", "Fluency"], {
     attendance: "attended",
     feedback: "Great use of discourse markers. Watch the tense shift when telling anecdotes.",
+    ratings: [lessonRating("parent", teacherStudentsSeed[0], 5, -6, "Clear notes after every class.")],
+  }),
+  teacherLessonSeed("teacher-lesson-18", -5, "11:30", 25, "Business English", teacherStudentsSeed[3], "cancelled", ["Business English"], {
+    cancelReason: "Teacher cancelled 40 minutes before the start.",
+    cancellation: {
+      reason: "Personal emergency",
+      comment: "Family emergency came up right before class.",
+      status: "approved",
+      requestedAt: lessonStartISO(-5, "11:30", -40),
+      requestedBy: "Alex Johnson",
+      reviewedAt: lessonStartISO(-5, "11:30", -25),
+      reviewedBy: MANAGER_NAME,
+    },
+  }),
+  teacherLessonSeed("teacher-lesson-19", -9, "10:00", 25, "Academic writing", teacherStudentsSeed[5], "cancelled", ["Writing"], {
+    cancelReason: "Teacher did not join; the student waited in the classroom.",
+    teacherAbsence: {
+      note: "Did not join the classroom; the student waited 15 minutes.",
+      reportedBy: MANAGER_NAME,
+      reportedAt: lessonStartISO(-9, "10:00", 30),
+    },
   }),
 ];
 
@@ -744,10 +846,11 @@ export const teacherTasksSeed: TeacherTask[] = [
   { id: "task-1", title: "Review Mia's homework", detail: "Elevator pitch recording · submitted", dueLabel: "Today", done: false },
   { id: "task-2", title: "Add feedback for Ava", detail: "IELTS speaking mock · yesterday", dueLabel: "Today", done: false },
   { id: "task-3", title: "Check in with Olivia", detail: "Low attendance this month", dueLabel: "This week", done: false },
-  { id: "task-4", title: "Set Friday availability", detail: "Weekly planning", dueLabel: "This week", done: false },
-  { id: "task-5", title: "Prepare B2 curriculum unit", detail: "Curriculum studio", dueLabel: "Next week", done: true },
+  { id: "task-4", title: "Review slot closure requests", detail: "Awaiting manager approval", dueLabel: "This week", done: false },
+  { id: "task-5", title: "Download lesson materials", detail: "Assigned by your manager", dueLabel: "Before class", done: false },
 ];
 
+/** Curriculum is owned by the manager; kept as seed data for the future admin curriculum screen. */
 export const teacherCurriculumSeed: CurriculumUnit[] = [
   {
     id: "unit-1",

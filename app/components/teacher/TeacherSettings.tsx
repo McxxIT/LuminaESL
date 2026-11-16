@@ -4,12 +4,11 @@ import { useState } from "react";
 import Icon from "../Icon";
 import Toggle from "../student/Toggle";
 import { downloadTextFile } from "../../lib/student";
-import type { TeacherAvailability, TeacherProfile, TeacherSettings } from "../../lib/types";
+import type { TeacherProfile, TeacherSettings } from "../../lib/types";
 
 type SettingsProps = {
   profile: TeacherProfile;
   settings: TeacherSettings;
-  availability: TeacherAvailability[];
   onSaveSettings: (settings: TeacherSettings) => void;
   onResetWorkspace: () => void;
   onNavigate: (page: string) => void;
@@ -17,17 +16,12 @@ type SettingsProps = {
   onNotice: (message: string) => void;
 };
 
-const dayLabels: Record<TeacherAvailability["day"], string> = {
-  MON: "Mon", TUE: "Tue", WED: "Wed", THU: "Thu", FRI: "Fri", SAT: "Sat", SUN: "Sun",
-};
-
-export default function TeacherSettingsPage({ profile, settings, availability, onSaveSettings, onResetWorkspace, onNavigate, onRequestLogout, onNotice }: SettingsProps) {
+export default function TeacherSettingsPage({ profile, settings, onSaveSettings, onResetWorkspace, onNavigate, onRequestLogout, onNotice }: SettingsProps) {
   const [draft, setDraft] = useState<TeacherSettings>(settings);
   const [resetOpen, setResetOpen] = useState(false);
 
   const changed = JSON.stringify(draft) !== JSON.stringify(settings);
   const enabledNotifications = [draft.emailNotifications, draft.lessonReminders, draft.newBookingAlerts, draft.studentMessages, draft.weeklySummary].filter(Boolean).length;
-  const activeSlots = availability.filter((slot) => slot.active);
 
   function save() {
     onSaveSettings(draft);
@@ -35,7 +29,7 @@ export default function TeacherSettingsPage({ profile, settings, availability, o
   }
 
   function exportData() {
-    downloadTextFile("lumina-teacher-settings.json", JSON.stringify({ profile, settings: draft, availability }, null, 2));
+    downloadTextFile("lumina-teacher-settings.json", JSON.stringify({ profile, settings: draft }, null, 2));
     onNotice("Your profile and settings were downloaded.");
   }
 
@@ -64,12 +58,12 @@ export default function TeacherSettingsPage({ profile, settings, availability, o
         <section className="panel student-panel student-settings-card">
           <div className="panel-header"><div><h2>Scheduling preferences</h2><p>Defaults used when adding and rescheduling lessons</p></div></div>
           <div className="student-settings-fields">
-            <label>Default lesson length<select value={draft.defaultDuration} onChange={(event) => setDraft({ ...draft, defaultDuration: event.target.value as TeacherSettings["defaultDuration"] })}><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+            <label>Lesson length<select value={draft.defaultDuration} onChange={(event) => setDraft({ ...draft, defaultDuration: event.target.value as TeacherSettings["defaultDuration"] })}><option value="25">25 minutes</option></select></label>
             <label>Buffer between lessons<select value={draft.bufferMinutes} onChange={(event) => setDraft({ ...draft, bufferMinutes: event.target.value as TeacherSettings["bufferMinutes"] })}><option value="0">No buffer</option><option value="15">15 minutes</option><option value="30">30 minutes</option></select></label>
             <label>Interface language<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as TeacherSettings["language"] })}><option>English</option><option>Spanish</option><option>Japanese</option><option>Korean</option></select></label>
           </div>
           <div className="student-settings-list">
-            <Toggle checked={draft.autoAcceptBookings} onChange={(value) => setDraft({ ...draft, autoAcceptBookings: value })} title="Auto-accept bookings" description="Confirm new bookings automatically inside your availability windows." />
+            <Toggle checked={draft.autoAcceptBookings} onChange={(value) => setDraft({ ...draft, autoAcceptBookings: value })} title="Auto-accept bookings" description="Confirm new bookings automatically inside your open 25-minute slots." />
             <Toggle checked={draft.compactSchedule} onChange={(value) => setDraft({ ...draft, compactSchedule: value })} title="Compact schedule" description="Show more lessons at once in schedule and lesson lists." />
             <Toggle checked={draft.showLocalTimezone} onChange={(value) => setDraft({ ...draft, showLocalTimezone: value })} title="Show my local timezone" description="Display your timezone alongside lesson times." />
           </div>
@@ -77,11 +71,14 @@ export default function TeacherSettingsPage({ profile, settings, availability, o
         </section>
 
         <section className="panel student-panel student-settings-card">
-          <div className="panel-header"><div><h2>Availability defaults</h2><p>{activeSlots.length} open block{activeSlots.length === 1 ? "" : "s"} this week</p></div><button type="button" className="text-button" onClick={() => onNavigate("Schedule")}>Manage <Icon name="arrow" size={14} /></button></div>
-          <div className="teacher-settings-availability">
-            {activeSlots.length > 0 ? activeSlots.map((slot) => <span key={slot.id}><strong>{dayLabels[slot.day]}</strong> {slot.startTime}–{slot.endTime}</span>) : <p>No availability windows are open. Students cannot book new lessons.</p>}
+          <div className="panel-header"><div><h2>Booking rules</h2><p>Slots are closed by default, opening is instant, and closures need manager review</p></div><button type="button" className="text-button" onClick={() => onNavigate("Booking slots")}>Manage <Icon name="arrow" size={14} /></button></div>
+          <div className="teacher-booking-rules">
+            <div><Icon name="clock" size={16} /><span><strong>25 minutes per booking</strong><small>Students book one open slot at a time.</small></span></div>
+            <div><Icon name="calendar" size={16} /><span><strong>08:00–23:30 daily</strong><small>Every day starts closed until you open the slots you want to teach.</small></span></div>
+            <div><Icon name="lock" size={16} /><span><strong>Opening is instant</strong><small>Open any slot for bookings without manager approval.</small></span></div>
+            <div><Icon name="lock" size={16} /><span><strong>Approval for closures</strong><small>Add a reason before an open slot can be closed.</small></span></div>
           </div>
-          <p className="student-form-note">Availability is edited on the Schedule page so you can see it beside your lessons.</p>
+          <p className="student-form-note">Weekly availability has been replaced by individual booking slots on the Booking slots page.</p>
         </section>
 
         <section className="panel student-panel student-settings-card">
@@ -94,7 +91,7 @@ export default function TeacherSettingsPage({ profile, settings, availability, o
         </section>
 
         <section className="panel student-panel student-settings-card">
-          <div className="panel-header"><div><h2>Data & privacy</h2><p>Download a copy of your profile, settings, and availability</p></div></div>
+          <div className="panel-header"><div><h2>Data & privacy</h2><p>Download a copy of your profile and teaching settings</p></div></div>
           <div className="student-data-actions">
             <div><span className="metric-icon blue"><Icon name="download" /></span><div><strong>Export my data</strong><small>Download a JSON copy of your teacher workspace settings.</small></div><button type="button" className="secondary-button" onClick={exportData}>Download</button></div>
             <div><span className="metric-icon orange"><Icon name="shield" /></span><div><strong>Privacy policy</strong><small>Review how student and teaching data is stored and used.</small></div><button type="button" className="secondary-button" onClick={() => onNotice("Privacy policy opened in a new tab.")}>Read policy</button></div>
@@ -102,13 +99,13 @@ export default function TeacherSettingsPage({ profile, settings, availability, o
         </section>
 
         <section className="panel student-panel danger-zone">
-          <div><span className="eyebrow">ACCOUNT ACCESS</span><h2>Sign out</h2><p>You can sign back in at any time. Your lessons, students, and curriculum are saved.</p></div>
+          <div><span className="eyebrow">ACCOUNT ACCESS</span><h2>Sign out</h2><p>You can sign back in at any time. Your lessons, students, and notes are saved.</p></div>
           <button type="button" className="danger-outline-button" onClick={onRequestLogout}><Icon name="logout" size={15} /> Sign out of Lumina</button>
         </section>
 
         <section className="panel student-panel danger-zone">
-          <div><span className="eyebrow">SESSION</span><h2>Reset demo workspace</h2><p>Clear locally saved lessons, students, notes, curriculum, and preferences for this account.</p></div>
-          {resetOpen ? <div className="inline-confirm"><span>Reset all local data?</span><button type="button" className="cancel-button" onClick={() => setResetOpen(false)}>Keep my data</button><button type="button" className="danger-button" onClick={() => { setResetOpen(false); onResetWorkspace(); onNotice("Workspace reset to defaults."); }}>Reset</button></div> : <button type="button" className="danger-outline-button" onClick={() => setResetOpen(true)}><Icon name="trash" size={15} /> Reset data</button>}
+          <div><span className="eyebrow">SESSION</span><h2>Reset demo workspace</h2><p>Restore the demo school for everyone (lessons, slots, requests, credits) and reset this account&apos;s notes and preferences.</p></div>
+          {resetOpen ? <div className="inline-confirm"><span>Reset the demo school for every account?</span><button type="button" className="cancel-button" onClick={() => setResetOpen(false)}>Keep my data</button><button type="button" className="danger-button" onClick={() => { setResetOpen(false); onResetWorkspace(); onNotice("Workspace reset to defaults."); }}>Reset</button></div> : <button type="button" className="danger-outline-button" onClick={() => setResetOpen(true)}><Icon name="trash" size={15} /> Reset data</button>}
         </section>
       </div>
 

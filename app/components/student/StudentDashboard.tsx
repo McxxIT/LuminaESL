@@ -34,10 +34,13 @@ export default function StudentDashboard({ account, activeNav, onNavigate, onNot
   if (activeNav === "Lessons") return <StudentLessons
     lessons={state.lessons}
     creditHours={state.creditHours}
+    tutors={workspace.tutors}
+    getTutorSchedule={workspace.getTutorSchedule}
     onBookLesson={workspace.bookLesson}
     onRescheduleLesson={workspace.rescheduleLesson}
     onCancelLesson={workspace.cancelLesson}
     onRebookLesson={workspace.rebookLesson}
+    onRateLesson={workspace.rateLesson}
     onNotice={onNotice}
   />;
 
@@ -99,6 +102,7 @@ export default function StudentDashboard({ account, activeNav, onNavigate, onNot
     profile={state.profile}
     lessons={state.lessons}
     creditHours={state.creditHours}
+    courseProgress={workspace.courseProgress}
     assignments={state.assignments}
     skills={studentSkills}
     completedTasks={state.completedTasks}

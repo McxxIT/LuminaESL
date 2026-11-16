@@ -3,18 +3,27 @@
 import { useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
 import StudentModal from "./StudentModal";
-import type { BookLessonInput } from "./useStudentWorkspace";
-import { lessonTimeOptions, studentTutors } from "../../lib/data";
-import { addMinutes, downloadTextFile, formatLessonDate, formatLongDate, isoDaysFromNow, todayISO } from "../../lib/student";
-import type { StudentLesson } from "../../lib/types";
+import LessonRating from "./LessonRating";
+import type { BookableTutor, BookLessonInput } from "./useStudentWorkspace";
+import type { RateLessonInput, ServiceResult } from "../../lib/school/services";
+import { buildDaySlots, canJoinLesson, findNextOpenSlot } from "../../lib/scheduling";
+import { downloadTextFile, formatLessonDate, formatLongDate, isoDaysFromNow, todayISO } from "../../lib/student";
+import type { StudentLesson, TeacherLesson, TeacherSlotClosure, TeacherSlotOpening } from "../../lib/types";
+
+type TutorSchedule = { closedSlots: TeacherSlotClosure[]; openedSlots: TeacherSlotOpening[]; lessons: TeacherLesson[] };
 
 type LessonsProps = {
   lessons: StudentLesson[];
   creditHours: number;
-  onBookLesson: (input: BookLessonInput) => StudentLesson;
-  onRescheduleLesson: (id: string, date: string, time: string, duration: number) => void;
-  onCancelLesson: (id: string, reason: string) => void;
-  onRebookLesson: (id: string) => StudentLesson | null;
+  /** Teachers this student can book with (their enrolled teachers). */
+  tutors: BookableTutor[];
+  /** Live slot rules and every student's bookings for a teacher. */
+  getTutorSchedule: (teacherId: string) => TutorSchedule;
+  onBookLesson: (input: BookLessonInput) => ServiceResult<StudentLesson>;
+  onRescheduleLesson: (id: string, date: string, time: string) => ServiceResult<StudentLesson>;
+  onCancelLesson: (id: string, reason: string) => ServiceResult<{ refunded: boolean }>;
+  onRebookLesson: (id: string, date: string, time: string) => ServiceResult<StudentLesson>;
+  onRateLesson: (id: string, input: RateLessonInput) => ServiceResult<unknown>;
   onNotice: (message: string) => void;
 };
 
@@ -52,7 +61,22 @@ function lessonSummary(lesson: StudentLesson) {
   ].join("\n");
 }
 
-export default function StudentLessons({ lessons, creditHours, onBookLesson, onRescheduleLesson, onCancelLesson, onRebookLesson, onNotice }: LessonsProps) {
+export default function StudentLessons({ lessons, creditHours, tutors: bookableTutors, getTutorSchedule, onBookLesson, onRescheduleLesson, onCancelLesson, onRebookLesson, onRateLesson, onNotice }: LessonsProps) {
+  function availableSlotsFor(tutorId: string | undefined, date: string, excludeLessonId?: string) {
+    if (!tutorId) return [];
+    const schedule = getTutorSchedule(tutorId);
+    return buildDaySlots({
+      date,
+      closures: schedule.closedSlots,
+      openedSlots: schedule.openedSlots,
+      lessons: schedule.lessons,
+      excludedLessonId: excludeLessonId,
+      includeClosed: false,
+    });
+  }
+
+  const initialDate = isoDaysFromNow(1);
+  const initialTutor = bookableTutors[0]?.id ?? "";
   const [tab, setTab] = useState<(typeof tabs)[number]["key"]>("upcoming");
   const [query, setQuery] = useState("");
   const [tutorFilter, setTutorFilter] = useState("all");
@@ -60,8 +84,8 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
   const [bookingOpen, setBookingOpen] = useState(false);
   const [rescheduleTarget, setRescheduleTarget] = useState<StudentLesson | null>(null);
   const [cancelTarget, setCancelTarget] = useState<StudentLesson | null>(null);
-  const [bookForm, setBookForm] = useState({ tutor: "Jamie Smith", title: "Conversation practice", date: isoDaysFromNow(1), time: "10:00", duration: "60", notes: "" });
-  const [rescheduleForm, setRescheduleForm] = useState({ date: isoDaysFromNow(1), time: "10:00", duration: "60" });
+  const [bookForm, setBookForm] = useState({ tutor: initialTutor, title: "Conversation practice", date: initialDate, time: availableSlotsFor(initialTutor, initialDate)[0]?.time ?? "", notes: "" });
+  const [rescheduleForm, setRescheduleForm] = useState({ date: initialDate, time: "" });
   const [cancelReason, setCancelReason] = useState("Schedule conflict");
 
   const tutors = useMemo(() => Array.from(new Set(lessons.map((lesson) => lesson.tutor))), [lessons]);
@@ -70,6 +94,11 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
     completed: lessons.filter((lesson) => lesson.status === "completed").length,
     cancelled: lessons.filter((lesson) => lesson.status === "cancelled").length,
   }), [lessons]);
+
+  const bookingSlots = availableSlotsFor(bookForm.tutor, bookForm.date);
+  const rescheduleSlots = rescheduleTarget
+    ? availableSlotsFor(rescheduleTarget.tutorId, rescheduleForm.date, rescheduleTarget.id)
+    : [];
 
   const filtered = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -81,36 +110,73 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
   }, [lessons, query, tab, tutorFilter]);
 
   function openBooking() {
-    setBookForm({ tutor: "Jamie Smith", title: "Conversation practice", date: isoDaysFromNow(1), time: "10:00", duration: "60", notes: "" });
+    const date = isoDaysFromNow(1);
+    const slots = availableSlotsFor(initialTutor, date);
+    setBookForm({ tutor: initialTutor, title: "Conversation practice", date, time: slots[0]?.time ?? "", notes: "" });
     setBookingOpen(true);
+  }
+
+  function handleBookingTutor(tutor: string) {
+    const slots = availableSlotsFor(tutor, bookForm.date);
+    setBookForm((current) => ({
+      ...current,
+      tutor,
+      time: slots.some((slot) => slot.time === current.time) ? current.time : slots[0]?.time ?? "",
+    }));
+  }
+
+  function handleBookingDate(date: string) {
+    const slots = availableSlotsFor(bookForm.tutor, date);
+    setBookForm((current) => ({
+      ...current,
+      date,
+      time: slots.some((slot) => slot.time === current.time) ? current.time : slots[0]?.time ?? "",
+    }));
   }
 
   function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const tutor = studentTutors.find((item) => item.name === bookForm.tutor);
+    const tutor = bookableTutors.find((item) => item.id === bookForm.tutor);
     if (!tutor || !bookForm.date || bookForm.date < todayISO()) {
       onNotice("Choose a valid future date for your lesson.");
       return;
     }
-    onBookLesson({
+    if (!bookForm.time || !bookingSlots.some((slot) => slot.time === bookForm.time)) {
+      onNotice("Choose an open 25-minute slot for your lesson.");
+      return;
+    }
+    const result = onBookLesson({
+      teacherId: tutor.id,
       date: bookForm.date,
       time: bookForm.time,
-      duration: Number(bookForm.duration),
       title: bookForm.title,
-      tutor: tutor.name,
-      tutorInitials: tutor.initials,
-      tutorColor: tutor.color,
       focus: [bookForm.title.split(" ")[0], "Tutoring"],
       notes: bookForm.notes.trim() || `Focus on ${bookForm.title.toLowerCase()} with ${tutor.name}.`,
     });
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
     setBookingOpen(false);
     setTab("upcoming");
     onNotice(`${bookForm.title} booked with ${tutor.name} for ${formatLessonDate(bookForm.date)} at ${bookForm.time}.`);
   }
 
   function openReschedule(lesson: StudentLesson) {
-    setRescheduleForm({ date: lesson.date >= todayISO() ? lesson.date : isoDaysFromNow(1), time: lesson.time, duration: String(lesson.duration) });
+    const date = lesson.date >= todayISO() ? lesson.date : isoDaysFromNow(1);
+    const slots = availableSlotsFor(lesson.tutorId, date, lesson.id);
+    setRescheduleForm({ date, time: slots.some((slot) => slot.time === lesson.time) ? lesson.time : slots[0]?.time ?? "" });
     setRescheduleTarget(lesson);
+  }
+
+  function handleRescheduleDate(date: string) {
+    if (!rescheduleTarget) return;
+    const slots = availableSlotsFor(rescheduleTarget.tutorId, date, rescheduleTarget.id);
+    setRescheduleForm((current) => ({
+      ...current,
+      date,
+      time: slots.some((slot) => slot.time === current.time) ? current.time : slots[0]?.time ?? "",
+    }));
   }
 
   function submitReschedule(event: FormEvent<HTMLFormElement>) {
@@ -120,7 +186,15 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
       onNotice("Choose a valid future date for the reschedule.");
       return;
     }
-    onRescheduleLesson(rescheduleTarget.id, rescheduleForm.date, rescheduleForm.time, Number(rescheduleForm.duration));
+    if (!rescheduleForm.time || !rescheduleSlots.some((slot) => slot.time === rescheduleForm.time)) {
+      onNotice("Choose an open 25-minute slot for the reschedule.");
+      return;
+    }
+    const result = onRescheduleLesson(rescheduleTarget.id, rescheduleForm.date, rescheduleForm.time);
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
     setRescheduleTarget(null);
     setSelectedLesson(null);
     onNotice(`Lesson rescheduled to ${formatLessonDate(rescheduleForm.date)} at ${rescheduleForm.time}.`);
@@ -129,22 +203,42 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
   function submitCancel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cancelTarget) return;
-    onCancelLesson(cancelTarget.id, cancelReason.trim() || "Cancelled by student");
+    const result = onCancelLesson(cancelTarget.id, cancelReason.trim() || "Cancelled by student");
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
     setCancelTarget(null);
     setSelectedLesson(null);
     setTab("cancelled");
-    onNotice("Lesson cancelled. Your lesson credit has been returned.");
+    onNotice(result.value.refunded ? "Lesson cancelled. Your lesson credit has been returned." : "Lesson cancelled. Cancellations within 24 hours of the start are not refunded.");
   }
 
   function rebook(lesson: StudentLesson) {
-    const next = onRebookLesson(lesson.id);
-    if (!next) {
-      onNotice("This lesson is no longer available to rebook.");
+    if (!lesson.tutorId) {
+      onNotice("This lesson's teacher is no longer available to rebook.");
       return;
     }
+    const schedule = getTutorSchedule(lesson.tutorId);
+    const slot = findNextOpenSlot({
+      closedSlots: schedule.closedSlots,
+      openedSlots: schedule.openedSlots,
+      lessons: schedule.lessons,
+      fromDate: isoDaysFromNow(1),
+    });
+    if (!slot) {
+      onNotice("No open 25-minute slots in the next two weeks. Try another tutor.");
+      return;
+    }
+    const result = onRebookLesson(lesson.id, slot.date, slot.time);
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
+    const next = result.value;
     setSelectedLesson(null);
     setTab("upcoming");
-    onNotice(`${lesson.title} rebooked with ${lesson.tutor} for ${formatLessonDate(next.date)}.`);
+    onNotice(`${lesson.title} rebooked with ${lesson.tutor} for ${formatLessonDate(next.date)} at ${next.time}.`);
   }
 
   return <div className="role-workspace student-page">
@@ -182,18 +276,21 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
             <div className={`avatar avatar-${lesson.tutorColor}`}>{lesson.tutorInitials}</div>
             <div className="lesson-card-copy">
               <div className="lesson-card-title"><strong>{lesson.title}</strong>{lesson.roomCode && <span className="lesson-room">{lesson.roomCode}</span>}</div>
-              <small>{lesson.tutor} · {lesson.duration} minutes</small>
+              <small>{lesson.tutor}</small>
               <div className="lesson-tags">{lesson.focus.map((focus) => <span key={focus}>{focus}</span>)}</div>
             </div>
           </button>
           <div className="lesson-card-actions">
             {lesson.status === "upcoming" && <>
-              <button type="button" className="primary-button compact-button" onClick={() => onNotice(`Classroom ${lesson.roomCode} opens 5 minutes before the lesson.`)}><Icon name="video" size={14} /> Join</button>
+              {canJoinLesson(lesson)
+                ? <button type="button" className="primary-button compact-button" onClick={() => onNotice(`Classroom ${lesson.roomCode} opens 5 minutes before the lesson.`)}><Icon name="video" size={14} /> Join</button>
+                : <button type="button" className="secondary-button compact-button" onClick={() => setSelectedLesson(lesson)}><Icon name="file" size={14} /> View</button>}
               <button type="button" className="icon-text-button" onClick={() => openReschedule(lesson)}><Icon name="calendar" size={14} /> Reschedule</button>
               <button type="button" className="icon-text-button danger-text" onClick={() => { setCancelReason("Schedule conflict"); setCancelTarget(lesson); }}><Icon name="x" size={14} /> Cancel</button>
             </>}
             {lesson.status === "completed" && <>
               <button type="button" className="secondary-button compact-button" onClick={() => setSelectedLesson(lesson)}><Icon name="file" size={14} /> View report</button>
+              {lesson.attendance !== "no-show" && !lesson.ratings?.some((rating) => rating.from === "student") && <button type="button" className="icon-text-button lesson-rate-button" onClick={() => setSelectedLesson(lesson)}><Icon name="star" size={14} /> Rate</button>}
               <button type="button" className="icon-text-button" onClick={() => rebook(lesson)}><Icon name="repeat" size={14} /> Rebook</button>
             </>}
             {lesson.status === "cancelled" && <button type="button" className="secondary-button compact-button" onClick={() => rebook(lesson)}><Icon name="repeat" size={14} /> Rebook lesson</button>}
@@ -215,7 +312,7 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
         {selectedLesson.status === "upcoming" && <>
           <button type="button" className="cancel-button" onClick={() => openReschedule(selectedLesson)}>Reschedule</button>
           <button type="button" className="danger-outline-button" onClick={() => { setCancelReason("Schedule conflict"); setCancelTarget(selectedLesson); }}>Cancel lesson</button>
-          <button type="button" className="primary-button" onClick={() => onNotice(`Classroom ${selectedLesson.roomCode} opens 5 minutes before the lesson.`)}>Join classroom</button>
+          {canJoinLesson(selectedLesson) && <button type="button" className="primary-button" onClick={() => onNotice(`Classroom ${selectedLesson.roomCode} opens 5 minutes before the lesson.`)}>Join classroom</button>}
         </>}
         {selectedLesson.status === "completed" && <>
           <button type="button" className="secondary-button" onClick={() => onNotice("Lesson whiteboard opened.")}>Shared whiteboard</button>
@@ -225,10 +322,10 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
         {selectedLesson.status === "cancelled" && <button type="button" className="primary-button" onClick={() => rebook(selectedLesson)}>Rebook lesson</button>}
       </>}>
       <div className="lesson-detail-grid">
-        <div><span className="eyebrow">DATE</span><strong>{formatLongDate(selectedLesson.date)}</strong></div>
-        <div><span className="eyebrow">TIME</span><strong>{selectedLesson.time}–{selectedLesson.endTime}</strong></div>
-        <div><span className="eyebrow">DURATION</span><strong>{selectedLesson.duration} minutes</strong></div>
-        <div><span className="eyebrow">ROOM</span><strong>{selectedLesson.roomCode ?? "No room assigned"}</strong></div>
+        <div><span className="lesson-detail-icon"><Icon name="user" size={15} /></span><span className="lesson-detail-copy"><span className="eyebrow">TUTOR</span><strong>{selectedLesson.tutor}</strong></span></div>
+        <div><span className="lesson-detail-icon"><Icon name="calendar" size={15} /></span><span className="lesson-detail-copy"><span className="eyebrow">DATE</span><strong>{formatLessonDate(selectedLesson.date)}</strong></span></div>
+        <div><span className="lesson-detail-icon"><Icon name="clock" size={15} /></span><span className="lesson-detail-copy"><span className="eyebrow">TIME</span><strong>{selectedLesson.time}–{selectedLesson.endTime}</strong></span></div>
+        <div><span className="lesson-detail-icon"><Icon name="video" size={15} /></span><span className="lesson-detail-copy"><span className="eyebrow">ROOM</span><strong>{selectedLesson.roomCode ?? "Not assigned"}</strong></span></div>
       </div>
       <div className="lesson-detail-section"><span className="eyebrow">FOCUS</span><div className="lesson-tags">{selectedLesson.focus.map((focus) => <span key={focus}>{focus}</span>)}</div></div>
       {selectedLesson.notes && <div className="lesson-detail-section"><span className="eyebrow">LESSON NOTES</span><p>{selectedLesson.notes}</p></div>}
@@ -236,30 +333,47 @@ export default function StudentLessons({ lessons, creditHours, onBookLesson, onR
       {selectedLesson.status === "completed" && <>
         {selectedLesson.scores && <div className="report-scores">{selectedLesson.scores.map((score) => <div key={score.label}><strong>{score.value.toFixed(1)}<em>/5.0</em></strong><span>{score.label}</span></div>)}</div>}
         {selectedLesson.feedback && <div className="lesson-detail-section"><span className="eyebrow">TEACHER FEEDBACK</span><blockquote>{selectedLesson.feedback}</blockquote></div>}
+        {/* Read the live lesson so a new rating shows immediately. */}
+        <LessonRating lesson={lessons.find((lesson) => lesson.id === selectedLesson.id) ?? selectedLesson} onRate={onRateLesson} onNotice={onNotice} />
         {selectedLesson.corrections && selectedLesson.corrections.length > 0 && <div className="lesson-detail-section"><span className="eyebrow">TARGET CORRECTIONS</span><div className="correction-list">{selectedLesson.corrections.map((item) => <span key={item.from}><s>{item.from}</s> → <strong>{item.to}</strong></span>)}</div></div>}
       </>}
       {selectedLesson.status === "cancelled" && <div className="lesson-callout warning"><Icon name="clock" size={16} /><div><strong>Cancellation note</strong><p>{selectedLesson.cancelReason ?? "This lesson was cancelled."}</p></div></div>}
     </StudentModal>}
 
-    {bookingOpen && <StudentModal eyebrow="SCHEDULE A SESSION" title="Book a lesson" description="Pick a tutor, date, and focus for your next session." onClose={() => setBookingOpen(false)}
-      footer={<><button type="button" className="cancel-button" onClick={() => setBookingOpen(false)}>Cancel</button><button type="submit" form="book-lesson-form" className="primary-button"><Icon name="calendarAdd" size={15} /> Confirm booking</button></>}>
+    {bookingOpen && <StudentModal eyebrow="SCHEDULE A SESSION" title="Book a lesson" description="Pick a tutor, date, and one of the open 25-minute slots." onClose={() => setBookingOpen(false)}
+      footer={<><button type="button" className="cancel-button" onClick={() => setBookingOpen(false)}>Cancel</button><button type="submit" form="book-lesson-form" className="primary-button" disabled={!bookForm.time || bookingSlots.length === 0}><Icon name="calendarAdd" size={15} /> Confirm booking</button></>}>
       <form id="book-lesson-form" className="student-form-grid" onSubmit={submitBooking}>
-        <label>Tutor<select value={bookForm.tutor} onChange={(event) => setBookForm({ ...bookForm, tutor: event.target.value })}>{studentTutors.map((tutor) => <option value={tutor.name} key={tutor.name}>{tutor.name} — {tutor.specialty}</option>)}</select></label>
+        <label>Tutor<select value={bookForm.tutor} onChange={(event) => handleBookingTutor(event.target.value)}>{bookableTutors.map((tutor) => <option value={tutor.id} key={tutor.id}>{tutor.name} — {tutor.specialty}</option>)}</select></label>
         <label>Lesson focus<select value={bookForm.title} onChange={(event) => setBookForm({ ...bookForm, title: event.target.value })}>{focusOptions.map((focus) => <option value={focus} key={focus}>{focus}</option>)}</select></label>
-        <label>Date<input type="date" min={todayISO()} value={bookForm.date} onChange={(event) => setBookForm({ ...bookForm, date: event.target.value })} required /></label>
-        <label>Start time<select value={bookForm.time} onChange={(event) => setBookForm({ ...bookForm, time: event.target.value })}>{lessonTimeOptions.map((time) => <option value={time} key={time}>{time}</option>)}</select></label>
-        <label>Duration<select value={bookForm.duration} onChange={(event) => setBookForm({ ...bookForm, duration: event.target.value })}><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+        <label>Date<input type="date" min={todayISO()} value={bookForm.date} onChange={(event) => handleBookingDate(event.target.value)} required /></label>
+        <div className="student-slot-field full-field">
+          <span>Start time · 25-minute slots</span>
+          <div className="student-slot-grid">
+            {bookingSlots.map((slot) => <button type="button" className={`student-slot-button ${bookForm.time === slot.time ? "selected" : ""}`} key={slot.time} onClick={() => setBookForm({ ...bookForm, time: slot.time })}>
+              <strong>{slot.time}</strong><small>to {slot.endTime}</small>
+            </button>)}
+          </div>
+          {bookingSlots.length === 0 && <p className="student-slot-empty">No open slots for this tutor and date. Try another date.</p>}
+        </div>
         <label className="full-field">Notes for your tutor<textarea rows={3} value={bookForm.notes} onChange={(event) => setBookForm({ ...bookForm, notes: event.target.value })} placeholder="What would you like to focus on?" /></label>
-        <div className="booking-summary full-field"><Icon name="clock" size={16} /><span>{formatLessonDate(bookForm.date)} · {bookForm.time}–{addMinutes(bookForm.time, Number(bookForm.duration))} · {bookForm.duration} minutes</span></div>
+        <div className="booking-summary full-field"><Icon name="clock" size={16} /><span>{formatLessonDate(bookForm.date)} · {bookForm.time ? `${bookForm.time}–${bookingSlots.find((slot) => slot.time === bookForm.time)?.endTime ?? ""}` : "Choose an open slot"} · 25 minutes</span></div>
       </form>
     </StudentModal>}
 
     {rescheduleTarget && <StudentModal eyebrow="RESCHEDULE" title={`Move ${rescheduleTarget.title}`} description={`Currently ${formatLessonDate(rescheduleTarget.date)} at ${rescheduleTarget.time} with ${rescheduleTarget.tutor}.`} onClose={() => setRescheduleTarget(null)}
-      footer={<><button type="button" className="cancel-button" onClick={() => setRescheduleTarget(null)}>Keep current time</button><button type="submit" form="reschedule-form" className="primary-button">Save new time</button></>}>
+      footer={<><button type="button" className="cancel-button" onClick={() => setRescheduleTarget(null)}>Keep current time</button><button type="submit" form="reschedule-form" className="primary-button" disabled={!rescheduleForm.time || rescheduleSlots.length === 0}>Save new time</button></>}>
       <form id="reschedule-form" className="student-form-grid" onSubmit={submitReschedule}>
-        <label>New date<input type="date" min={todayISO()} value={rescheduleForm.date} onChange={(event) => setRescheduleForm({ ...rescheduleForm, date: event.target.value })} required /></label>
-        <label>New start time<select value={rescheduleForm.time} onChange={(event) => setRescheduleForm({ ...rescheduleForm, time: event.target.value })}>{lessonTimeOptions.map((time) => <option value={time} key={time}>{time}</option>)}</select></label>
-        <label>Duration<select value={rescheduleForm.duration} onChange={(event) => setRescheduleForm({ ...rescheduleForm, duration: event.target.value })}><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+        <label>New date<input type="date" min={todayISO()} value={rescheduleForm.date} onChange={(event) => handleRescheduleDate(event.target.value)} required /></label>
+        <div className="student-slot-field full-field">
+          <span>New start time · 25-minute slots</span>
+          <div className="student-slot-grid">
+            {rescheduleSlots.map((slot) => <button type="button" className={`student-slot-button ${rescheduleForm.time === slot.time ? "selected" : ""}`} key={slot.time} onClick={() => setRescheduleForm({ ...rescheduleForm, time: slot.time })}>
+              <strong>{slot.time}</strong><small>to {slot.endTime}</small>
+            </button>)}
+          </div>
+          {rescheduleSlots.length === 0 && <p className="student-slot-empty">No open slots for this tutor and date. Try another date.</p>}
+        </div>
+        <div className="booking-summary full-field"><Icon name="clock" size={16} /><span>{formatLessonDate(rescheduleForm.date)} · {rescheduleForm.time ? `${rescheduleForm.time}–${rescheduleSlots.find((slot) => slot.time === rescheduleForm.time)?.endTime ?? ""}` : "Choose an open slot"} · 25 minutes</span></div>
       </form>
     </StudentModal>}
 

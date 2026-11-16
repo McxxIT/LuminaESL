@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Icon from "./Icon";
-import { accounts } from "../lib/data";
+import { findUserByEmail, getSchoolSnapshot } from "../lib/school";
 import type { Account } from "../lib/types";
 
 export default function LoginScreen({ onLogin }: { onLogin: (account: Account) => void }) {
@@ -12,13 +12,18 @@ export default function LoginScreen({ onLogin }: { onLogin: (account: Account) =
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const account = accounts.find((item) => item.email.toLowerCase() === email.trim().toLowerCase());
-    if (!account || !password.trim()) {
+    // Any person in the shared school can sign in (demo: any non-empty password).
+    const user = findUserByEmail(getSchoolSnapshot(), email);
+    if (!user || !password.trim()) {
       setError("Use a registered Lumina account and password.");
       return;
     }
+    if (user.status !== "active") {
+      setError("This account is paused. Contact your school manager.");
+      return;
+    }
     setError("");
-    onLogin(account);
+    onLogin({ email: user.email, role: user.role, name: user.name });
   }
 
   return <main className="auth-shell"><section className="auth-card">
@@ -31,6 +36,6 @@ export default function LoginScreen({ onLogin }: { onLogin: (account: Account) =
       {error && <p className="auth-error" role="alert">{error}</p>}
       <button type="submit" className="primary-button auth-submit">Sign in <Icon name="arrow" size={16} /></button>
     </form>
-    <p className="auth-note">Demo accounts: admin@lumina.school · teacher@lumina.school · student@lumina.school</p>
+    <p className="auth-note">Demo accounts: admin@lumina.school · manager@lumina.school · manager2@lumina.school · teacher@lumina.school · student@lumina.school</p>
   </section></main>;
 }

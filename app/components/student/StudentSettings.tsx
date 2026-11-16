@@ -58,7 +58,7 @@ export default function StudentSettings({ profile, settings, onSaveSettings, onR
         <section className="panel student-panel student-settings-card">
           <div className="panel-header"><div><h2>Learning preferences</h2><p>Defaults used when booking and viewing lessons</p></div></div>
           <div className="student-settings-fields">
-            <label>Default lesson length<select value={draft.defaultDuration} onChange={(event) => setDraft({ ...draft, defaultDuration: event.target.value as StudentSettings["defaultDuration"] })}><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+            <label>Lesson length<select value={draft.defaultDuration} onChange={(event) => setDraft({ ...draft, defaultDuration: event.target.value as StudentSettings["defaultDuration"] })}><option value="25">25 minutes</option></select></label>
             <label>Interface language<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as StudentSettings["language"] })}><option>English</option><option>Spanish</option><option>Japanese</option><option>Korean</option></select></label>
           </div>
           <div className="student-settings-list">
@@ -91,8 +91,8 @@ export default function StudentSettings({ profile, settings, onSaveSettings, onR
         </section>
 
         <section className="panel student-panel danger-zone">
-          <div><span className="eyebrow">SESSION</span><h2>Reset demo workspace</h2><p>Clear locally saved lessons, assignments, practice results, and preferences for this account.</p></div>
-          {resetOpen ? <div className="inline-confirm"><span>Reset all local data?</span><button type="button" className="cancel-button" onClick={() => setResetOpen(false)}>Keep my data</button><button type="button" className="danger-button" onClick={() => { setResetOpen(false); onResetWorkspace(); onNotice("Workspace reset to defaults."); }}>Reset</button></div> : <button type="button" className="danger-outline-button" onClick={() => setResetOpen(true)}><Icon name="trash" size={15} /> Reset data</button>}
+          <div><span className="eyebrow">SESSION</span><h2>Reset demo workspace</h2><p>Restore the demo school for everyone (lessons, slots, requests, credits) and reset this account&apos;s notes and preferences.</p></div>
+          {resetOpen ? <div className="inline-confirm"><span>Reset the demo school for every account?</span><button type="button" className="cancel-button" onClick={() => setResetOpen(false)}>Keep my data</button><button type="button" className="danger-button" onClick={() => { setResetOpen(false); onResetWorkspace(); onNotice("Workspace reset to defaults."); }}>Reset</button></div> : <button type="button" className="danger-outline-button" onClick={() => setResetOpen(true)}><Icon name="trash" size={15} /> Reset data</button>}
         </section>
       </div>
 

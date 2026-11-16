@@ -1,152 +1,192 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import Icon from "../Icon";
-import { downloadTextFile, isoDaysFromNow, parseISODate } from "../../lib/student";
-import type { CurriculumUnit, TeacherLesson, TeacherStudent } from "../../lib/types";
+import { useSchool } from "../../lib/hooks/useSchool";
+import { performanceRules } from "../../lib/school";
+import { downloadTextFile, formatLessonDate, isoDaysFromNow } from "../../lib/student";
+import {
+  computeTeacherPerformance,
+  formatPoints,
+  ON_THE_SPOT_CANCELLATION_POINTS,
+  PERFORMANCE_BASE_POINTS,
+  RATING_POINTS,
+  TEACHER_ABSENCE_POINTS,
+  type PerformanceEvent,
+} from "../../lib/teacherPerformance";
+import type { TeacherLesson } from "../../lib/types";
 
 type AnalyticsProps = {
-  students: TeacherStudent[];
   lessons: TeacherLesson[];
-  curriculum: CurriculumUnit[];
   onNavigate: (page: string) => void;
   onNotice: (message: string) => void;
 };
 
-export default function TeacherAnalytics({ students, lessons, curriculum, onNavigate, onNotice }: AnalyticsProps) {
-  const completed = useMemo(() => lessons.filter((lesson) => lesson.status === "completed"), [lessons]);
-  const cancelled = lessons.filter((lesson) => lesson.status === "cancelled");
-  const scheduled = lessons.filter((lesson) => lesson.status === "scheduled");
-  const live = lessons.filter((lesson) => lesson.status === "live");
-  const hoursTaught = completed.reduce((total, lesson) => total + lesson.duration / 60, 0);
-  const attendanceLessons = completed.filter((lesson) => lesson.attendance);
-  const attendedLessons = attendanceLessons.filter((lesson) => lesson.attendance === "attended").length;
-  const attendanceRate = attendanceLessons.length ? Math.round((attendedLessons / attendanceLessons.length) * 100) : 0;
-  const activeStudents = students.filter((student) => student.status !== "paused");
-  const averageProgress = Math.round(students.reduce((total, student) => total + student.progress, 0) / Math.max(students.length, 1));
-  const atRisk = students.filter((student) => student.status === "at-risk");
-  const publishedUnits = curriculum.filter((unit) => unit.status === "published").length;
+const eventIcon: Record<PerformanceEvent["kind"], "x" | "user" | "star"> = {
+  "on-the-spot-cancellation": "x",
+  absence: "user",
+  rating: "star",
+};
 
-  const weekly = useMemo(() => Array.from({ length: 7 }, (_, index) => {
-    const date = isoDaysFromNow(index - 6);
-    const hours = completed
-      .filter((lesson) => lesson.date === date)
-      .reduce((total, lesson) => total + lesson.duration / 60, 0);
-    return {
-      date,
-      hours,
-      label: parseISODate(date).toLocaleDateString("en-US", { weekday: "short" }),
-    };
-  }), [completed]);
+type HistoryFilter = "all" | "deductions" | "ratings";
 
-  const chartMax = Math.max(...weekly.map((day) => day.hours), 1);
-  const weekHours = weekly.reduce((total, day) => total + day.hours, 0);
-  const topStudents = [...activeStudents].sort((a, b) => b.progress - a.progress).slice(0, 4);
+function pointsTone(points: number) {
+  if (points > 0) return "positive";
+  if (points < 0) return "negative";
+  return "neutral";
+}
+
+function Stars({ score, size = 13 }: { score: number; size?: number }) {
+  return <span className="teacher-stars" aria-label={`${score.toFixed(1)} out of 5 stars`}>
+    {[1, 2, 3, 4, 5].map((star) => <span key={star} className={star <= Math.round(score) ? "filled" : ""}><Icon name="star" size={size} /></span>)}
+  </span>;
+}
+
+export default function TeacherAnalytics({ lessons, onNavigate, onNotice }: AnalyticsProps) {
+  // Scoring rules come from the admin's School settings (on-the-spot window, performance window).
+  const rules = useSchool(performanceRules);
+  const performance = useMemo(() => computeTeacherPerformance(lessons, rules), [lessons, rules]);
+  const { score, tier, events, onTheSpotCancellations, absences, ratings } = performance;
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const deductions = events.filter((event) => event.kind !== "rating");
+  const visibleEvents = historyFilter === "all" ? events : historyFilter === "deductions" ? deductions : ratings.items;
+  const historyTabs: { key: HistoryFilter; label: string; count: number }[] = [
+    { key: "all", label: "All", count: events.length },
+    { key: "deductions", label: "Deductions", count: deductions.length },
+    { key: "ratings", label: "Ratings", count: ratings.items.length },
+  ];
+
+  const since = isoDaysFromNow(-rules.windowDays);
+  const windowCompleted = lessons.filter((lesson) => lesson.status === "completed" && lesson.date >= since);
+  const hoursTaught = windowCompleted.reduce((total, lesson) => total + lesson.duration / 60, 0);
+  const attendanceLessons = windowCompleted.filter((lesson) => lesson.attendance);
+  const attendanceRate = attendanceLessons.length
+    ? Math.round((attendanceLessons.filter((lesson) => lesson.attendance === "attended").length / attendanceLessons.length) * 100)
+    : 0;
+  const ratingComments = ratings.items.filter((event) => event.rating?.comment).slice(0, 4);
+  const maxDistribution = Math.max(...Object.values(ratings.distribution), 1);
+  const tierClass = tier.toLowerCase().replace(" ", "-");
 
   function downloadReport() {
     const lines = [
-      "LUMINA ESL — TEACHING ANALYTICS",
+      "LUMINA ESL — TEACHER PERFORMANCE",
       "================================",
+      `Window: last ${rules.windowDays} days`,
+      `Performance score: ${score}/100 (${tier})`,
+      `On-the-spot cancellations: ${onTheSpotCancellations.count} (${formatPoints(onTheSpotCancellations.points)} pts)`,
+      `Absent while student present: ${absences.count} (${formatPoints(absences.points)} pts)`,
+      `Ratings: ${ratings.count} · average ${ratings.average.toFixed(1)}/5 (${formatPoints(ratings.points)} pts)`,
+      "",
       `Hours taught: ${hoursTaught.toFixed(1)}`,
-      `Lessons completed: ${completed.length}`,
-      `Lessons scheduled: ${scheduled.length}`,
-      `Lessons cancelled: ${cancelled.length}`,
-      `Attendance rate: ${attendanceRate}%`,
-      `Active students: ${activeStudents.length}`,
-      `Average progress: ${averageProgress}%`,
-      `Published curriculum units: ${publishedUnits} of ${curriculum.length}`,
+      `Lessons completed: ${windowCompleted.length}`,
+      `Student attendance: ${attendanceRate}%`,
       "",
-      "STUDENT BREAKDOWN",
-      ...students.map((student) => `${student.name} · ${student.level} · ${student.progress}% progress · ${student.attendance}% attendance · ${student.status}`),
-      "",
-      "STUDENTS NEEDING ATTENTION",
-      ...(atRisk.length ? atRisk.map((student) => `${student.name}: ${student.goal}`) : ["None"]),
+      "POINTS HISTORY",
+      ...(events.length ? events.map((event) => `${event.date} ${event.time} · ${formatPoints(event.points)} · ${event.title} · ${event.detail}`) : ["No point changes in this window."]),
     ];
-    downloadTextFile("lumina-teaching-analytics.txt", lines.join("\n"));
-    onNotice("Teaching analytics report downloaded.");
+    downloadTextFile("lumina-teacher-performance.txt", lines.join("\n"));
+    onNotice("Performance report downloaded.");
   }
 
   return <div className="role-workspace teacher-page">
     <section className="page-heading student-page-heading">
-      <div><p className="eyebrow">TEACHING ANALYTICS</p><h1>How your teaching is landing</h1><p className="subheading">A live view of lesson volume, attendance, student progress, and curriculum coverage.</p></div>
+      <div><p className="eyebrow">TEACHING ANALYTICS</p><h1>Your performance</h1><p className="subheading">Points from cancellations, attendance, and student &amp; parent ratings over the last {rules.windowDays} days.</p></div>
       <div className="page-heading-actions">
         <button type="button" className="secondary-button" onClick={downloadReport}><Icon name="download" size={15} /> Download report</button>
-        <button type="button" className="primary-button" onClick={() => onNavigate("Students")}>Open roster <Icon name="arrow" size={15} /></button>
       </div>
     </section>
 
-    <section className="student-lessons-summary">
-      <article className="student-summary-card"><span className="metric-icon violet"><Icon name="clock" /></span><div><span>HOURS TAUGHT</span><strong>{hoursTaught.toFixed(1)} <em>hrs</em></strong></div></article>
-      <article className="student-summary-card"><span className="metric-icon green"><Icon name="check" /></span><div><span>LESSONS COMPLETED</span><strong>{completed.length}</strong></div></article>
-      <article className="student-summary-card"><span className="metric-icon blue"><Icon name="users" /></span><div><span>ATTENDANCE</span><strong>{attendanceRate}%</strong></div></article>
-      <article className="student-summary-card"><span className="metric-icon orange"><Icon name="chart" /></span><div><span>AVG PROGRESS</span><strong>{averageProgress}%</strong></div></article>
+    <section className="panel teacher-score-panel">
+      <div className={`teacher-score-ring tier-${tierClass}`} style={{ "--score": score } as CSSProperties}>
+        <div><strong>{score}</strong><span>/ 100</span></div>
+      </div>
+      <div className="teacher-score-copy">
+        <span className="eyebrow">PERFORMANCE SCORE</span>
+        <h2><span className={`teacher-tier-pill tier-${tierClass}`}>{tier}</span></h2>
+        <p>You start each {rules.windowDays}-day window at {PERFORMANCE_BASE_POINTS} points. Late cancellations and missed lessons take points away; student and parent ratings add or remove them.</p>
+      </div>
+      <div className="teacher-score-breakdown">
+        <div>
+          <span className="metric-icon orange"><Icon name="x" /></span>
+          <span className="teacher-score-label">On-the-spot cancellations<small>{onTheSpotCancellations.count} in the last {rules.windowDays} days</small></span>
+          <em className={`teacher-points ${pointsTone(onTheSpotCancellations.points)}`}>{formatPoints(onTheSpotCancellations.points)}</em>
+        </div>
+        <div>
+          <span className="metric-icon violet"><Icon name="user" /></span>
+          <span className="teacher-score-label">Absent, student present<small>{absences.count} in the last {rules.windowDays} days</small></span>
+          <em className={`teacher-points ${pointsTone(absences.points)}`}>{formatPoints(absences.points)}</em>
+        </div>
+        <div>
+          <span className="metric-icon green"><Icon name="star" /></span>
+          <span className="teacher-score-label">Student &amp; parent ratings<small>{ratings.count ? `${ratings.average.toFixed(1)} average · ${ratings.count} ratings` : "No ratings yet"}</small></span>
+          <em className={`teacher-points ${pointsTone(ratings.points)}`}>{formatPoints(ratings.points)}</em>
+        </div>
+      </div>
     </section>
 
-    <div className="student-progress-columns">
-      <section className="panel student-panel">
-        <div className="panel-header"><div><h2>Teaching hours</h2><p>Completed lesson time · last 7 days</p></div><span className="student-trend"><Icon name="clock" size={14} /> {weekHours.toFixed(1)} hrs</span></div>
-        <div className="student-activity-chart">
-          {weekly.map((day) => <div className="activity-bar-wrap" key={day.date}>
-            <span>{day.hours > 0 ? day.hours.toFixed(1) : "0"}</span>
-            <div className="activity-bar"><i style={{ height: `${Math.round((day.hours / chartMax) * 100)}%` }} /></div>
-            <small>{day.label}</small>
-          </div>)}
+    <div className="teacher-analytics-columns">
+      <section className="panel student-panel teacher-history-panel">
+        <div className="panel-header"><div><h2>Points history</h2><p>Every change to your score, newest first</p></div></div>
+        <div className="student-tabbar" role="tablist" aria-label="Filter points history">
+          {historyTabs.map((item) => <button type="button" role="tab" aria-selected={historyFilter === item.key} className={`student-tab ${historyFilter === item.key ? "active" : ""}`} key={item.key} onClick={() => setHistoryFilter(item.key)}>
+            {item.label}<span>{item.count}</span>
+          </button>)}
+        </div>
+        <div className="teacher-points-list">
+          {visibleEvents.length > 0 ? visibleEvents.map((event) => <div className="teacher-points-row" key={event.id}>
+            <span className={`teacher-points-icon ${pointsTone(event.points)}`}><Icon name={eventIcon[event.kind]} size={15} /></span>
+            <div className="teacher-points-copy">
+              <strong>{event.title}</strong>
+              <small>{formatLessonDate(event.date)} · {event.time} · {event.detail}</small>
+            </div>
+            <em className={`teacher-points ${pointsTone(event.points)}`}>{formatPoints(event.points)}</em>
+          </div>) : <div className="student-empty-inline"><Icon name="check" /><p>{historyFilter === "deductions" ? "No deductions in the last" : historyFilter === "ratings" ? "No ratings in the last" : "No point changes in the last"} {rules.windowDays} days.</p></div>}
         </div>
       </section>
 
       <section className="panel student-panel">
-        <div className="panel-header"><div><h2>Lesson outcomes</h2><p>Across your current schedule</p></div></div>
-        <div className="teacher-outcome-list">
-          <div className="teacher-outcome-row"><span className="metric-icon green"><Icon name="check" /></span><div><strong>Completed</strong><small>{attendedLessons} attended · {attendanceLessons.length - attendedLessons} no-show</small></div><em>{completed.length}</em></div>
-          <div className="teacher-outcome-row"><span className="metric-icon blue"><Icon name="calendar" /></span><div><strong>Scheduled</strong><small>{scheduled.length} upcoming lessons</small></div><em>{scheduled.length}</em></div>
-          <div className="teacher-outcome-row"><span className="metric-icon orange"><Icon name="play" /></span><div><strong>Live now</strong><small>Classrooms currently open</small></div><em>{live.length}</em></div>
-          <div className="teacher-outcome-row"><span className="metric-icon violet"><Icon name="x" /></span><div><strong>Cancelled</strong><small>Student or teacher cancellations</small></div><em>{cancelled.length}</em></div>
+        <div className="panel-header"><div><h2>Ratings</h2><p>From students and parents after each lesson</p></div></div>
+        <div className="teacher-ratings">
+          <div className="teacher-ratings-summary">
+            <div className="teacher-ratings-average">
+              <strong>{ratings.count ? ratings.average.toFixed(1) : "—"}</strong>
+              <Stars score={ratings.average} size={15} />
+              <small>{ratings.count} rating{ratings.count === 1 ? "" : "s"}</small>
+            </div>
+            <div className="teacher-ratings-bars">
+              {([5, 4, 3, 2, 1] as const).map((star) => <div key={star}>
+                <span>{star}★</span>
+                <div className="bar"><i style={{ width: `${(ratings.distribution[star] / maxDistribution) * 100}%` }} /></div>
+                <em>{ratings.distribution[star]}</em>
+              </div>)}
+            </div>
+          </div>
+          <div className="teacher-ratings-comments">
+            {ratingComments.length > 0 ? ratingComments.map((event) => <blockquote key={event.id}>
+              <div><Stars score={event.rating!.score} size={11} /><span className={`teacher-rating-source ${event.rating!.from}`}>{event.rating!.from}</span></div>
+              <p>&ldquo;{event.rating!.comment}&rdquo;</p>
+              <small>{event.rating!.name} · {formatLessonDate(event.date)}</small>
+            </blockquote>) : <div className="student-empty-inline"><Icon name="message" /><p>Written feedback from students and parents will appear here.</p></div>}
+          </div>
         </div>
-        <div className="teacher-analytics-note"><Icon name="target" size={16} /><p>{atRisk.length > 0 ? `${atRisk.map((student) => student.name.split(" ")[0]).join(", ")} need a check-in this week.` : "Every active student is on track this week."}</p></div>
       </section>
     </div>
 
-    <div className="student-progress-columns">
-      <section className="panel student-panel">
-        <div className="panel-header"><div><h2>Student progress</h2><p>Course completion and attendance</p></div><button type="button" className="text-button" onClick={() => onNavigate("Students")}>Full roster <Icon name="arrow" size={14} /></button></div>
-        <div className="teacher-analytics-students">
-          {[...students].sort((a, b) => b.progress - a.progress).map((student) => <div className="teacher-analytics-student" key={student.id}>
-            <div className={`avatar avatar-${student.avatarColor}`}>{student.initials}</div>
-            <div className="teacher-analytics-student-copy"><strong>{student.name}</strong><small>{student.level} · {student.attendance}% attendance</small><div className="bar"><i style={{ width: `${student.progress}%` }} /></div></div>
-            <em>{student.progress}%</em>
-          </div>)}
-        </div>
-      </section>
-
-      <section className="panel student-panel">
-        <div className="panel-header"><div><h2>Needs attention</h2><p>Students with the lowest progress or attendance</p></div></div>
-        <div className="teacher-attention-list">
-          {atRisk.length > 0 ? atRisk.map((student) => <button type="button" className="teacher-attention-row" key={student.id} onClick={() => onNavigate("Students")}>
-            <div className={`avatar avatar-${student.avatarColor}`}>{student.initials}</div>
-            <div><strong>{student.name}</strong><small>{student.attendance}% attendance · {student.progress}% progress</small></div>
-            <Icon name="chevronRight" size={15} />
-          </button>) : <div className="student-empty-inline"><Icon name="check" /><p>No students are flagged for attention right now.</p></div>}
-        </div>
-        <div className="teacher-analytics-note"><Icon name="sparkles" size={16} /><p>Small check-ins before the next lesson have the biggest impact on retention.</p></div>
-      </section>
-    </div>
-
-    <section className="panel student-panel">
-      <div className="panel-header"><div><h2>Curriculum coverage</h2><p>{publishedUnits} of {curriculum.length} units published · {curriculum.reduce((total, unit) => total + unit.lessons.length, 0)} lessons planned</p></div><button type="button" className="text-button" onClick={() => onNavigate("Curriculum")}>Open curriculum <Icon name="arrow" size={14} /></button></div>
-      <div className="teacher-coverage-list">
-        {[...curriculum].sort((a, b) => a.order - b.order).map((unit) => <div className="teacher-coverage-row" key={unit.id}>
-          <div><strong>{unit.title}</strong><small>{unit.level} · {unit.lessons.length} lessons</small></div>
-          <div className="bar"><i className={unit.status === "published" ? "green-bar" : "secondary-bar"} style={{ width: `${unit.status === "published" ? 100 : 42}%` }} /></div>
-          <span className={`teacher-unit-status ${unit.status}`}>{unit.status}</span>
-        </div>)}
+    <section className="panel student-panel teacher-points-rules">
+      <div className="panel-header"><div><h2>How points work</h2><p>Applied to lessons in the last {rules.windowDays} days · score stays between 0 and 100</p></div></div>
+      <div className="teacher-rules-grid">
+        <div><em className="teacher-points negative">{ON_THE_SPOT_CANCELLATION_POINTS}</em><span>Cancelling less than {rules.onTheSpotHours} hours before the start (once approved)</span></div>
+        <div><em className="teacher-points negative">{TEACHER_ABSENCE_POINTS}</em><span>Missing a lesson the student attended</span></div>
+        <div><em className="teacher-points positive">{formatPoints(RATING_POINTS[5])} / {formatPoints(RATING_POINTS[4])}</em><span>5★ / 4★ rating from a student or parent</span></div>
+        <div><em className="teacher-points negative">{RATING_POINTS[2]} / {RATING_POINTS[1]}</em><span>2★ / 1★ rating · 3★ has no effect</span></div>
       </div>
     </section>
 
     <section className="student-footer-strip">
-      <div><span className="eyebrow">TOP LEARNER</span><strong>{topStudents[0] ? `${topStudents[0].name} · ${topStudents[0].progress}%` : "No students yet"}</strong></div>
-      <div><span className="eyebrow">ACTIVE STUDENTS</span><strong>{activeStudents.length} of {students.length}</strong></div>
-      <div><span className="eyebrow">ATTENDANCE RATE</span><strong>{attendanceRate}%</strong></div>
-      <button type="button" className="text-button" onClick={() => onNavigate("Students")}>Review students <Icon name="arrow" size={14} /></button>
+      <div><span className="eyebrow">HOURS TAUGHT · {rules.windowDays} DAYS</span><strong>{hoursTaught.toFixed(1)} hrs</strong></div>
+      <div><span className="eyebrow">LESSONS COMPLETED</span><strong>{windowCompleted.length}</strong></div>
+      <div><span className="eyebrow">STUDENT ATTENDANCE</span><strong>{attendanceRate}%</strong></div>
+      <button type="button" className="text-button" onClick={() => onNavigate("Lessons")}>Review lessons <Icon name="arrow" size={14} /></button>
     </section>
   </div>;
 }

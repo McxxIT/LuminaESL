@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import LoginScreen from "./LoginScreen";
-import AdminDashboard from "./admin/AdminDashboard";
+import ManagerWorkspace from "./manager/ManagerWorkspace";
 import TeacherDashboard from "./teacher/TeacherDashboard";
 import StudentDashboard from "./student/StudentDashboard";
 import NotificationPanel, { AppNotification } from "./NotificationPanel";
-import { navItems, studentNavItems, teacherNavItems } from "../lib/data";
+import { adminNavItems, managerNavItems, studentNavItems, teacherNavItems } from "../lib/data";
 import { friendlyRole, initials } from "../lib/student";
 import type { Account } from "../lib/types";
 
@@ -128,7 +128,7 @@ export default function LuminaApp() {
 
   if (!account) return <LoginScreen onLogin={login} />;
 
-  const roleNavItems = account.role === "student" ? studentNavItems : account.role === "teacher" ? teacherNavItems : navItems;
+  const roleNavItems = { student: studentNavItems, teacher: teacherNavItems, manager: managerNavItems, admin: adminNavItems }[account.role];
   const roleLabel = friendlyRole(account.role);
   const accountInitials = initials(account.name);
 
@@ -137,7 +137,7 @@ export default function LuminaApp() {
       <div className="brand"><div className="brand-mark">L</div><span>Lumina</span><span className="brand-badge">ESL</span></div>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="nav-list" aria-label="Primary navigation">
-        {roleNavItems.map((item) => <button type="button" className={`nav-item ${activeNav === item.label ? "active" : ""}`} onClick={() => { navigate(item.label); if (account.role === "admin") showNotice(`${item.label} view selected.`); }} key={item.label}><Icon name={item.icon} /><span>{item.label}</span></button>)}
+        {roleNavItems.map((item) => <button type="button" className={`nav-item ${activeNav === item.label ? "active" : ""}`} onClick={() => navigate(item.label)} key={item.label}><Icon name={item.icon} /><span>{item.label}</span></button>)}
       </nav>
       <div className="sidebar-spacer" />
       <div className="sidebar-bottom">
@@ -164,8 +164,8 @@ export default function LuminaApp() {
         </div>
       </header>
       <div className="content-wrap">
-        {account.role === "admin"
-          ? <AdminDashboard onNotice={showNotice} />
+        {account.role === "admin" || account.role === "manager"
+          ? <ManagerWorkspace account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} />
           : account.role === "teacher"
             ? <TeacherDashboard account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
             : <StudentDashboard account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onCreditChange={setStudentCredits} onRequestLogout={() => setModal("logout")} />}

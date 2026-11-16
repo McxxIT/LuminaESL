@@ -1,10 +1,10 @@
 "use client";
 
 import TeacherAnalytics from "./TeacherAnalytics";
-import TeacherCurriculum from "./TeacherCurriculum";
+import TeacherBookingSlots from "./TeacherBookingSlots";
+import TeacherLessons from "./TeacherLessons";
 import TeacherOverview from "./TeacherOverview";
 import TeacherProfilePage from "./TeacherProfile";
-import TeacherSchedule from "./TeacherSchedule";
 import TeacherSettingsPage from "./TeacherSettings";
 import TeacherStudents from "./TeacherStudents";
 import useTeacherWorkspace from "./useTeacherWorkspace";
@@ -23,18 +23,27 @@ export default function TeacherDashboard({ account, activeNav, onNavigate, onNot
   const workspace = useTeacherWorkspace(account);
   const { state } = workspace;
 
-  if (activeNav === "Schedule") return <TeacherSchedule
-    settings={state.settings}
+  if (activeNav === "Booking slots") return <TeacherBookingSlots
+    lessons={state.lessons}
+    closedSlots={state.closedSlots}
+    openedSlots={state.openedSlots}
+    onRequestSlotClosure={workspace.requestSlotClosure}
+    onCancelSlotClosureRequest={workspace.cancelSlotClosureRequest}
+    onOpenSlot={workspace.openSlot}
+    onNavigate={onNavigate}
+    onNotice={onNotice}
+  />;
+
+  if (activeNav === "Lessons") return <TeacherLessons
     lessons={state.lessons}
     students={state.students}
-    availability={state.availability}
+    closedSlots={state.closedSlots}
+    openedSlots={state.openedSlots}
     onAddLesson={workspace.addLesson}
-    onRescheduleLesson={workspace.rescheduleLesson}
-    onCancelLesson={workspace.cancelLesson}
-    onStartLesson={workspace.startLesson}
+    onRequestLessonCancellation={workspace.requestLessonCancellation}
+    onWithdrawLessonCancellationRequest={workspace.withdrawLessonCancellationRequest}
     onCompleteLesson={workspace.completeLesson}
-    onToggleAvailability={workspace.toggleAvailability}
-    onSetAvailabilityActive={workspace.setAvailabilityActive}
+    onNavigate={onNavigate}
     onNotice={onNotice}
   />;
 
@@ -47,19 +56,8 @@ export default function TeacherDashboard({ account, activeNav, onNavigate, onNot
     onNotice={onNotice}
   />;
 
-  if (activeNav === "Curriculum") return <TeacherCurriculum
-    units={state.curriculum}
-    onCreateUnit={workspace.createUnit}
-    onUpdateUnit={workspace.updateUnit}
-    onTogglePublish={workspace.toggleUnitPublish}
-    onMoveUnit={workspace.moveUnit}
-    onNotice={onNotice}
-  />;
-
   if (activeNav === "Analytics") return <TeacherAnalytics
-    students={state.students}
     lessons={state.lessons}
-    curriculum={state.curriculum}
     onNavigate={onNavigate}
     onNotice={onNotice}
   />;
@@ -69,7 +67,6 @@ export default function TeacherDashboard({ account, activeNav, onNavigate, onNot
     account={account}
     profile={state.profile}
     students={state.students}
-    availability={state.availability}
     onSaveProfile={workspace.updateProfile}
     onUpdateAccount={onUpdateAccount}
     onNavigate={onNavigate}
@@ -81,7 +78,6 @@ export default function TeacherDashboard({ account, activeNav, onNavigate, onNot
     key={JSON.stringify(state.settings)}
     profile={state.profile}
     settings={state.settings}
-    availability={state.availability}
     onSaveSettings={workspace.updateSettings}
     onResetWorkspace={workspace.resetWorkspace}
     onNavigate={onNavigate}
@@ -94,10 +90,9 @@ export default function TeacherDashboard({ account, activeNav, onNavigate, onNot
     lessons={state.lessons}
     students={state.students}
     tasks={state.tasks}
-    availability={state.availability}
-    curriculum={state.curriculum}
+    closedSlots={state.closedSlots}
+    openedSlots={state.openedSlots}
     onToggleTask={workspace.toggleTask}
-    onSetAvailabilityActive={workspace.setAvailabilityActive}
     onNavigate={onNavigate}
     onNotice={onNotice}
   />;

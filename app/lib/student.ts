@@ -70,6 +70,7 @@ export function downloadTextFile(filename: string, content: string) {
 
 export function friendlyRole(role: string) {
   if (role === "admin") return "School admin";
+  if (role === "manager") return "Manager";
   if (role === "teacher") return "Teacher";
   return "Student";
 }

@@ -1,23 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { defaultTeacherProfile, defaultTeacherSettings, teacherStudentsSeed, teacherTasksSeed } from "../../lib/data";
+import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
+import { useSchool } from "../../lib/hooks/useSchool";
+import { findUserByEmail, getSchoolSnapshot, resetSchool, studentProfile, studentsForUser, teacherProfile, teacherScheduleView, type SchoolData, type SchoolUser } from "../../lib/school";
 import {
-  defaultTeacherProfile,
-  defaultTeacherSettings,
-  teacherAvailabilitySeed,
-  teacherCurriculumSeed,
-  teacherLessonsSeed,
-  teacherStudentsSeed,
-  teacherTasksSeed,
-} from "../../lib/data";
-import { addMinutes, todayISO } from "../../lib/student";
+  completeLesson as completeLessonService,
+  openSlot as openSlotService,
+  requestLessonCancellation as requestLessonCancellationService,
+  requestSlotClosure as requestSlotClosureService,
+  scheduleLessonForStudent,
+  withdrawLessonCancellation,
+  withdrawSlotClosure,
+  type ServiceResult,
+} from "../../lib/school/services";
+import { initials } from "../../lib/student";
 import type {
   Account,
-  CurriculumUnit,
   TeacherAttendance,
-  TeacherLesson,
+  TeacherLessonAttachment,
   TeacherProfile,
   TeacherSettings,
+  TeacherStudent,
+  TeacherTask,
   TeacherWorkspaceState,
 } from "../../lib/types";
 
@@ -39,60 +45,106 @@ export type CompleteLessonInput = {
   homework: string;
 };
 
-export type CurriculumUnitInput = {
-  title: string;
-  level: string;
-  summary: string;
-  objectives: string[];
-  lessons: { title: string; focus: string; minutes: number }[];
+export type CancelLessonRequestInput = {
+  reason: string;
+  comment: string;
+  attachment?: TeacherLessonAttachment;
+};
+
+/** Personal data only. Lessons, slots, and requests live in the shared school store. */
+type TeacherPersonalState = {
+  profile: TeacherProfile;
+  settings: TeacherSettings;
+  /** Private roster details (notes, homework, progress) keyed by student id. */
+  students: TeacherStudent[];
+  tasks: TeacherTask[];
 };
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function createInitialState(account: Account): TeacherWorkspaceState {
-  return {
-    profile: defaultTeacherProfile(account),
-    settings: clone(defaultTeacherSettings),
-    availability: clone(teacherAvailabilitySeed),
-    lessons: clone(teacherLessonsSeed),
-    students: clone(teacherStudentsSeed),
-    tasks: clone(teacherTasksSeed),
-    curriculum: clone(teacherCurriculumSeed),
-  };
-}
+const DEMO_TEACHER_EMAIL = "teacher@lumina.school";
 
-function sortLessons(items: TeacherLesson[]) {
-  return [...items].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+/** The demo teacher starts with demo content; anyone else starts from their school record. */
+function createPersonalState(account: Account): TeacherPersonalState {
+  const defaults = defaultTeacherProfile(account);
+  if (account.email.toLowerCase() === DEMO_TEACHER_EMAIL) {
+    return { profile: defaults, settings: clone(defaultTeacherSettings), students: clone(teacherStudentsSeed), tasks: clone(teacherTasksSeed) };
+  }
+  const data = getSchoolSnapshot();
+  const user = findUserByEmail(data, account.email);
+  const record = user ? teacherProfile(data, user.id) : undefined;
+  return {
+    profile: {
+      ...defaults,
+      headline: record?.headline ?? "ESL teacher",
+      bio: record?.bio ?? "",
+      specializations: record?.specializations ?? [],
+      languages: record?.languages ?? ["English"],
+      yearsExperience: 0,
+      certifications: "",
+      memberSince: new Date(user?.createdAt ?? Date.now()).toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+      weeklyGoalHours: record?.weeklyGoalHours ?? 20,
+    },
+    settings: clone(defaultTeacherSettings),
+    students: [],
+    tasks: [],
+  };
 }
 
 function displayDate() {
   return new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+const notSignedIn: ServiceResult<never> = { ok: false, error: "Your account was not found in the school." };
+
+/** Roster = students the teacher teaches in the shared store, with this teacher's private details. */
+function buildRoster(data: SchoolData, teacher: SchoolUser | undefined, saved: TeacherStudent[]): TeacherStudent[] {
+  if (!teacher) return saved;
+  const byId = new Map(saved.map((student) => [student.id, student]));
+  return studentsForUser(data, teacher).map((user) => {
+    const details = byId.get(user.id);
+    const profile = studentProfile(data, user.id);
+    if (details) return { ...details, name: user.name, email: user.email, status: user.status === "paused" ? "paused" : details.status };
+    return {
+      id: user.id,
+      name: user.name,
+      initials: initials(user.name),
+      email: user.email,
+      avatarColor: user.avatarColor,
+      level: profile?.level ?? "",
+      targetLevel: profile?.targetLevel ?? "",
+      goal: profile?.goal ?? "",
+      progress: 0,
+      attendance: 100,
+      lessonsCompleted: 0,
+      status: user.status === "paused" ? "paused" : "active",
+      notes: [],
+      homework: [],
+    };
+  });
+}
+
 export default function useTeacherWorkspace(account: Account) {
   const storageKey = `${STORAGE_PREFIX}${account.email.toLowerCase()}`;
-  const [state, setState] = useState<TeacherWorkspaceState>(() => createInitialState(account));
+  const [personal, setPersonal] = useState<TeacherPersonalState>(() => createPersonalState(account));
   const [hydrated, setHydrated] = useState(false);
+  const teacher = useCurrentUser(account);
+  const teacherId = teacher?.id;
 
   useEffect(() => {
     const restore = window.setTimeout(() => {
-      const base = createInitialState(account);
+      const base = createPersonalState(account);
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
         try {
-          const parsed = JSON.parse(raw) as Partial<TeacherWorkspaceState>;
-          setState({
-            ...base,
-            ...parsed,
+          const parsed = JSON.parse(raw) as Partial<TeacherPersonalState>;
+          setPersonal({
             profile: { ...base.profile, ...parsed.profile, email: account.email },
-            settings: { ...base.settings, ...parsed.settings },
-            availability: parsed.availability?.length ? parsed.availability : base.availability,
-            lessons: parsed.lessons?.length ? sortLessons(parsed.lessons) : base.lessons,
+            settings: { ...base.settings, ...parsed.settings, defaultDuration: "25" },
             students: parsed.students?.length ? parsed.students : base.students,
             tasks: parsed.tasks?.length ? parsed.tasks : base.tasks,
-            curriculum: parsed.curriculum?.length ? parsed.curriculum : base.curriculum,
           });
         } catch {
           window.localStorage.removeItem(storageKey);
@@ -105,238 +157,104 @@ export default function useTeacherWorkspace(account: Account) {
 
   useEffect(() => {
     if (!hydrated) return;
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
-  }, [hydrated, state, storageKey]);
+    // Only personal fields are saved here; the old shared fields are dropped after migration.
+    window.localStorage.setItem(storageKey, JSON.stringify(personal));
+  }, [hydrated, personal, storageKey]);
+
+  const selectShared = useCallback((data: SchoolData) => ({
+    schedule: teacherId ? teacherScheduleView(data, teacherId) : { closedSlots: [], openedSlots: [], lessons: [] },
+    roster: buildRoster(data, teacher, personal.students),
+  }), [teacherId, teacher, personal.students]);
+  const shared = useSchool(selectShared);
+
+  const state: TeacherWorkspaceState = useMemo(() => ({
+    profile: personal.profile,
+    settings: personal.settings,
+    tasks: personal.tasks,
+    students: shared.roster,
+    lessons: shared.schedule.lessons,
+    closedSlots: shared.schedule.closedSlots,
+    openedSlots: shared.schedule.openedSlots,
+  }), [personal, shared]);
 
   const updateProfile = useCallback((profile: TeacherProfile) => {
-    setState((current) => ({ ...current, profile }));
+    setPersonal((current) => ({ ...current, profile }));
   }, []);
 
   const updateSettings = useCallback((settings: TeacherSettings) => {
-    setState((current) => ({ ...current, settings }));
+    setPersonal((current) => ({ ...current, settings }));
   }, []);
 
-  const setAvailabilityActive = useCallback((active: boolean) => {
-    setState((current) => ({ ...current, availability: current.availability.map((slot) => ({ ...slot, active })) }));
-  }, []);
-
-  const toggleAvailability = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      availability: current.availability.map((slot) => slot.id === id ? { ...slot, active: !slot.active } : slot),
-    }));
-  }, []);
+  const openSlot = useCallback((date: string, time: string) => teacherId ? openSlotService(teacherId, date, time) : notSignedIn, [teacherId]);
+  const requestSlotClosure = useCallback((date: string, time: string, reason: string) => teacherId ? requestSlotClosureService(teacherId, date, time, reason) : notSignedIn, [teacherId]);
+  const cancelSlotClosureRequest = useCallback((date: string, time: string) => teacherId ? withdrawSlotClosure(teacherId, date, time) : notSignedIn, [teacherId]);
 
   const addLesson = useCallback((input: AddTeacherLessonInput) => {
-    setState((current) => {
-      const student = current.students.find((item) => item.id === input.studentId);
-      if (!student) return current;
-      const created: TeacherLesson = {
-        id: `teacher-lesson-${Date.now()}`,
-        date: input.date || todayISO(),
-        time: input.time,
-        endTime: addMinutes(input.time, input.duration),
-        duration: input.duration,
-        title: input.title,
-        focus: input.focus,
-        studentId: student.id,
-        studentName: student.name,
-        studentInitials: student.initials,
-        studentColor: student.avatarColor,
-        status: "scheduled",
-        roomCode: `ESL-${Math.floor(1000 + Math.random() * 9000)}`,
-        notes: input.notes,
-      };
-      return { ...current, lessons: sortLessons([...current.lessons, created]) };
-    });
-  }, []);
+    if (!teacherId) return notSignedIn;
+    return scheduleLessonForStudent(teacherId, { teacherId, studentId: input.studentId, date: input.date, time: input.time, title: input.title, focus: input.focus, notes: input.notes });
+  }, [teacherId]);
 
-  const rescheduleLesson = useCallback((id: string, date: string, time: string, duration: number) => {
-    setState((current) => ({
-      ...current,
-      lessons: sortLessons(current.lessons.map((lesson) => lesson.id === id
-        ? { ...lesson, date, time, duration, endTime: addMinutes(time, duration), status: "scheduled" as const, cancelReason: undefined }
-        : lesson)),
-    }));
-  }, []);
-
-  const cancelLesson = useCallback((id: string, reason: string) => {
-    setState((current) => ({
-      ...current,
-      lessons: current.lessons.map((lesson) => lesson.id === id
-        ? { ...lesson, status: "cancelled" as const, cancelReason: reason }
-        : lesson),
-    }));
-  }, []);
-
-  const startLesson = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      lessons: current.lessons.map((lesson) => lesson.id === id ? { ...lesson, status: "live" as const } : lesson),
-    }));
-  }, []);
+  const requestLessonCancellation = useCallback((id: string, input: CancelLessonRequestInput) => teacherId ? requestLessonCancellationService(teacherId, id, input) : notSignedIn, [teacherId]);
+  const withdrawLessonCancellationRequest = useCallback((id: string) => teacherId ? withdrawLessonCancellation(teacherId, id) : notSignedIn, [teacherId]);
 
   const completeLesson = useCallback((id: string, input: CompleteLessonInput) => {
-    setState((current) => {
-      const lesson = current.lessons.find((item) => item.id === id);
-      if (!lesson) return current;
+    if (!teacherId) return notSignedIn;
+    const studentId = state.lessons.find((lesson) => lesson.id === id)?.studentId;
+    const result = completeLessonService(teacherId, id, input);
+    // Keep this teacher's private roster counters in step, as before.
+    if (result.ok && result.value.firstCompletion && studentId) {
       const attended = input.attendance === "attended";
-      const alreadyCompleted = lesson.status === "completed";
-      return {
+      setPersonal((current) => ({
         ...current,
-        lessons: current.lessons.map((item) => item.id === id
-          ? {
-              ...item,
-              status: "completed" as const,
-              attendance: input.attendance,
-              feedback: input.feedback.trim() || undefined,
-              homework: input.homework.trim() || undefined,
-            }
-          : item),
-        students: alreadyCompleted ? current.students : current.students.map((student) => {
-          if (student.id !== lesson.studentId) return student;
+        students: current.students.map((student) => {
+          if (student.id !== studentId) return student;
           const priorLessons = student.lessonsCompleted;
           const priorAttended = Math.round((student.attendance / 100) * priorLessons);
           const nextLessons = priorLessons + 1;
-          return {
-            ...student,
-            lessonsCompleted: nextLessons,
-            attendance: Math.round(((priorAttended + (attended ? 1 : 0)) / nextLessons) * 100),
-          };
+          return { ...student, lessonsCompleted: nextLessons, attendance: Math.round(((priorAttended + (attended ? 1 : 0)) / nextLessons) * 100) };
         }),
-      };
-    });
-  }, []);
+      }));
+    }
+    return result;
+  }, [teacherId, state.lessons]);
 
   const toggleTask = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      tasks: current.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task),
-    }));
+    setPersonal((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task) }));
   }, []);
+
+  /** Edits private roster details, creating them from the shared roster entry if needed. */
+  const updateRosterStudent = useCallback((studentId: string, change: (student: TeacherStudent) => TeacherStudent) => {
+    setPersonal((current) => {
+      const existing = current.students.find((student) => student.id === studentId) ?? state.students.find((student) => student.id === studentId);
+      if (!existing) return current;
+      const others = current.students.filter((student) => student.id !== studentId);
+      return { ...current, students: [...others, change(existing)] };
+    });
+  }, [state.students]);
 
   const addStudentNote = useCallback((studentId: string, body: string) => {
     const trimmed = body.trim();
     if (!trimmed) return;
-    setState((current) => ({
-      ...current,
-      students: current.students.map((student) => student.id === studentId
-        ? {
-            ...student,
-            notes: [{ id: `note-${Date.now()}`, date: displayDate(), body: trimmed }, ...student.notes],
-          }
-        : student),
-    }));
-  }, []);
+    updateRosterStudent(studentId, (student) => ({ ...student, notes: [{ id: `note-${Date.now()}`, date: displayDate(), body: trimmed }, ...student.notes] }));
+  }, [updateRosterStudent]);
 
   const assignHomework = useCallback((studentId: string, title: string, dueLabel: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    setState((current) => ({
-      ...current,
-      students: current.students.map((student) => student.id === studentId
-        ? {
-            ...student,
-            homework: [
-              {
-                id: `homework-${Date.now()}`,
-                title: trimmed,
-                assignedAt: displayDate(),
-                dueLabel: dueLabel.trim() || "No due date",
-                status: "assigned" as const,
-              },
-              ...student.homework,
-            ],
-          }
-        : student),
+    updateRosterStudent(studentId, (student) => ({
+      ...student,
+      homework: [{ id: `homework-${Date.now()}`, title: trimmed, assignedAt: displayDate(), dueLabel: dueLabel.trim() || "No due date", status: "assigned" as const }, ...student.homework],
     }));
-  }, []);
+  }, [updateRosterStudent]);
 
   const reviewHomework = useCallback((studentId: string, homeworkId: string) => {
-    setState((current) => ({
-      ...current,
-      students: current.students.map((student) => student.id === studentId
-        ? {
-            ...student,
-            homework: student.homework.map((item) => item.id === homeworkId
-              ? { ...item, status: "reviewed" as const }
-              : item),
-          }
-        : student),
-    }));
-  }, []);
+    updateRosterStudent(studentId, (student) => ({ ...student, homework: student.homework.map((item) => item.id === homeworkId ? { ...item, status: "reviewed" as const } : item) }));
+  }, [updateRosterStudent]);
 
-  const createUnit = useCallback((input: CurriculumUnitInput) => {
-    setState((current) => {
-      const order = current.curriculum.reduce((max, unit) => Math.max(max, unit.order), 0) + 1;
-      const id = `unit-${Date.now()}`;
-      const created: CurriculumUnit = {
-        id,
-        title: input.title,
-        level: input.level,
-        summary: input.summary,
-        objectives: input.objectives,
-        lessons: input.lessons.map((lesson, index) => ({
-          id: `${id}-lesson-${index + 1}`,
-          title: lesson.title,
-          focus: lesson.focus,
-          minutes: lesson.minutes,
-        })),
-        status: "draft",
-        order,
-        updatedAt: displayDate(),
-      };
-      return { ...current, curriculum: [...current.curriculum, created].sort((a, b) => a.order - b.order) };
-    });
-  }, []);
-
-  const updateUnit = useCallback((id: string, input: CurriculumUnitInput) => {
-    setState((current) => ({
-      ...current,
-      curriculum: current.curriculum.map((unit) => unit.id === id
-        ? {
-            ...unit,
-            title: input.title,
-            level: input.level,
-            summary: input.summary,
-            objectives: input.objectives,
-            lessons: input.lessons.map((lesson, index) => ({
-              id: `${unit.id}-lesson-${index + 1}`,
-              title: lesson.title,
-              focus: lesson.focus,
-              minutes: lesson.minutes,
-            })),
-            updatedAt: displayDate(),
-          }
-        : unit),
-    }));
-  }, []);
-
-  const toggleUnitPublish = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      curriculum: current.curriculum.map((unit) => unit.id === id
-        ? { ...unit, status: unit.status === "published" ? "draft" as const : "published" as const, updatedAt: displayDate() }
-        : unit),
-    }));
-  }, []);
-
-  const moveUnit = useCallback((id: string, direction: -1 | 1) => {
-    setState((current) => {
-      const ordered = [...current.curriculum].sort((a, b) => a.order - b.order);
-      const index = ordered.findIndex((unit) => unit.id === id);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= ordered.length) return current;
-      [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
-      return {
-        ...current,
-        curriculum: ordered.map((unit, position) => ({ ...unit, order: position + 1 })),
-      };
-    });
-  }, []);
-
+  /** Demo reset: re-seeds the shared school (every role) and this teacher's personal data. */
   const resetWorkspace = useCallback(() => {
-    setState(createInitialState(account));
+    resetSchool();
+    setPersonal(createPersonalState(account));
   }, [account]);
 
   return {
@@ -344,21 +262,17 @@ export default function useTeacherWorkspace(account: Account) {
     hydrated,
     updateProfile,
     updateSettings,
-    setAvailabilityActive,
-    toggleAvailability,
+    openSlot,
+    requestSlotClosure,
+    cancelSlotClosureRequest,
     addLesson,
-    rescheduleLesson,
-    cancelLesson,
-    startLesson,
+    requestLessonCancellation,
+    withdrawLessonCancellationRequest,
     completeLesson,
     toggleTask,
     addStudentNote,
     assignHomework,
     reviewHomework,
-    createUnit,
-    updateUnit,
-    toggleUnitPublish,
-    moveUnit,
     resetWorkspace,
   };
 }

@@ -3,7 +3,8 @@
 import { useEffect, type ReactNode } from "react";
 import Icon from "../Icon";
 
-export default function StudentModal({
+/** Dialog used by every role: header with eyebrow/title/description, body, optional footer actions. Escape and backdrop click close it. */
+export default function Modal({
   eyebrow,
   title,
   description,

@@ -2,13 +2,12 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
-import type { Account, TeacherAvailability, TeacherProfile, TeacherStudent } from "../../lib/types";
+import type { Account, TeacherProfile, TeacherStudent } from "../../lib/types";
 
 type ProfileProps = {
   account: Account;
   profile: TeacherProfile;
   students: TeacherStudent[];
-  availability: TeacherAvailability[];
   onSaveProfile: (profile: TeacherProfile) => void;
   onUpdateAccount: (account: Account) => void;
   onNavigate: (page: string) => void;
@@ -17,15 +16,12 @@ type ProfileProps = {
 };
 
 const timezones = ["Asia/Singapore (UTC+8)", "Asia/Tokyo (UTC+9)", "Europe/London (UTC+0)", "America/New_York (UTC-5)", "America/Los_Angeles (UTC-8)", "Australia/Sydney (UTC+11)"];
-const dayLabels: Record<TeacherAvailability["day"], string> = {
-  MON: "Monday", TUE: "Tuesday", WED: "Wednesday", THU: "Thursday", FRI: "Friday", SAT: "Saturday", SUN: "Sunday",
-};
 
 function splitList(value: string) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-export default function TeacherProfilePage({ account, profile, students, availability, onSaveProfile, onUpdateAccount, onNavigate, onRequestLogout, onNotice }: ProfileProps) {
+export default function TeacherProfilePage({ account, profile, students, onSaveProfile, onUpdateAccount, onNavigate, onRequestLogout, onNotice }: ProfileProps) {
   const [draft, setDraft] = useState<TeacherProfile>(profile);
   const [specialtiesText, setSpecialtiesText] = useState(profile.specializations.join(", "));
   const [languagesText, setLanguagesText] = useState(profile.languages.join(", "));
@@ -42,7 +38,6 @@ export default function TeacherProfilePage({ account, profile, students, availab
 
   const activeStudents = students.filter((student) => student.status !== "paused");
   const averageProgress = Math.round(activeStudents.reduce((total, student) => total + student.progress, 0) / Math.max(activeStudents.length, 1));
-  const activeSlots = availability.filter((slot) => slot.active);
 
   function discard() {
     setDraft(profile);
@@ -147,7 +142,7 @@ export default function TeacherProfilePage({ account, profile, students, availab
             <label>Certifications<input value={draft.certifications} onChange={(event) => setDraft({ ...draft, certifications: event.target.value })} placeholder="CELTA, DELTA Module 1" /></label>
             <label>Weekly teaching goal<input type="number" min={1} max={60} value={draft.weeklyGoalHours} onChange={(event) => setDraft({ ...draft, weeklyGoalHours: Number(event.target.value) })} /><small>Hours per week.</small></label>
           </div>
-          <div className="student-form-actions"><button type="button" className="text-button" onClick={() => onNavigate("Schedule")}>Manage availability <Icon name="arrow" size={14} /></button><button type="button" className="primary-button" disabled={!changed} onClick={() => saveProfile()}>Save teaching focus</button></div>
+          <div className="student-form-actions"><button type="button" className="text-button" onClick={() => onNavigate("Booking slots")}>Open booking slots <Icon name="arrow" size={14} /></button><button type="button" className="primary-button" disabled={!changed} onClick={() => saveProfile()}>Save teaching focus</button></div>
         </section>
 
         <section className="panel student-panel">
@@ -161,7 +156,7 @@ export default function TeacherProfilePage({ account, profile, students, availab
         </section>
 
         <section className="panel student-panel danger-zone">
-          <div><span className="eyebrow">ACCOUNT ACCESS</span><h2>Session & account</h2><p>Sign out on this device. Your lessons, notes, and curriculum stay safe.</p></div>
+          <div><span className="eyebrow">ACCOUNT ACCESS</span><h2>Session & account</h2><p>Sign out on this device. Your lessons, notes, and students stay safe.</p></div>
           <button type="button" className="danger-outline-button" onClick={onRequestLogout}><Icon name="logout" size={15} /> Sign out</button>
         </section>
       </div>
@@ -179,13 +174,12 @@ export default function TeacherProfilePage({ account, profile, students, availab
         </section>
 
         <section className="panel student-panel">
-          <div className="panel-header"><div><h2>Availability</h2><p>{activeSlots.length} open block{activeSlots.length === 1 ? "" : "s"}</p></div></div>
-          <div className="teacher-availability-mini">
-            {activeSlots.slice(0, 5).map((slot) => <div className="teacher-availability-row" key={slot.id}>
-              <span className="teacher-availability-dot" /><span>{dayLabels[slot.day]}</span><strong>{slot.startTime}–{slot.endTime}</strong>
-            </div>)}
-            {activeSlots.length === 0 && <div className="student-empty-inline"><Icon name="clock" /><p>No open availability blocks.</p></div>}
-            <button type="button" className="secondary-button full-width" onClick={() => onNavigate("Schedule")}>Edit availability <Icon name="arrow" size={14} /></button>
+          <div className="panel-header"><div><h2>Booking model</h2><p>How students book your time</p></div></div>
+          <div className="teacher-booking-summary">
+            <div><span>Session length</span><strong>25 minutes</strong></div>
+            <div><span>Booking window</span><strong>08:00–23:30</strong></div>
+            <div><span>Slot closures</span><strong>Manager approval</strong></div>
+            <button type="button" className="secondary-button full-width" onClick={() => onNavigate("Booking slots")}>Open booking slots <Icon name="arrow" size={14} /></button>
           </div>
         </section>
 
@@ -194,7 +188,7 @@ export default function TeacherProfilePage({ account, profile, students, availab
           <div className="student-preference-list">
             <button type="button" onClick={() => onNavigate("Settings")}><span><Icon name="bell" size={15} /> Notifications</span><Icon name="chevronRight" size={14} /></button>
             <button type="button" onClick={() => onNavigate("Settings")}><span><Icon name="globe" size={15} /> Timezone & language</span><Icon name="chevronRight" size={14} /></button>
-            <button type="button" onClick={() => onNavigate("Schedule")}><span><Icon name="sliders" size={15} /> Availability defaults</span><Icon name="chevronRight" size={14} /></button>
+            <button type="button" onClick={() => onNavigate("Booking slots")}><span><Icon name="sliders" size={15} /> Booking rules</span><Icon name="chevronRight" size={14} /></button>
           </div>
         </section>
 

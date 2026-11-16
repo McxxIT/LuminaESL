@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Icon from "../Icon";
+import type { ServiceResult } from "../../lib/school/services";
 import StudentModal from "./StudentModal";
 import { creditPackages } from "../../lib/data";
 import { downloadTextFile } from "../../lib/student";
@@ -10,7 +11,7 @@ import type { CreditTransaction } from "../../lib/types";
 type BillingProps = {
   creditHours: number;
   transactions: CreditTransaction[];
-  onPurchase: (hours: number, amount: number) => void;
+  onPurchase: (hours: number, amount: number) => ServiceResult<unknown>;
   onNavigate: (page: string) => void;
   onNotice: (message: string) => void;
 };
@@ -23,7 +24,11 @@ export default function StudentBilling({ creditHours, transactions, onPurchase, 
   const totalSpent = transactions.filter((transaction) => transaction.status === "paid").reduce((total, transaction) => total + transaction.amount, 0);
 
   function buyCredits() {
-    onPurchase(selected.hours, selected.price);
+    const result = onPurchase(selected.hours, selected.price);
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
     setBuyOpen(false);
     onNotice(`${selected.hours} lesson hours added to your wallet.`);
   }

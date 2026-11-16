@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "../Icon";
 import { studyTasks } from "../../lib/data";
+import { canJoinLesson } from "../../lib/scheduling";
 import { formatLessonDate, parseISODate } from "../../lib/student";
 import type {
   PracticeResult,
@@ -16,6 +17,8 @@ type OverviewProps = {
   profile: StudentProfile;
   lessons: StudentLesson[];
   creditHours: number;
+  /** Real progress through the student's course (shared store). */
+  courseProgress?: { courseTitle: string; completed: number; total: number; nextPlanTitle?: string };
   assignments: StudentAssignment[];
   skills: StudentSkill[];
   completedTasks: string[];
@@ -57,6 +60,7 @@ export default function StudentOverview({
   profile,
   lessons,
   creditHours,
+  courseProgress,
   assignments,
   skills,
   completedTasks,
@@ -67,7 +71,7 @@ export default function StudentOverview({
 }: OverviewProps) {
   const upcoming = useMemo(
     () => lessons
-      .filter((lesson) => lesson.status === "upcoming")
+      .filter((lesson) => canJoinLesson(lesson))
       .sort((a, b) => lessonTimestamp(a) - lessonTimestamp(b)),
     [lessons],
   );
@@ -98,7 +102,7 @@ export default function StudentOverview({
       <div className="student-hero-copy">
         <div className="student-hero-meta">
           <span className="student-live-chip"><i /> {nextLesson?.status === "upcoming" ? "CONFIRMED" : "NO LESSON"} {nextLesson?.roomCode ? `· ROOM ${nextLesson.roomCode}` : ""}</span>
-          {nextLesson && <span>{formatLessonDate(nextLesson.date)} · {nextLesson.time}–{nextLesson.endTime} · {nextLesson.duration} min</span>}
+          {nextLesson && <span>{formatLessonDate(nextLesson.date)} · {nextLesson.time}–{nextLesson.endTime}</span>}
         </div>
         <h2>{nextLesson?.title ?? "Book your next lesson"}</h2>
         {nextLesson ? <div className="student-hero-tutor">
@@ -136,9 +140,9 @@ export default function StudentOverview({
 
     <section className="student-metrics">
       <article className="role-card"><div className="metric-icon blue"><Icon name="calendar" /></div><div><span>NEXT LESSON</span><strong>{nextLesson ? `${formatLessonDate(nextLesson.date)}, ${nextLesson.time}` : "Not booked"}</strong><small>{nextLesson?.title ?? "Book a session to get started"}</small></div></article>
-      <article className="role-card"><div className="metric-icon green"><Icon name="chart" /></div><div><span>COURSE PROGRESS</span><strong>{averageProgress}%</strong><small>{profile.currentLevel}</small></div></article>
+      <article className="role-card"><div className="metric-icon green"><Icon name="chart" /></div><div><span>COURSE PROGRESS</span><strong>{courseProgress ? <>{courseProgress.completed} <em>/ {courseProgress.total} lessons</em></> : "Not enrolled"}</strong><small>{courseProgress ? courseProgress.courseTitle : "Ask your school to enroll you"}</small>{courseProgress && courseProgress.total > 0 && <div className="bar course-progress-bar"><i style={{ width: `${Math.round((courseProgress.completed / courseProgress.total) * 100)}%` }} /></div>}</div></article>
       <article className="role-card"><div className="metric-icon violet"><Icon name="zap" /></div><div><span>LEARNING STREAK</span><strong>12 days</strong><small>{practiceMinutes} practice minutes logged</small></div></article>
-      <article className="role-card"><div className="metric-icon orange"><Icon name="clock" /></div><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>hrs</em></strong><small>About {Math.round(creditHours * 2)} half-hour sessions</small></div></article>
+      <article className="role-card"><div className="metric-icon orange"><Icon name="clock" /></div><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>hrs</em></strong><small>About {Math.floor(creditHours / (25 / 60))} 25-minute lessons</small></div></article>
     </section>
 
     <div className="student-dashboard-grid">

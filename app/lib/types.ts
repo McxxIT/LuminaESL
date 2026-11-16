@@ -1,13 +1,4 @@
-export type Role = "admin" | "teacher" | "student";
-
-export type LessonState = "booked" | "open" | "live";
-
-export type Lesson = {
-  time: string;
-  title: string;
-  student: string;
-  state: LessonState;
-};
+export type Role = "admin" | "manager" | "teacher" | "student";
 
 export type Account = {
   email: string;
@@ -25,6 +16,8 @@ export type StudentLesson = {
   duration: number;
   title: string;
   tutor: string;
+  /** Teacher's user id in the shared school store. */
+  tutorId?: string;
   tutorInitials: string;
   tutorColor: string;
   focus: string[];
@@ -36,6 +29,9 @@ export type StudentLesson = {
   corrections?: { from: string; to: string }[];
   scores?: { label: string; value: number }[];
   cancelReason?: string;
+  attendance?: "attended" | "no-show";
+  /** Ratings this lesson received from the student and/or their parent. */
+  ratings?: { from: "student" | "parent"; score: number; comment?: string }[];
 };
 
 export type AssignmentStatus = "pending" | "submitted" | "graded";
@@ -122,7 +118,7 @@ export type StudentSettings = {
   autoJoinReminder: boolean;
   compactSchedule: boolean;
   showLocalTimezone: boolean;
-  defaultDuration: "30" | "45" | "60";
+  defaultDuration: "25";
   language: "English" | "Spanish" | "Japanese" | "Korean";
   theme: "light" | "system";
 };
@@ -151,6 +147,67 @@ export type TeacherLessonStatus = "scheduled" | "live" | "completed" | "cancelle
 
 export type TeacherAttendance = "attended" | "no-show";
 
+export type TeacherLessonCancellationStatus = "pending" | "approved" | "rejected";
+
+export type TeacherLessonAttachment = {
+  name: string;
+  type: string;
+  dataUrl: string;
+};
+
+export type TeacherLessonRatingSource = "student" | "parent";
+
+/** Post-lesson rating left by the student or a parent (1–5 stars). */
+export type TeacherLessonRating = {
+  from: TeacherLessonRatingSource;
+  name: string;
+  score: 1 | 2 | 3 | 4 | 5;
+  comment?: string;
+  ratedAt: string;
+};
+
+/** Recorded by the manager when the teacher missed a lesson the student attended. */
+export type TeacherLessonAbsence = {
+  note: string;
+  reportedBy: string;
+  reportedAt: string;
+};
+
+export type TeacherLessonMaterialSection = {
+  heading: string;
+  items: string[];
+};
+
+/** Lesson plan the manager assigns to a booked lesson; teachers download it from the lesson details. */
+export type TeacherLessonMaterial = {
+  id: string;
+  title: string;
+  fileName: string;
+  summary: string;
+  sections: TeacherLessonMaterialSection[];
+  assignedBy: string;
+  assignedAt: string;
+  attachment?: TeacherLessonAttachment;
+  /** The course this plan belongs to, and its place in it (e.g. plan 3 of 7). */
+  courseTitle?: string;
+  position?: number;
+  total?: number;
+  /** Files uploaded to the lesson plan (bytes loaded on demand by `storageKey`). */
+  files?: { id: string; name: string; type: string; size: number; storageKey: string }[];
+};
+
+export type TeacherLessonCancellation = {
+  reason: string;
+  comment: string;
+  attachment?: TeacherLessonAttachment;
+  status: TeacherLessonCancellationStatus;
+  requestedAt: string;
+  requestedBy?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNote?: string;
+};
+
 export type TeacherProfile = {
   name: string;
   email: string;
@@ -176,18 +233,33 @@ export type TeacherSettings = {
   autoAcceptBookings: boolean;
   compactSchedule: boolean;
   showLocalTimezone: boolean;
-  defaultDuration: "30" | "45" | "60";
+  defaultDuration: "25";
   bufferMinutes: "0" | "15" | "30";
   language: "English" | "Spanish" | "Japanese" | "Korean";
   theme: "light" | "system";
 };
 
-export type TeacherAvailability = {
+export type TeacherSlotClosureStatus = "pending" | "approved" | "rejected";
+
+export type TeacherSlotClosure = {
   id: string;
-  day: "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
-  startTime: string;
-  endTime: string;
-  active: boolean;
+  date: string;
+  time: string;
+  reason: string;
+  status: TeacherSlotClosureStatus;
+  requestedAt: string;
+  requestedBy?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNote?: string;
+};
+
+export type TeacherSlotOpening = {
+  id: string;
+  date: string;
+  time: string;
+  openedAt: string;
+  openedBy?: string;
 };
 
 export type TeacherStudentNote = {
@@ -245,6 +317,10 @@ export type TeacherLesson = {
   attendance?: TeacherAttendance;
   feedback?: string;
   cancelReason?: string;
+  cancellation?: TeacherLessonCancellation;
+  material?: TeacherLessonMaterial;
+  ratings?: TeacherLessonRating[];
+  teacherAbsence?: TeacherLessonAbsence;
 };
 
 export type TeacherTask = {
@@ -277,9 +353,9 @@ export type CurriculumUnit = {
 export type TeacherWorkspaceState = {
   profile: TeacherProfile;
   settings: TeacherSettings;
-  availability: TeacherAvailability[];
+  closedSlots: TeacherSlotClosure[];
+  openedSlots: TeacherSlotOpening[];
   lessons: TeacherLesson[];
   students: TeacherStudent[];
   tasks: TeacherTask[];
-  curriculum: CurriculumUnit[];
 };
