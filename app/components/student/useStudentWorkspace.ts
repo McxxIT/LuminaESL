@@ -6,6 +6,8 @@ import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   activeCourseProgress,
+  assignmentsForStudent,
+  toStudentAssignmentView,
   creditBalance,
   creditTransactionsView,
   enrollmentsForStudent,
@@ -26,6 +28,8 @@ import {
   cancelLessonByStudent,
   purchaseCredits as purchaseCreditsService,
   rateLesson as rateLessonService,
+  submitHomework,
+  updateMyName,
   type RateLessonInput,
   rebookLesson as rebookLessonService,
   rescheduleLesson as rescheduleLessonService,
@@ -157,6 +161,7 @@ export default function useStudentWorkspace(account: Account) {
 
   const selectShared = useCallback((data: SchoolData) => ({
     lessons: studentId ? studentLessonsView(data, studentId) : [],
+    assignments: studentId ? assignmentsForStudent(data, studentId).map((assignment) => toStudentAssignmentView(data, assignment)) : [],
     creditHours: studentId ? creditBalance(data, studentId) : 0,
     transactions: studentId ? creditTransactionsView(data, studentId) : [],
     tutors: bookableTutors(data, studentId),
@@ -169,6 +174,7 @@ export default function useStudentWorkspace(account: Account) {
 
   const state: StudentWorkspaceState = useMemo(() => ({
     ...personal,
+    assignments: shared.assignments,
     lessons: shared.lessons,
     creditHours: shared.creditHours,
     transactions: shared.transactions,
@@ -179,7 +185,9 @@ export default function useStudentWorkspace(account: Account) {
 
   const updateProfile = useCallback((profile: StudentProfile) => {
     setPersonal((current) => ({ ...current, profile }));
-  }, []);
+    // The name is shared: teachers and managers see it.
+    if (studentId) updateMyName(studentId, profile.name);
+  }, [studentId]);
 
   const updateSettings = useCallback((settings: StudentSettings) => {
     setPersonal((current) => ({ ...current, settings }));
@@ -200,19 +208,8 @@ export default function useStudentWorkspace(account: Account) {
     }));
   }, []);
 
-  const submitAssignment = useCallback((id: string, response: string) => {
-    setPersonal((current) => ({
-      ...current,
-      assignments: current.assignments.map((assignment) => assignment.id === id
-        ? {
-            ...assignment,
-            status: "submitted" as const,
-            response,
-            submittedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " at " + new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-          }
-        : assignment),
-    }));
-  }, []);
+  /** Shared homework: the teacher sees the submission on their roster. */
+  const submitAssignment = useCallback((id: string, response: string) => studentId ? submitHomework(studentId, id, response) : notSignedIn, [studentId]);
 
   const completePractice = useCallback((activityId: string, score: number, total: number, minutes: number) => {
     const result: PracticeResult = { activityId, completedAt: new Date().toISOString(), score, total, minutes };

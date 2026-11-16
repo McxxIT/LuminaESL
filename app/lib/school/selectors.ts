@@ -208,3 +208,11 @@ export function ratingsForLesson(data: SchoolData, lessonId: string) {
 export function recentActivity(data: SchoolData, limit = 200) {
   return list(data, "activity").sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
 }
+
+export function assignmentsForStudent(data: SchoolData, studentId: string) {
+  return query(data, "assignments", (assignment) => assignment.studentId === studentId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function assignmentsForTeacher(data: SchoolData, teacherId: string) {
+  return query(data, "assignments", (assignment) => assignment.teacherId === teacherId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}

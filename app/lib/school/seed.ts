@@ -1,6 +1,7 @@
 import {
   defaultTeacherProfile,
   managerLessonMaterials,
+  studentAssignments,
   studentTransactionSeed,
   teacherClosedSlotsSeed,
   teacherCurriculumSeed,
@@ -12,6 +13,7 @@ import { addMinutes, isoDaysFromNow } from "../student";
 import {
   SCHOOL_SCHEMA_VERSION,
   type Course,
+  type Assignment,
   type CourseUnit,
   type CreditLedgerEntry,
   type Enrollment,
@@ -235,6 +237,22 @@ export function createSeedSchool(now = new Date().toISOString()): SchoolData {
     requests.push({ id: closure.id, type: "slot-closure", teacherId: teacherAlex, date: closure.date, time: closure.time, reason: closure.reason, status: closure.status, requestedAt: closure.requestedAt, requestedBy: legacyPersonId(closure.requestedBy), reviewedBy: closure.reviewedBy ? legacyPersonId(closure.reviewedBy) : undefined, reviewedAt: closure.reviewedAt, reviewNote: closure.reviewNote });
   });
 
+  // Homework --------------------------------------------------------------------------------
+  // Mia's assignments, plus homework already on Alex's roster for his other students. All set by Alex.
+  const assignmentState = { pending: "assigned", submitted: "submitted", graded: "reviewed" } as const;
+  const assignments: Assignment[] = studentAssignments.map((item) => ({
+    id: item.id, studentId: "student-mia", teacherId: teacherAlex, title: item.title, type: item.type, description: item.description,
+    instructions: item.instructions, dueLabel: item.dueLabel, status: assignmentState[item.status], response: item.response,
+    submittedAt: item.submittedAt ? now : undefined, feedback: item.feedback, grade: item.grade, reviewedAt: item.status === "graded" ? now : undefined, createdAt: now,
+  }));
+  teacherStudentsSeed.filter((student) => student.id !== "student-mia").forEach((student) => student.homework.forEach((item) => {
+    assignments.push({
+      id: item.id, studentId: student.id, teacherId: teacherAlex, title: item.title, type: "writing", description: item.title,
+      instructions: "Complete the task and submit your work before the next lesson.", dueLabel: item.dueLabel, status: item.status,
+      feedback: item.feedback, submittedAt: item.status !== "assigned" ? now : undefined, reviewedAt: item.status === "reviewed" ? now : undefined, createdAt: now,
+    });
+  }));
+
   // Credits ---------------------------------------------------------------------------------
   const credits: CreditLedgerEntry[] = [];
   studentTransactionSeed.forEach((txn) => {
@@ -261,6 +279,7 @@ export function createSeedSchool(now = new Date().toISOString()): SchoolData {
     requests: byId(requests),
     absences: byId(absences),
     ratings: byId(ratings),
+    assignments: byId(assignments),
     credits: byId(credits),
     activity: byId([{ id: "activity-seed", actorId: admin, action: "school.seeded", targetType: "school", targetId: "lumina", summary: "Demo school created", createdAt: now }]),
   };

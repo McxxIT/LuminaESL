@@ -221,6 +221,28 @@ export type Rating = {
   createdAt: Timestamp;
 };
 
+export type AssignmentState = "assigned" | "submitted" | "reviewed";
+export type HomeworkType = "recording" | "quiz" | "reading" | "writing";
+
+/** Homework a teacher sets for a student; the student submits, the teacher reviews. */
+export type Assignment = {
+  id: string;
+  studentId: string;
+  teacherId: string;
+  title: string;
+  type: HomeworkType;
+  description: string;
+  instructions: string;
+  dueLabel: string;
+  status: AssignmentState;
+  response?: string;
+  submittedAt?: Timestamp;
+  feedback?: string;
+  grade?: string;
+  reviewedAt?: Timestamp;
+  createdAt: Timestamp;
+};
+
 export type CreditReason = "purchase" | "booking" | "refund" | "adjustment";
 
 /** Student credit balance is the sum of `hours` across their entries. */
@@ -274,6 +296,7 @@ export type SchoolCollections = {
   requests: Record<string, SchoolRequest>;
   absences: Record<string, TeacherAbsence>;
   ratings: Record<string, Rating>;
+  assignments: Record<string, Assignment>;
   credits: Record<string, CreditLedgerEntry>;
   activity: Record<string, ActivityEntry>;
 };

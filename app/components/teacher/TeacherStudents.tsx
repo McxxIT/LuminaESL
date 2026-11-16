@@ -4,14 +4,15 @@ import { useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
 import StudentModal from "../student/StudentModal";
 import { downloadTextFile, formatLessonDate, todayISO } from "../../lib/student";
-import type { TeacherLesson, TeacherStudent } from "../../lib/types";
+import type { ServiceResult } from "../../lib/school/services";
+import type { TeacherHomework, TeacherLesson, TeacherStudent } from "../../lib/types";
 
 type StudentsProps = {
   students: TeacherStudent[];
   lessons: TeacherLesson[];
   onAddNote: (studentId: string, body: string) => void;
-  onAssignHomework: (studentId: string, title: string, dueLabel: string) => void;
-  onReviewHomework: (studentId: string, homeworkId: string) => void;
+  onAssignHomework: (studentId: string, title: string, dueLabel: string) => ServiceResult<unknown>;
+  onReviewHomework: (homeworkId: string, feedback: string, grade: string) => ServiceResult<unknown>;
   onNotice: (message: string) => void;
 };
 
@@ -34,6 +35,8 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
   const [noteDraft, setNoteDraft] = useState("");
   const [homeworkTargetId, setHomeworkTargetId] = useState<string | null>(null);
   const [homeworkForm, setHomeworkForm] = useState({ title: "", dueLabel: "Due in 3 days" });
+  const [reviewTarget, setReviewTarget] = useState<TeacherHomework | null>(null);
+  const [reviewForm, setReviewForm] = useState({ feedback: "", grade: "" });
 
   const selected = students.find((student) => student.id === selectedId) ?? null;
   const homeworkTarget = students.find((student) => student.id === homeworkTargetId) ?? null;
@@ -93,9 +96,30 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
       onNotice("Give the homework a clear title.");
       return;
     }
-    onAssignHomework(homeworkTarget.id, homeworkForm.title, homeworkForm.dueLabel);
+    const result = onAssignHomework(homeworkTarget.id, homeworkForm.title, homeworkForm.dueLabel);
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
     setHomeworkTargetId(null);
-    onNotice(`Homework assigned to ${homeworkTarget.name}.`);
+    onNotice(`Homework assigned to ${homeworkTarget.name}. It's on their Assignments page now.`);
+  }
+
+  function openReview(homework: TeacherHomework) {
+    setReviewForm({ feedback: homework.feedback ?? "", grade: "" });
+    setReviewTarget(homework);
+  }
+
+  function submitReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reviewTarget) return;
+    const result = onReviewHomework(reviewTarget.id, reviewForm.feedback, reviewForm.grade);
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
+    onNotice(`${reviewTarget.title} reviewed. The student can see your feedback.`);
+    setReviewTarget(null);
   }
 
   function downloadRoster() {
@@ -180,7 +204,7 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
       <button type="button" className="secondary-button" onClick={() => { setQuery(""); setStatusFilter("all"); }}>Clear filters</button>
     </div></section>}
 
-    {selected && <StudentModal eyebrow="STUDENT PROFILE" title={selected.name} description={`${selected.level} → ${selected.targetLevel} · ${selected.email}`} onClose={() => setSelectedId(null)} size="wide"
+    {selected && !reviewTarget && <StudentModal eyebrow="STUDENT PROFILE" title={selected.name} description={`${selected.level} → ${selected.targetLevel} · ${selected.email}`} onClose={() => setSelectedId(null)} size="wide"
       footer={<>
         <button type="button" className="cancel-button" onClick={() => setSelectedId(null)}>Close</button>
         <button type="button" className="secondary-button" onClick={() => onNotice(`Message drafted for ${selected.name}.`)}><Icon name="message" size={14} /> Message</button>
@@ -213,10 +237,10 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
           <div className="panel-header teacher-detail-header"><div><h2>Homework</h2><p>Assigned tasks and review status</p></div><span className="setting-count">{selected.homework.length}</span></div>
           <div className="teacher-homework-list">
             {selected.homework.length > 0 ? selected.homework.map((homework) => <div className="teacher-homework-row" key={homework.id}>
-              <div><strong>{homework.title}</strong><small>Assigned {homework.assignedAt} · {homework.dueLabel}</small>{homework.feedback && <p>{homework.feedback}</p>}</div>
+              <div><strong>{homework.title}</strong><small>Assigned {homework.assignedAt} · {homework.dueLabel}</small>{homework.response && <p className="teacher-homework-response"><strong>Answer:</strong> {homework.response}</p>}{homework.feedback && <p>{homework.feedback}</p>}</div>
               <div className="teacher-homework-actions">
                 <span className={`teacher-homework-status ${homework.status}`}>{homeworkLabels[homework.status]}</span>
-                {homework.status !== "reviewed" && <button type="button" className="icon-text-button" onClick={() => { onReviewHomework(selected.id, homework.id); onNotice(`${homework.title} marked reviewed.`); }}><Icon name="check" size={13} /> Review</button>}
+                {homework.status !== "reviewed" && <button type="button" className="icon-text-button" onClick={() => openReview(homework)}><Icon name="check" size={13} /> Review</button>}
               </div>
             </div>) : <div className="student-empty-inline"><Icon name="book" /><p>No homework assigned yet.</p></div>}
           </div>
@@ -230,6 +254,14 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
         <label className="full-field">Task title<input value={homeworkForm.title} onChange={(event) => setHomeworkForm({ ...homeworkForm, title: event.target.value })} placeholder="e.g. Record a 2-minute product pitch" required /></label>
         <label className="full-field">Due date<select value={homeworkForm.dueLabel} onChange={(event) => setHomeworkForm({ ...homeworkForm, dueLabel: event.target.value })}><option>Due tomorrow</option><option>Due in 2 days</option><option>Due in 3 days</option><option>Due in 5 days</option><option>Due next lesson</option></select></label>
         <p className="student-form-note full-field">The student can submit the task from their Assignments page. You will see it here for review.</p>
+      </form>
+    </StudentModal>}
+    {reviewTarget && <StudentModal eyebrow="REVIEW HOMEWORK" title={reviewTarget.title} description={`Assigned ${reviewTarget.assignedAt} · ${reviewTarget.dueLabel}`} onClose={() => setReviewTarget(null)}
+      footer={<><button type="button" className="cancel-button" onClick={() => setReviewTarget(null)}>Cancel</button><button type="submit" form="teacher-review-form" className="primary-button"><Icon name="check" size={14} /> Mark reviewed</button></>}>
+      <form id="teacher-review-form" className="student-form-grid" onSubmit={submitReview}>
+        <div className="lesson-detail-section full-field"><span className="eyebrow">STUDENT ANSWER</span><p>{reviewTarget.response ?? "No answer submitted yet. You can still mark it reviewed."}</p></div>
+        <label className="full-field">Feedback for the student<textarea rows={3} value={reviewForm.feedback} onChange={(event) => setReviewForm({ ...reviewForm, feedback: event.target.value })} placeholder="What went well, and one thing to improve." autoFocus /></label>
+        <label>Grade (optional)<input value={reviewForm.grade} onChange={(event) => setReviewForm({ ...reviewForm, grade: event.target.value })} placeholder="e.g. A-" maxLength={4} /></label>
       </form>
     </StudentModal>}
   </div>;

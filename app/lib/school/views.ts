@@ -1,11 +1,11 @@
 import { buildDaySlots, isSlotInPast } from "../scheduling";
 import { initials, parseISODate, toISODate } from "../student";
 import { computeTeacherPerformance, type PerformanceRules, type TeacherPerformance } from "../teacherPerformance";
-import type { CreditTransaction, StudentLesson, TeacherLesson, TeacherLessonMaterial, TeacherSlotClosure, TeacherSlotOpening } from "../types";
+import type { CreditTransaction, StudentAssignment, StudentLesson, TeacherHomework, TeacherLesson, TeacherLessonMaterial, TeacherSlotClosure, TeacherSlotOpening } from "../types";
 import { readFile } from "./files";
 import { get, list, query } from "./repositories";
 import { lessonsForStudent, lessonsForTeacher, plansForCourse, ratingsForLesson } from "./selectors";
-import type { Lesson, LessonCancellationRequest, SchoolData, SlotClosureRequest } from "./types";
+import type { Assignment, Lesson, LessonCancellationRequest, SchoolData, SlotClosureRequest } from "./types";
 
 /**
  * Adapters from shared-store records to the view shapes existing screens already render.
@@ -224,4 +224,32 @@ export function openSlotsForTeacher(data: SchoolData, teacherId: string, date: s
   const schedule = teacherScheduleView(data, teacherId);
   return buildDaySlots({ date, closures: schedule.closedSlots, openedSlots: schedule.openedSlots, lessons: schedule.lessons, includeClosed: false })
     .filter((slot) => !isSlotInPast(date, slot.time));
+}
+
+function shortDate(value: string | undefined) {
+  return value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+}
+
+/** Homework as the student's Assignments page shows it. */
+export function toStudentAssignmentView(data: SchoolData, assignment: Assignment): StudentAssignment {
+  const status = assignment.status === "assigned" ? "pending" : assignment.status === "reviewed" ? "graded" : "submitted";
+  return {
+    id: assignment.id,
+    title: assignment.title,
+    type: assignment.type,
+    dueLabel: assignment.dueLabel,
+    tutor: nameOf(data, assignment.teacherId, "Teacher"),
+    description: assignment.description,
+    instructions: assignment.instructions,
+    status,
+    grade: assignment.grade,
+    feedback: assignment.feedback,
+    response: assignment.response,
+    submittedAt: assignment.submittedAt ? new Date(assignment.submittedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : undefined,
+  };
+}
+
+/** Homework as the teacher's roster shows it. */
+export function toTeacherHomeworkView(assignment: Assignment): TeacherHomework & { response?: string } {
+  return { id: assignment.id, title: assignment.title, assignedAt: shortDate(assignment.createdAt), dueLabel: assignment.dueLabel, status: assignment.status, feedback: assignment.feedback, response: assignment.response };
 }

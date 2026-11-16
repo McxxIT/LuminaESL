@@ -7,6 +7,8 @@ import ManagerApprovals from "./ManagerApprovals";
 import ManagerCurriculum from "./ManagerCurriculum";
 import ManagerOverview from "./ManagerOverview";
 import ManagerPerformance from "./ManagerPerformance";
+import ManagerProfile from "./ManagerProfile";
+import ManagerSettings from "./ManagerSettings";
 import ManagerSchedule from "./ManagerSchedule";
 import ManagerStudents from "./ManagerStudents";
 import ManagerTeachers from "./ManagerTeachers";
@@ -20,13 +22,15 @@ type ManagerWorkspaceProps = {
   activeNav: string;
   onNavigate: (page: string) => void;
   onNotice: (message: string) => void;
+  onUpdateAccount: (account: Account) => void;
+  onRequestLogout: () => void;
 };
 
 /**
  * Page router for the admin and manager roles. Both use the same pages; selectors scope the data
  * (a manager sees their own team, the admin sees the whole school). Admin-only pages are guarded.
  */
-export default function ManagerWorkspace({ account, activeNav, onNavigate, onNotice }: ManagerWorkspaceProps) {
+export default function ManagerWorkspace({ account, activeNav, onNavigate, onNotice, onUpdateAccount, onRequestLogout }: ManagerWorkspaceProps) {
   const ready = useSchoolReady();
   const user = useCurrentUser(account);
   const approvals = useApprovals(user);
@@ -43,6 +47,8 @@ export default function ManagerWorkspace({ account, activeNav, onNavigate, onNot
   const isAdmin = user.role === "admin";
 
   if (activeNav === "Managers" && isAdmin) return <AdminManagers user={user} onNavigate={onNavigate} onNotice={onNotice} />;
+  if (activeNav === "Profile") return <ManagerProfile key={user.name} user={user} account={account} onUpdateAccount={onUpdateAccount} onNavigate={onNavigate} onRequestLogout={onRequestLogout} onNotice={onNotice} />;
+  if (activeNav === "Settings") return <ManagerSettings user={user} onNavigate={onNavigate} onRequestLogout={onRequestLogout} onNotice={onNotice} />;
   if (activeNav === "Teachers") return <ManagerTeachers user={user} onNotice={onNotice} />;
   if (activeNav === "Students") return <ManagerStudents user={user} onNotice={onNotice} />;
   if (activeNav === "Approvals") return <ManagerApprovals user={user} approvals={approvals} onNotice={onNotice} />;

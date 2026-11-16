@@ -6,12 +6,13 @@ import LoginScreen from "./LoginScreen";
 import ManagerWorkspace from "./manager/ManagerWorkspace";
 import TeacherDashboard from "./teacher/TeacherDashboard";
 import StudentDashboard from "./student/StudentDashboard";
-import NotificationPanel, { AppNotification } from "./NotificationPanel";
+import NotificationPanel, { type AppNotification } from "./NotificationPanel";
+import { useNotifications } from "../lib/hooks/useNotifications";
 import { adminNavItems, managerNavItems, studentNavItems, teacherNavItems } from "../lib/data";
 import { friendlyRole, initials } from "../lib/student";
 import type { Account } from "../lib/types";
 
-type ModalName = "profile" | "settings" | "help" | "logout" | null;
+type ModalName = "help" | "logout" | null;
 
 export default function LuminaApp() {
   const [account, setAccount] = useState<Account | null>(null);
@@ -20,13 +21,7 @@ export default function LuminaApp() {
   const [studentCredits, setStudentCredits] = useState(24.5);
   const [openPopover, setOpenPopover] = useState<"notifications" | null>(null);
   const [modal, setModal] = useState<ModalName>(null);
-  const [editName, setEditName] = useState("");
-  const [notifications, setNotifications] = useState<AppNotification[]>([
-    { id: 1, title: "Lesson reminder", detail: "Conversation practice starts at 09:00.", unread: true },
-    { id: 2, title: "New feedback", detail: "Jamie left feedback on your latest lesson.", unread: true },
-    { id: 3, title: "Assignment due", detail: "Your elevator pitch recording is due today.", unread: true },
-    { id: 4, title: "Schedule updated", detail: "Your weekly calendar is ready to review.", unread: false },
-  ]);
+  const { notifications, unreadCount, markRead, markAllRead } = useNotifications(account);
   const noticeTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -37,7 +32,6 @@ export default function LuminaApp() {
         const parsed = JSON.parse(stored) as Account;
         if (parsed.email && parsed.role && parsed.name) {
           setAccount(parsed);
-          setEditName(parsed.name);
         }
       } catch {
         window.localStorage.removeItem("lumina-account");
@@ -70,7 +64,6 @@ export default function LuminaApp() {
     setAccount(nextAccount);
     setActiveNav("Overview");
     setStudentCredits(24.5);
-    setEditName(nextAccount.name);
     setOpenPopover(null);
     setModal(null);
     window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
@@ -78,7 +71,6 @@ export default function LuminaApp() {
 
   function updateAccount(nextAccount: Account) {
     setAccount(nextAccount);
-    setEditName(nextAccount.name);
     window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
   }
 
@@ -97,33 +89,17 @@ export default function LuminaApp() {
     setModal(null);
   }
 
-  function readNotification(id: number) {
-    setNotifications((items) => items.map((item) => item.id === id ? { ...item, unread: false } : item));
+  function openNotification(notification: AppNotification) {
+    markRead(notification.id);
+    navigate(notification.nav);
   }
 
   function openProfile() {
-    if (account?.role === "student" || account?.role === "teacher") navigate("Profile");
-    else {
-      setEditName(account?.name ?? "");
-      setOpenPopover(null);
-      setModal("profile");
-    }
+    navigate("Profile");
   }
 
   function openSettings() {
-    if (account?.role === "student" || account?.role === "teacher") navigate("Settings");
-    else {
-      setOpenPopover(null);
-      setModal("settings");
-    }
-  }
-
-  function saveProfile() {
-    if (!account || !editName.trim()) return;
-    const updated = { ...account, name: editName.trim() };
-    updateAccount(updated);
-    setModal(null);
-    showNotice("Profile updated.");
+    navigate("Settings");
   }
 
   if (!account) return <LoginScreen onLogin={login} />;
@@ -158,14 +134,14 @@ export default function LuminaApp() {
         <div className="topbar-actions">
           {account.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} hrs</strong></button>}
           <div className="popover-anchor">
-            <button type="button" className="icon-button notification-button" aria-label="Notifications" onClick={() => setOpenPopover(openPopover === "notifications" ? null : "notifications")}><Icon name="bell" /><span className={`notification-dot ${notifications.some((item) => item.unread) ? "" : "hidden-dot"}`} /></button>
-            {openPopover === "notifications" && <NotificationPanel notifications={notifications} onRead={readNotification} onClose={() => setOpenPopover(null)} />}
+            <button type="button" className="icon-button notification-button" aria-label="Notifications" onClick={() => setOpenPopover(openPopover === "notifications" ? null : "notifications")}><Icon name="bell" /><span className={`notification-dot ${unreadCount > 0 ? "" : "hidden-dot"}`} /></button>
+            {openPopover === "notifications" && <NotificationPanel notifications={notifications} onOpen={openNotification} onMarkAllRead={markAllRead} onClose={() => setOpenPopover(null)} />}
           </div>
         </div>
       </header>
       <div className="content-wrap">
         {account.role === "admin" || account.role === "manager"
-          ? <ManagerWorkspace account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} />
+          ? <ManagerWorkspace account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
           : account.role === "teacher"
             ? <TeacherDashboard account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
             : <StudentDashboard account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onCreditChange={setStudentCredits} onRequestLogout={() => setModal("logout")} />}
@@ -176,8 +152,6 @@ export default function LuminaApp() {
 
     {modal && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
       <section className="general-modal" role="dialog" aria-modal="true">
-        {modal === "profile" && <><div className="modal-header"><div><p className="eyebrow">ACCOUNT PROFILE</p><h2>Edit profile</h2><p>Keep your account details up to date.</p></div><button type="button" className="icon-button bordered" aria-label="Close profile dialog" onClick={() => setModal(null)}><Icon name="x" /></button></div><label className="modal-field">Display name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><label className="modal-field">Email address<input value={account.email} disabled /></label><div className="modal-footer"><button type="button" className="cancel-button" onClick={() => setModal(null)}>Cancel</button><button type="button" className="primary-button" onClick={saveProfile}>Save changes</button></div></>}
-        {modal === "settings" && <><div className="modal-header"><div><p className="eyebrow">PREFERENCES</p><h2>Settings</h2><p>Customize how Lumina works for you.</p></div><button type="button" className="icon-button bordered" aria-label="Close settings dialog" onClick={() => setModal(null)}><Icon name="x" /></button></div><div className="settings-list"><label><span><strong>Email notifications</strong><small>Receive reminders about lessons and feedback.</small></span><input type="checkbox" defaultChecked /></label><label><span><strong>Weekly progress summary</strong><small>Get a summary every Monday morning.</small></span><input type="checkbox" defaultChecked /></label><label><span><strong>Compact schedule</strong><small>Show more lessons in calendar views.</small></span><input type="checkbox" /></label></div><div className="modal-footer"><button type="button" className="primary-button" onClick={() => { setModal(null); showNotice("Settings saved."); }}>Save settings</button></div></>}
         {modal === "help" && <><div className="modal-header"><div><p className="eyebrow">SUPPORT</p><h2>Help center</h2><p>Find a quick answer or contact the Lumina team.</p></div><button type="button" className="icon-button bordered" aria-label="Close help dialog" onClick={() => setModal(null)}><Icon name="x" /></button></div><div className="help-options"><button type="button" onClick={() => { setModal(null); showNotice("Getting started guide opened."); }}>Getting started <Icon name="arrow" size={14} /></button><button type="button" onClick={() => { setModal(null); showNotice("Support request form opened."); }}>Contact support <Icon name="arrow" size={14} /></button><button type="button" onClick={() => { setModal(null); navigate("Settings"); }}>Preferences <Icon name="arrow" size={14} /></button></div></>}
         {modal === "logout" && <><div className="modal-header"><div><p className="eyebrow">SIGN OUT</p><h2>Log out of Lumina?</h2><p>You can sign back in at any time with your account.</p></div><button type="button" className="icon-button bordered" aria-label="Close logout dialog" onClick={() => setModal(null)}><Icon name="x" /></button></div><div className="modal-footer"><button type="button" className="cancel-button" onClick={() => setModal(null)}>Stay signed in</button><button type="button" className="danger-button" onClick={logout}>Log out</button></div></>}
       </section>

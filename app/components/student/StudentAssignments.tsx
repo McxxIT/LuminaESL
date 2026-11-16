@@ -2,12 +2,13 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
+import type { ServiceResult } from "../../lib/school/services";
 import StudentModal from "./StudentModal";
 import type { StudentAssignment } from "../../lib/types";
 
 type AssignmentsProps = {
   assignments: StudentAssignment[];
-  onSubmitAssignment: (id: string, response: string) => void;
+  onSubmitAssignment: (id: string, response: string) => ServiceResult<unknown>;
   onNavigate: (page: string) => void;
   onNotice: (message: string) => void;
 };
@@ -49,7 +50,11 @@ export default function StudentAssignments({ assignments, onSubmitAssignment, on
       onNotice("Add a response before submitting your work.");
       return;
     }
-    onSubmitAssignment(submitTarget.id, response.trim());
+    const result = onSubmitAssignment(submitTarget.id, response.trim());
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
     setSubmitTarget(null);
     setResponse("");
     setFilter("Submitted");

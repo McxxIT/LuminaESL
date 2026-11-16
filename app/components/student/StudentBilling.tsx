@@ -67,7 +67,7 @@ export default function StudentBilling({ creditHours, transactions, onPurchase, 
     <div className="student-billing-grid">
       <section className="panel student-panel student-wallet-card">
         <div className="panel-header"><div><h2>Credit wallet</h2><p>Institutional plan · renewed monthly</p></div><span className="student-wallet-badge"><Icon name="shield" size={12} /> Secured</span></div>
-        <div className="wallet-balance"><span>Hours remaining</span><strong>{creditHours.toFixed(1)}</strong><small>About {Math.round(creditHours * 2)} half-hour sessions</small></div>
+        <div className="wallet-balance"><span>Hours remaining</span><strong>{creditHours.toFixed(1)}</strong><small>About {Math.floor(creditHours / (25 / 60))} 25-minute lessons</small></div>
         <div className="wallet-progress"><div className="bar"><i style={{ width: `${Math.min(100, (creditHours / 40) * 100)}%` }} /></div><div><span>0 hrs</span><span>40 hr plan cap</span></div></div>
         <div className="wallet-renew"><div><span className="metric-icon green"><Icon name="repeat" /></span><div><strong>Auto-renew is {autoRenew ? "active" : "paused"}</strong><small>Recharges 10 hours on the 1st of each month.</small></div></div><button type="button" className={`student-toggle-button ${autoRenew ? "active" : ""}`} onClick={() => { setAutoRenew((value) => !value); onNotice(`Auto-renew ${autoRenew ? "paused" : "activated"}.`); }}>{autoRenew ? "On" : "Off"}</button></div>
         <div className="wallet-actions"><button type="button" className="primary-button" onClick={() => setBuyOpen(true)}>Buy credits</button><button type="button" className="secondary-button" onClick={() => onNotice("Billing statements are emailed monthly to your registered address.")}><Icon name="mail" size={14} /> Billing settings</button></div>
@@ -89,12 +89,12 @@ export default function StudentBilling({ creditHours, transactions, onPurchase, 
           <table className="billing-table">
             <thead><tr><th>Date</th><th>Description</th><th>Hours</th><th>Amount</th><th>Status</th><th /></tr></thead>
             <tbody>{transactions.map((transaction) => <tr key={transaction.id}>
-              <td>{transaction.date}</td>
-              <td><strong>{transaction.description}</strong></td>
-              <td className="tabular">{transaction.hours > 0 ? "+" : ""}{transaction.hours} hrs</td>
-              <td className="tabular">${transaction.amount.toFixed(2)}</td>
-              <td><span className={`billing-status ${transaction.status}`}>{transaction.status}</span></td>
-              <td><button type="button" className="icon-text-button" onClick={() => downloadInvoice(transaction)}><Icon name="download" size={13} /> Invoice</button></td>
+              <td data-label="Date">{transaction.date}</td>
+              <td data-label="Description"><strong>{transaction.description}</strong></td>
+              <td data-label="Hours" className="tabular">{transaction.hours > 0 ? "+" : ""}{transaction.hours} hrs</td>
+              <td data-label="Amount" className="tabular">${transaction.amount.toFixed(2)}</td>
+              <td data-label="Status"><span className={`billing-status ${transaction.status}`}>{transaction.status}</span></td>
+              <td className="billing-invoice-cell"><button type="button" className="icon-text-button" onClick={() => downloadInvoice(transaction)}><Icon name="download" size={13} /> Invoice</button></td>
             </tr>)}</tbody>
           </table>
         </div>

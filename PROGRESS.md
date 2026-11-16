@@ -1,7 +1,7 @@
 # Lumina ESL - Progress and Next Plan
 
 Last updated: November 16, 2026
-Last verified: `npm run lint` and `npx tsc --noEmit` pass; every phase was checked in the browser (1440px and 390px) and with Node service tests.
+Last verified: `npm run lint` and `npx tsc --noEmit` pass; the production build passes; the Node service checks (29) and the Playwright audit flow (24) pass; every page for all four roles was swept at 1440px and 390px.
 
 ## Status at a glance
 
@@ -10,8 +10,8 @@ Last verified: `npm run lint` and `npx tsc --noEmit` pass; every phase was check
 | App shell | Working | `lumina-account` |
 | Student role | Complete | Shared store + personal `lumina-student-workspace:<email>` |
 | Teacher role | Complete | Shared store + personal `lumina-teacher-workspace:<email>` |
-| Admin role | Partial: read-only Overview, Managers, Teachers, Students; working Approvals | Shared store `lumina-school:v1` |
-| Manager role | Partial: same pages scoped to their team | Shared store `lumina-school:v1` |
+| Admin role | Complete, including Profile and Settings pages | Shared store `lumina-school:v1` + personal staff preferences |
+| Manager role | Complete, including Profile and Settings pages | Shared store `lumina-school:v1` + personal staff preferences |
 
 ## Quick start
 
@@ -85,6 +85,12 @@ The plan for the admin and manager roles is in `ADMIN_PLAN.md`. **Phases 0, 1, a
   - Admin **School settings** (`app/components/admin/AdminSettings.tsx`): Rules tab (school name, on-the-spot window, performance window, student late-cancellation window, refund teacher cancellations/absences) saved via `updateSchoolSettings`; Activity log tab with search and type filter.
   - Scoring rules come from settings everywhere: `performanceRules(data)` feeds `computeTeacherPerformance(lessons, rules)` for manager pages, the teacher Analytics page, and the teacher's on-the-spot warning; refunds read the same settings.
   - Every page is now built; the temporary "coming soon" component was removed.
+- **Audit fixes (profile, settings, notifications, shared homework):**
+  - Admin and manager now have real **Profile** and **Settings** pages (`ManagerProfile.tsx`, `ManagerSettings.tsx`) instead of the shell modal. Profile shows role, team scope, contact details, and the personal name/job title; Settings holds notification toggles, a link to School rules, and the demo reset.
+  - Anyone can rename themselves through `updateMyName` (`services/profile.ts`): the change is normalised and written to the shared store, so it shows up in the sidebar, roster and every other role immediately. Email stays admin-managed.
+  - Notifications are real (`lib/school/notifications.ts` + `useNotifications`): they are derived per role from the shared store (approvals, plans, lessons, homework, ratings, credits), navigate to the related page, and can be muted per category. Read state and muted categories are shared between the bell and the Settings page through `usePersonalValue`.
+  - Homework is shared end to end (`services/homework.ts`, `assignments` collection): the teacher assigns, the student sees it on Assignments and submits, the teacher reviews with feedback and an optional grade, and the student sees the result. Scope is enforced (teachers only their students, students only their own work, reviewed work cannot be resubmitted).
+  - The student Profile "Your teacher" card now shows the actual enrolled teacher from the shared store instead of the fictional tutor.
 - Demo logins: `admin@`, `manager@` (Priya Raman), `manager2@` (Marco Bianchi), `teacher@`, `student@` - all `@lumina.school`, any password.
 
 > Do not run `npm run build` while `npm run dev` is running. Both write into `.next`, and the dev server can get stuck serving stale CSS (pages look unstyled). If that happens, stop the dev server, delete `.next`, and restart it.
@@ -136,7 +142,7 @@ Student capabilities worth knowing:
 - Both roles use `app/components/manager/ManagerWorkspace.tsx` (see "Shared school layer" above). Admin-only pages: Managers, School settings.
 - Sidebars: `managerNavItems` and `adminNavItems` in `app/lib/data.ts`; teacher and student keep their own.
 - **Approvals** (`ManagerApprovals.tsx`): slot closures and lesson cancellations with attachment preview, Approve/Decline, and an optional note. The reviewer is recorded as the signed-in manager's name. Approval cancels the lesson or closes the slot; decline keeps it and returns the note to the teacher.
-- Admin/manager Profile and Settings still open the generic shell modals.
+- **Profile and Settings** are full pages, not modals (`ManagerProfile.tsx`, `ManagerSettings.tsx`), with the same toggle component the teacher/student pages use. The Profile page shows the role badge, team scope (teachers, students, pending approvals), contact details, name and job title; Settings holds notification toggles, a link to School settings for the admin, and the demo reset.
 
 ### Teacher role
 
@@ -257,17 +263,21 @@ app/lib/
 - [x] Curriculum removed from the teacher role (manager-owned).
 - [x] Teacher performance points and redesigned Analytics page.
 - [x] Responsive teacher CSS.
+- [x] Admin and manager Profile and Settings full pages (replacing the shell modals).
+- [x] Shared name changes across every role (`updateMyName`).
+- [x] Real per-role notifications with navigation and category muting.
+- [x] Shared homework assign -> submit -> review -> grade cycle between teacher and student.
+- [x] Student Profile shows the enrolled teacher instead of a fictional tutor.
+- [x] Node service tests and Playwright end-to-end checks for the audit fixes.
 - [x] Lint, TypeScript, and production build verification.
 
 ## Next plan
 
-1. **Admin: lesson materials and curriculum.** A Curriculum screen built on `teacherCurriculumSeed`, plus a way for the manager to assign or upload a lesson material on a booked lesson (replacing the seeded materials).
-2. **Performance inputs.** A post-lesson rating prompt for students (and parents), and an admin action to record a teacher absence while the student was present. Show a lesson's ratings in the teacher lesson details.
-3. **Decide the on-the-spot window.** Currently 2 hours (`ON_THE_SPOT_CANCELLATION_HOURS`); many tutoring platforms use 24 hours.
-4. **Admin role parity:** route the remaining admin nav items (Schedule, Students, Analytics) to real screens, persist admin state, and connect the admin schedule to the shared 25-minute slot logic.
-5. Extract shared primitives (`StudentModal` -> shared role modal, shared summary cards, shared tab bar) now that student and teacher both use them.
-6. Cross-role demo coherence: teacher actions such as assigning homework or completing a lesson could write into the corresponding student workspace.
-7. Students with an ended but still "upcoming" lesson still see Reschedule/Cancel; decide whether to hide them.
+1. **Decide the on-the-spot window.** Currently 2 hours (`ON_THE_SPOT_CANCELLATION_HOURS`); many tutoring platforms use 24 hours.
+2. **Shared primitives.** Extract `StudentModal` into a shared role modal, plus shared summary cards and a shared tab bar (the 390px sweep shows tab rows overflowing their container on Curriculum, Lessons and teacher Lessons).
+3. **Ended "upcoming" lessons.** Students with an ended but still "upcoming" lesson still see Reschedule/Cancel; decide whether to hide them.
+4. **Self-service email and password changes.** Profile now handles names only; email is admin-managed and passwords are not stored. Decide whether these should become real flows.
+5. **Notification persistence.** Notifications are derived from the shared store, but read/mute state lives in each browser (`usePersonalValue`). Move both to the shared store if staff use multiple devices.
 
 ## Definition of done
 

@@ -12,3 +12,5 @@ export * from "./people";
 export * from "./curriculum";
 export * from "./uploads";
 export * from "./quality";
+export * from "./homework";
+export * from "./profile";

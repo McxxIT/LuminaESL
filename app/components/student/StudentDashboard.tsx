@@ -80,6 +80,7 @@ export default function StudentDashboard({ account, activeNav, onNavigate, onNot
     key={JSON.stringify(state.profile)}
     account={account}
     profile={state.profile}
+    tutor={workspace.tutors[0]}
     onSaveProfile={workspace.updateProfile}
     onUpdateAccount={onUpdateAccount}
     onNavigate={onNavigate}

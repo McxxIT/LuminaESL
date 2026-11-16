@@ -25,6 +25,7 @@ export function createEmptySchool(): SchoolData {
       requests: {},
       absences: {},
       ratings: {},
+      assignments: {},
       credits: {},
       activity: {},
     },
@@ -51,7 +52,10 @@ function upgrade(data: SchoolData | null): SchoolData | null {
   if (data.version === SCHOOL_SCHEMA_VERSION) {
     // Fill collections/settings added after this data was saved.
     const empty = createEmptySchool();
-    return { ...data, settings: { ...empty.settings, ...data.settings }, collections: { ...empty.collections, ...data.collections } };
+    const collections = { ...empty.collections, ...data.collections };
+    // Collections added after this data was saved start from the demo seed (e.g. shared homework).
+    if (!data.collections.assignments) collections.assignments = createSeedSchool().collections.assignments;
+    return { ...data, settings: { ...empty.settings, ...data.settings }, collections };
   }
   return null;
 }

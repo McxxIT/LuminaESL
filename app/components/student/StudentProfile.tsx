@@ -2,12 +2,14 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
-import { studentTutors } from "../../lib/data";
+import type { BookableTutor } from "./useStudentWorkspace";
 import type { Account, StudentProfile } from "../../lib/types";
 
 type ProfileProps = {
   account: Account;
   profile: StudentProfile;
+  /** The student's enrolled teacher from the shared store. */
+  tutor?: BookableTutor;
   onSaveProfile: (profile: StudentProfile) => void;
   onUpdateAccount: (account: Account) => void;
   onNavigate: (page: string) => void;
@@ -19,7 +21,7 @@ const timezones = ["Asia/Singapore (UTC+8)", "Asia/Tokyo (UTC+9)", "Europe/Londo
 const languages = ["Mandarin Chinese", "Japanese", "Korean", "Spanish", "Portuguese", "Arabic", "Vietnamese", "Thai", "English"];
 const levels = ["A1 Beginner", "A2 Elementary", "B1 Intermediate", "B2 Upper intermediate", "C1 Advanced", "C2 Proficient"];
 
-export default function StudentProfile({ account, profile, onSaveProfile, onUpdateAccount, onNavigate, onRequestLogout, onNotice }: ProfileProps) {
+export default function StudentProfile({ account, profile, tutor, onSaveProfile, onUpdateAccount, onNavigate, onRequestLogout, onNotice }: ProfileProps) {
   const [draft, setDraft] = useState<StudentProfile>(profile);
   const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
 
@@ -28,7 +30,6 @@ export default function StudentProfile({ account, profile, onSaveProfile, onUpda
     return Math.round((fields.filter((value) => value && value.trim().length > 0).length / fields.length) * 100);
   }, [draft]);
 
-  const assignedTutor = studentTutors[0];
   const changed = JSON.stringify(draft) !== JSON.stringify(profile);
 
   function saveProfile(event?: FormEvent<HTMLFormElement>) {
@@ -132,12 +133,12 @@ export default function StudentProfile({ account, profile, onSaveProfile, onUpda
 
       <aside className="student-profile-side">
         <section className="panel student-panel">
-          <div className="panel-header"><div><h2>Assigned tutor</h2><p>Your main conversation tutor</p></div></div>
-          <div className="student-tutor-card">
-            <div className={`avatar avatar-${assignedTutor.color}`}>{assignedTutor.initials}</div>
-            <div><strong>{assignedTutor.name}</strong><small>{assignedTutor.specialty}</small></div>
-          </div>
-          <div className="student-tutor-actions"><button type="button" className="secondary-button full-width" onClick={() => onNotice(`Message sent to ${assignedTutor.name}.`)}><Icon name="message" size={14} /> Message tutor</button><button type="button" className="text-button" onClick={() => onNavigate("Lessons")}>Book with {assignedTutor.name.split(" ")[0]} <Icon name="arrow" size={14} /></button></div>
+          <div className="panel-header"><div><h2>Your teacher</h2><p>{tutor ? "Who you are enrolled with" : "Not enrolled yet"}</p></div></div>
+          {tutor ? <div className="student-tutor-card">
+            <div className={`avatar avatar-${tutor.color}`}>{tutor.initials}</div>
+            <div><strong>{tutor.name}</strong><small>{tutor.specialty}</small></div>
+          </div> : <div className="student-empty-inline"><Icon name="user" /><p>Your school will enroll you with a teacher.</p></div>}
+          <div className="student-tutor-actions"><button type="button" className="secondary-button full-width" onClick={() => onNotice(tutor ? `Message sent to ${tutor.name}.` : "You are not enrolled with a teacher yet.")}><Icon name="message" size={14} /> Message teacher</button>{tutor && <button type="button" className="text-button" onClick={() => onNavigate("Lessons")}>Book with {tutor.name.split(" ")[0]} <Icon name="arrow" size={14} /></button>}</div>
         </section>
 
         <section className="panel student-panel">

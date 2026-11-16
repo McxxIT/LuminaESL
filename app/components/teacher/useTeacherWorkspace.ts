@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultTeacherProfile, defaultTeacherSettings, teacherStudentsSeed, teacherTasksSeed } from "../../lib/data";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useSchool } from "../../lib/hooks/useSchool";
-import { findUserByEmail, getSchoolSnapshot, resetSchool, studentProfile, studentsForUser, teacherProfile, teacherScheduleView, type SchoolData, type SchoolUser } from "../../lib/school";
+import { assignmentsForTeacher, findUserByEmail, getSchoolSnapshot, resetSchool, studentProfile, studentsForUser, teacherProfile, teacherScheduleView, toTeacherHomeworkView, type SchoolData, type SchoolUser } from "../../lib/school";
 import {
+  assignHomework as assignHomeworkService,
   completeLesson as completeLessonService,
+  reviewHomework as reviewHomeworkService,
+  updateMyName,
   openSlot as openSlotService,
   requestLessonCancellation as requestLessonCancellationService,
   requestSlotClosure as requestSlotClosureService,
@@ -99,14 +102,22 @@ function displayDate() {
 
 const notSignedIn: ServiceResult<never> = { ok: false, error: "Your account was not found in the school." };
 
-/** Roster = students the teacher teaches in the shared store, with this teacher's private details. */
+/**
+ * Roster = students the teacher teaches in the shared store, with this teacher's private details
+ * (notes, progress). Homework comes from the shared store so the student sees it too.
+ */
 function buildRoster(data: SchoolData, teacher: SchoolUser | undefined, saved: TeacherStudent[]): TeacherStudent[] {
   if (!teacher) return saved;
   const byId = new Map(saved.map((student) => [student.id, student]));
+  const homeworkByStudent = new Map<string, TeacherStudent["homework"]>();
+  assignmentsForTeacher(data, teacher.id).forEach((assignment) => {
+    homeworkByStudent.set(assignment.studentId, [...(homeworkByStudent.get(assignment.studentId) ?? []), toTeacherHomeworkView(assignment)]);
+  });
   return studentsForUser(data, teacher).map((user) => {
     const details = byId.get(user.id);
     const profile = studentProfile(data, user.id);
-    if (details) return { ...details, name: user.name, email: user.email, status: user.status === "paused" ? "paused" : details.status };
+    const homework = homeworkByStudent.get(user.id) ?? [];
+    if (details) return { ...details, name: user.name, email: user.email, status: user.status === "paused" ? "paused" : details.status, homework };
     return {
       id: user.id,
       name: user.name,
@@ -121,7 +132,7 @@ function buildRoster(data: SchoolData, teacher: SchoolUser | undefined, saved: T
       lessonsCompleted: 0,
       status: user.status === "paused" ? "paused" : "active",
       notes: [],
-      homework: [],
+      homework,
     };
   });
 }
@@ -179,7 +190,9 @@ export default function useTeacherWorkspace(account: Account) {
 
   const updateProfile = useCallback((profile: TeacherProfile) => {
     setPersonal((current) => ({ ...current, profile }));
-  }, []);
+    // The name is shared: managers, students, and the schedule show it.
+    if (teacherId) updateMyName(teacherId, profile.name);
+  }, [teacherId]);
 
   const updateSettings = useCallback((settings: TeacherSettings) => {
     setPersonal((current) => ({ ...current, settings }));
@@ -238,18 +251,14 @@ export default function useTeacherWorkspace(account: Account) {
     updateRosterStudent(studentId, (student) => ({ ...student, notes: [{ id: `note-${Date.now()}`, date: displayDate(), body: trimmed }, ...student.notes] }));
   }, [updateRosterStudent]);
 
-  const assignHomework = useCallback((studentId: string, title: string, dueLabel: string) => {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    updateRosterStudent(studentId, (student) => ({
-      ...student,
-      homework: [{ id: `homework-${Date.now()}`, title: trimmed, assignedAt: displayDate(), dueLabel: dueLabel.trim() || "No due date", status: "assigned" as const }, ...student.homework],
-    }));
-  }, [updateRosterStudent]);
+  /** Shared homework: the student sees it on their Assignments page. */
+  const assignHomework = useCallback((studentId: string, title: string, dueLabel: string) => (
+    teacherId ? assignHomeworkService(teacherId, studentId, { title, dueLabel }) : notSignedIn
+  ), [teacherId]);
 
-  const reviewHomework = useCallback((studentId: string, homeworkId: string) => {
-    updateRosterStudent(studentId, (student) => ({ ...student, homework: student.homework.map((item) => item.id === homeworkId ? { ...item, status: "reviewed" as const } : item) }));
-  }, [updateRosterStudent]);
+  const reviewHomework = useCallback((homeworkId: string, feedback: string, grade: string) => (
+    teacherId ? reviewHomeworkService(teacherId, homeworkId, { feedback, grade }) : notSignedIn
+  ), [teacherId]);
 
   /** Demo reset: re-seeds the shared school (every role) and this teacher's personal data. */
   const resetWorkspace = useCallback(() => {

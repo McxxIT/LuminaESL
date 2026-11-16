@@ -29,6 +29,9 @@ export type SchoolAction =
   | "absence.record"
   | "lesson.complete"
   | "lesson.rate"
+  | "homework.assign"
+  | "homework.review"
+  | "homework.submit"
   | "performance.view"
   | "settings.edit";
 
@@ -101,9 +104,12 @@ export function can(data: SchoolData, actor: SchoolUser | undefined, action: Sch
     case "request.create":
     case "lesson.complete":
     case "lesson.schedule":
+    case "homework.assign":
+    case "homework.review":
       return actor.role === "teacher" && (!teacherId || teacherId === actor.id);
 
     case "lesson.rate":
+    case "homework.submit":
       return actor.role === "student" && (!studentId || studentId === actor.id);
 
     case "performance.view":

@@ -166,6 +166,8 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
 .student-assignment-preview { display: grid; }
 .student-assignment-row { align-items: center; background: none; border: 0; border-top: 1px solid #f1f5f9; color: #334155; cursor: pointer; display: flex; gap: 10px; padding: 13px 20px; text-align: left; width: 100%; }
 .student-assignment-row:first-child { border-top: 0; }
+/* Grid items default to min-content width; let rows shrink so long titles ellipsize instead of overflowing. */
+.student-assignment-preview > .student-assignment-row { min-width: 0; }
 .student-assignment-row:hover { background: #f8fafc; }
 .student-assignment-copy { flex: 1; min-width: 0; }
 .student-assignment-copy strong, .student-assignment-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -685,8 +687,12 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
   .student-week-time { display: none; }
   .student-assignment-row, .student-assignment-copy small { white-space: normal; }
   .student-due-pill { display: none; }
-  .lesson-date-block { border-right: 0; min-width: 0; width: 100%; }
-  .lesson-card-main { gap: 9px; }
+  /* Date on its own row, then avatar + details, so nothing is pushed off-screen. */
+  .lesson-card-main { flex-wrap: wrap; gap: 9px; }
+  .lesson-date-block { border-bottom: 1px solid #f1f5f9; border-right: 0; flex-basis: 100%; min-width: 0; padding: 0 0 8px; }
+  .lesson-card-main > .avatar { flex-shrink: 0; }
+  .lesson-card-copy { flex: 1 1 0; min-width: 0; }
+  .lesson-card-title { flex-wrap: wrap; }
   .lesson-card-actions { gap: 2px; }
   .lesson-card-actions .icon-text-button { font-size: 10px; }
   .student-level-card { align-items: flex-start; }
@@ -980,6 +986,18 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
   white-space: nowrap;
 }
 
+/* Phones: each transaction becomes a labelled card instead of a clipped wide table. */
+@media (max-width: 620px) {
+  .billing-table { min-width: 0; }
+  .billing-table thead { display: none; }
+  .billing-table, .billing-table tbody, .billing-table tr, .billing-table td { display: block; width: 100%; }
+  .billing-table tr { border: 1px solid #e2e8f0; border-radius: 8px; display: grid; gap: 8px 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 10px; padding: 12px; }
+  .billing-table td { border: 0 !important; padding: 0 !important; }
+  .billing-table td[data-label]::before { color: #94a3b8; content: attr(data-label); display: block; font-size: 9px; font-weight: 700; letter-spacing: .06em; margin-bottom: 2px; text-transform: uppercase; }
+  .billing-table td[data-label="Description"] { grid-column: 1 / -1; }
+  .billing-table .billing-invoice-cell { grid-column: 1 / -1; }
+}
+
 .billing-help {
   align-items: center;
   display: flex;
@@ -1270,7 +1288,9 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
 .student-slot-empty { color: #94a3b8; font-size: 10px; font-weight: 400; margin: 0; }
 
 @media (max-width: 1180px) {
-  .teacher-student-grid { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr) stops the column growing to its widest content on narrow screens. */
+  .teacher-student-grid { grid-template-columns: minmax(0, 1fr); }
+  .teacher-student-card { min-width: 0; }
 }
 @media (max-width: 900px) {
   .teacher-detail-columns, .student-progress-columns { grid-template-columns: 1fr; }
@@ -1577,6 +1597,20 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
   .schedule-toolbar .student-filter-count { margin-left: 0; }
   .schedule-lesson-stats { grid-template-columns: 1fr; }
 }
+
+/* Staff profile/settings, notifications, shared homework */
+.manager-scope-list { display: grid; padding: 0 12px 12px; }
+.manager-scope-list button { align-items: center; background: none; border: 0; border-radius: 8px; border-top: 1px solid #f1f5f9; color: #334155; cursor: pointer; display: flex; font: inherit; font-size: 13px; gap: 10px; padding: 11px 8px; text-align: left; }
+.manager-scope-list button:first-child { border-top: 0; }
+.manager-scope-list button:hover { background: #f8fafc; }
+.manager-scope-list button .icon:first-child { color: #6366f1; flex-shrink: 0; }
+.manager-scope-list button span { flex: 1; }
+.manager-scope-list button strong { color: #0f172a; font-size: 15px; font-variant-numeric: tabular-nums; }
+.manager-profile-error { margin: 0 20px 4px; }
+.notification-item { position: relative; }
+.notification-item .notification-time { align-self: flex-start; color: #94a3b8; flex-shrink: 0; font-size: 10px; font-style: normal; margin-left: auto; padding-right: 10px; }
+.popover-footer:disabled { color: #94a3b8; cursor: default; }
+.teacher-homework-response { background: #f8fafc; border-left: 3px solid #c7d2fe; border-radius: 4px; margin: 6px 0 0 !important; padding: 6px 8px; }
 
 /* Quality (phase 7): ratings, performance leaderboard, school settings, activity log */
 .lesson-rating { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 14px; }

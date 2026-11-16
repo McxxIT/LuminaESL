@@ -277,6 +277,8 @@ export type TeacherHomework = {
   dueLabel: string;
   status: TeacherHomeworkStatus;
   feedback?: string;
+  /** The student's submitted answer (shared homework). */
+  response?: string;
 };
 
 export type TeacherStudentStatus = "active" | "at-risk" | "paused";
