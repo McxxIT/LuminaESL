@@ -1,6 +1,7 @@
 # Lumina ESL - Admin & Manager Plan
 
 Status: **All phases (0-7) done** (November 16, 2026; phase 2 was done before phase 1). Remaining ideas are listed under "After the plan" at the end.
+Backend: the standalone API now lives in `backend/` (Fastify + PostgreSQL; see the root `README.md` and `PROGRESS.md`). This document stays the admin/manager product plan; the combined frontend + backend integration roadmap is `PROGRESS.md` -> "Next plan".
 Companion to `PROGRESS.md` (current state). Update both as phases land.
 
 ## 1. Decisions
@@ -9,7 +10,7 @@ Companion to `PROGRESS.md` (current state). Update both as phases land.
 | --- | --- |
 | Admin vs manager | **Two levels.** A school **admin** creates managers and assigns teachers to them. Each **manager** sees and handles only their own teachers, students, and approvals. The admin sees everything. |
 | What a "class" is | **1:1 curriculum per student.** Lessons stay 1:1 and 25 minutes. A manager enrolls a student with a teacher in a curriculum course; each booked lesson automatically gets the next lesson plan from that course. No group classes. |
-| Where data lives | **Browser storage behind a swappable layer.** Still `localStorage` for the demo, but every read/write goes through repository functions, so a real API/database can replace it later without touching screens. |
+| Where data lives | **API exists; the demo UI still uses browser storage.** `backend/` provides Fastify + PostgreSQL behind REST, and `localStorage` remains behind the swappable repository layer until the frontend cutover. |
 
 ## 2. Why the architecture has to change first
 

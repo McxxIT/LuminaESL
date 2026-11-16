@@ -1,7 +1,7 @@
 # Lumina ESL - Progress and Next Plan
 
 Last updated: November 16, 2026
-Last verified: `npm run lint` and `npx tsc --noEmit` pass; the production build passes; the Node service checks (29) and the Playwright audit flow (24) pass; every page for all four roles was swept at 1440px and 390px.
+Last verified: monorepo restructure done. `npm run typecheck` and `npm run lint` pass in both workspaces; backend tests pass (7/7); the frontend production build passes from `frontend/`; Drizzle migration applied to the local PostgreSQL 17 database; live HTTP smoke test passed for health, login, `/auth/me`, courses, credits, refresh rotation, and logout.
 
 ## Status at a glance
 
@@ -12,30 +12,74 @@ Last verified: `npm run lint` and `npx tsc --noEmit` pass; the production build 
 | Teacher role | Complete | Shared store + personal `lumina-teacher-workspace:<email>` |
 | Admin role | Complete, including Profile and Settings pages | Shared store `lumina-school:v1` + personal staff preferences |
 | Manager role | Complete, including Profile and Settings pages | Shared store `lumina-school:v1` + personal staff preferences |
+| Backend API | Running locally | PostgreSQL 17 database `lumina` |
+| Frontend -> API | Not connected yet | UI still reads/writes `lumina-school:v1` in the browser |
+
+## Repository layout
+
+The project is now an npm-workspaces monorepo:
+
+```text
+esl/
+├── frontend/     # Next.js 16 app (all UI and school domain code)
+├── backend/      # Fastify 5 REST API, Drizzle schema, seed, tests
+├── package.json  # workspaces + root scripts
+└── README.md     # setup, scripts, endpoint map
+```
+
+Frontend code paths in this document are relative to `frontend/` (for example
+`app/components/...`). Root commands run either workspace.
 
 ## Quick start
 
+Prerequisites: Node.js 22+, PostgreSQL 15+.
+
 ```powershell
+npm install
+npm run db:migrate
+npm run db:seed
 npm run dev
 ```
 
-Demo accounts (any non-empty password):
+`npm run dev` starts the web app on `http://localhost:3000` and the API on
+`http://127.0.0.1:4000`. Local env files are already created and git-ignored:
 
-| Role | Email |
-| --- | --- |
-| Admin | `admin@lumina.school` |
-| Manager (Priya Raman: Alex + Grace) | `manager@lumina.school` |
-| Manager (Marco Bianchi: Daniel + Sara) | `manager2@lumina.school` |
-| Teacher | `teacher@lumina.school` |
-| Student | `student@lumina.school` |
+- `backend/.env` - `DATABASE_URL` for the local `lumina` role/database plus a generated `JWT_SECRET`.
+- `frontend/.env.local` - `NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1`.
+
+Two separate account sets exist until the frontend is connected:
+
+| Where | Role | Email | Password |
+| --- | --- | --- | --- |
+| UI (browser store) | Admin | `admin@lumina.school` | any non-empty |
+| UI (browser store) | Manager (Priya Raman) | `manager@lumina.school` | any non-empty |
+| UI (browser store) | Manager (Marco Bianchi) | `manager2@lumina.school` | any non-empty |
+| UI (browser store) | Teacher | `teacher@lumina.school` | any non-empty |
+| UI (browser store) | Student | `student@lumina.school` | any non-empty |
+| API (seeded DB) | Admin | `admin@lumina.test` | `Password123!` |
+| API (seeded DB) | Manager | `manager@lumina.test` | `Password123!` |
+| API (seeded DB) | Teacher | `teacher@lumina.test` | `Password123!` |
+| API (seeded DB) | Student | `student@lumina.test` | `Password123!` |
 
 Verification commands:
 
 ```powershell
+npm run typecheck
 npm run lint
-npx tsc --noEmit
+npm run test
 npm run build
 ```
+
+## Monorepo and backend API (new)
+
+- **Restructure:** `app/`, `public/`, and the Next config moved to `frontend/` with `git mv` to preserve history. Root `package.json` declares `frontend` and `backend` workspaces; `package-lock.json` lives at the root.
+- **Stack:** Node 22, TypeScript, Fastify 5, PostgreSQL + Drizzle ORM, Zod validation, scrypt password hashing, JWT access token + rotating httpOnly refresh cookie, role guards, multipart uploads, Vitest.
+- **Schema:** `backend/src/db/schema.ts` (18 tables) mirrors the shared school domain: users and refresh tokens, teacher/student profiles, courses/units/lesson plans, attachments, enrollments, lessons, slot openings, requests, absences, ratings, assignments, credit ledger, activity, and settings.
+- **Migration and seed:** `backend/src/db/migrations/0000_material_jane_foster.sql` is applied; `npm run db:seed` creates the four `.test` demo users, a published course with units/plans, 12 student credits, two open slots, one assignment, and defaults.
+- **API surface** under `/api/v1`: auth, users, students, teachers, courses (units + plans), enrollments, lessons (complete + ratings), bookings (slots + book), requests (review + refund), assignments (submit + review), credits (ledger + balance), notifications, uploads, settings. `GET /health` is at the root.
+- **Business rules ported:** 25-minute lessons, credit debit on booking, one booking per open slot, role-scoped listings, teacher cancellation refund controlled by settings, and server-side role checks on every write.
+- **Tests:** `backend/tests/app.test.ts` covers health, structured 404, protected-route rejection, and body validation without touching the database; `password.test.ts` covers hashing and slot-time math.
+- **Not done yet:** no frontend code calls the API. The browser store (`app/lib/school`) remains the source of truth, and the UI still uses the `.school` accounts. `NEXT_PUBLIC_API_URL` is in place for the integration phase.
 
 ## Shared school layer (admin/manager work in progress)
 
@@ -270,19 +314,64 @@ app/lib/
 - [x] Student Profile shows the enrolled teacher instead of a fictional tutor.
 - [x] Node service tests and Playwright end-to-end checks for the audit fixes.
 - [x] Lint, TypeScript, and production build verification.
+- [x] Monorepo restructure into `frontend/` and `backend/` npm workspaces.
+- [x] Fastify 5 API with auth, role guards, and all school-domain route modules.
+- [x] PostgreSQL schema (18 tables), Drizzle migration, and reproducible seed.
+- [x] JWT access tokens, rotating httpOnly refresh cookies, and scrypt hashing.
+- [x] Backend unit tests plus a live HTTP smoke test against PostgreSQL.
 
 ## Next plan
 
-1. **Decide the on-the-spot window.** Currently 2 hours (`ON_THE_SPOT_CANCELLATION_HOURS`); many tutoring platforms use 24 hours.
-2. **Shared primitives.** Extract `StudentModal` into a shared role modal, plus shared summary cards and a shared tab bar (the 390px sweep shows tab rows overflowing their container on Curriculum, Lessons and teacher Lessons).
-3. **Ended "upcoming" lessons.** Students with an ended but still "upcoming" lesson still see Reschedule/Cancel; decide whether to hide them.
-4. **Self-service email and password changes.** Profile now handles names only; email is admin-managed and passwords are not stored. Decide whether these should become real flows.
-5. **Notification persistence.** Notifications are derived from the shared store, but read/mute state lives in each browser (`usePersonalValue`). Move both to the shared store if staff use multiple devices.
+The next milestone is frontend **and** backend work at the same time. Each item
+is a shippable slice; the joint items are the cutover gates.
+
+### Frontend track
+
+1. **API client and auth UI.** Add a typed fetch client (`app/lib/api/`), wire login/logout/refresh to `/auth/*`, keep the access token in memory, and rely on the httpOnly refresh cookie. Replace the browser account switcher; keep the local demo login behind `NEXT_PUBLIC_DEMO_MODE` until parity is proven.
+2. **School adapter cutover.** Implement `app/lib/school/adapter.ts` against the REST endpoints (users, students, teachers, courses, enrollments, lessons, bookings, requests, assignments, credits, settings) and route the existing services through it. Keep `localStorage` only as a demo/offline fallback, then remove it from the production path.
+3. **Uploads UI.** Replace IndexedDB/localStorage file storage (`files.ts`, `services/uploads.ts`) with `POST /uploads` plus the download endpoint; keep attachment IDs in lesson plans and cancellation evidence.
+4. **Notifications UI.** Feed `useNotifications` from `GET /notifications`, consume server-side read/mute state once it exists, and keep the per-role derivation until the activity log covers every event.
+5. **Carried-over UI work.** Extract the role modal, shared summary cards, and a shared tab bar (the 390px sweep still shows tab rows overflowing on Curriculum, Lessons, and teacher Lessons); decide whether ended "upcoming" lessons still show Reschedule/Cancel; decide whether email/password self-service becomes a real flow.
+
+### Backend track
+
+6. **Auth and account lifecycle.** Password reset and email verification, per-route rate limits on login/refresh, expired-refresh-token cleanup, stricter production cookie settings, and a per-environment CORS allow-list.
+7. **Domain rule parity with the store.** Close the gaps between `app/lib/school/services` and the API: advance enrollment progress when a lesson with a plan completes, enforce one rating per source per lesson, block archiving a course with enrolled students and deleting a plan attached to a lesson, record teacher absences, apply student late-cancellation refund windows from settings, and scope manager reads to their own team.
+8. **Read models and performance.** Add the joined/aggregate views the UI already computes client-side (dashboards, teacher performance, credit views), enforce pagination everywhere, and add indexes for the filters actually used.
+9. **Uploads and storage.** Put storage behind an adapter instead of local disk; add signed download URLs, type/size allow-lists, and cleanup for orphaned files.
+10. **Contract, observability, and deployment.** Generate OpenAPI from the route schemas, add contract tests against the adapter, add request IDs/structured logs/readiness probes, then ship Docker Compose for PostgreSQL + API, migrations on deploy, backups, and CI.
+
+### Joint integration and cutover
+
+11. **Align accounts and seeds.** Pick one demo account set, make the API seed and the browser seed match, and document the mapping so testers do not need two logins.
+12. **End-to-end parity suite.** Run the existing Playwright audit flow against the API-backed build, and add login, booking, cancellation/refund, homework, upload, and notification cases to CI before enabling the API path by default.
+13. **Migrate and remove duplicates.** Provide a one-time import from `lumina-school:v1`/IndexedDB, then delete duplicated seed data and the browser-store fallback once the API path is the default. Keep a documented rollback flag for one release.
+
+### Product decisions carried over
+
+14. **On-the-spot window.** Still 2 hours (`ON_THE_SPOT_CANCELLATION_HOURS`); confirm whether it should be 24.
+15. **Notification multi-device state.** Decide how read/mute state is stored per user, then implement it on the backend.
 
 ## Definition of done
 
-- Every teacher nav item renders a real screen. Met.
-- Teacher state survives refresh via `localStorage`. Met.
-- No action is toast-only unless it is genuinely a stub. Met.
-- Empty states and responsive layouts are handled. Met.
-- `npm run lint`, `npx tsc --noEmit`, and `npm run build` pass. Met.
+Frontend (met):
+
+- Every teacher nav item renders a real screen.
+- Teacher state survives refresh via `localStorage`.
+- No action is toast-only unless it is genuinely a stub.
+- Empty states and responsive layouts are handled.
+- Root `npm run typecheck`, `npm run lint`, and `npm run build` pass.
+
+Backend (met for the current scope):
+
+- Every write route validates input, and every API route enforces authentication or role guards.
+- Backend tests pass and the live smoke flow works against PostgreSQL.
+- The schema migration and seed are reproducible from a fresh database.
+- Secrets live only in git-ignored `.env` files.
+
+Next milestone (not met):
+
+- The UI authenticates through the API and reads/writes school data through it.
+- No production path depends on `lumina-school:v1` or IndexedDB attachments.
+- Uploads and notifications round-trip through the API.
+- A clean checkout can be set up from the README alone.

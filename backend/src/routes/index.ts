@@ -1,0 +1,32 @@
+import type { FastifyPluginAsync } from "fastify";
+import { assignmentRoutes } from "./assignments";
+import { authRoutes } from "./auth";
+import { bookingRoutes } from "./bookings";
+import { courseRoutes } from "./courses";
+import { creditRoutes } from "./credits";
+import { enrollmentRoutes } from "./enrollments";
+import { lessonRoutes } from "./lessons";
+import { notificationRoutes } from "./notifications";
+import { requestRoutes } from "./requests";
+import { settingsRoutes } from "./settings";
+import { studentRoutes } from "./students";
+import { teacherRoutes } from "./teachers";
+import { uploadRoutes } from "./uploads";
+import { userRoutes } from "./users";
+
+export const apiRoutes: FastifyPluginAsync = async (app) => {
+  await app.register(authRoutes, { prefix: "/auth" });
+  await app.register(userRoutes, { prefix: "/users" });
+  await app.register(studentRoutes, { prefix: "/students" });
+  await app.register(teacherRoutes, { prefix: "/teachers" });
+  await app.register(courseRoutes, { prefix: "/courses" });
+  await app.register(enrollmentRoutes, { prefix: "/enrollments" });
+  await app.register(lessonRoutes, { prefix: "/lessons" });
+  await app.register(bookingRoutes, { prefix: "/bookings" });
+  await app.register(requestRoutes, { prefix: "/requests" });
+  await app.register(assignmentRoutes, { prefix: "/assignments" });
+  await app.register(creditRoutes, { prefix: "/credits" });
+  await app.register(notificationRoutes, { prefix: "/notifications" });
+  await app.register(uploadRoutes, { prefix: "/uploads" });
+  await app.register(settingsRoutes, { prefix: "/settings" });
+};
