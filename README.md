@@ -48,6 +48,12 @@ npm run db:migrate
 npm run db:seed
 ```
 
+`frontend/.env.local` sets `NEXT_PUBLIC_API_URL`. `NEXT_PUBLIC_DEMO_MODE`
+defaults to `true` (browser-store demo login, any password). Set it to `false`
+to sign in through `POST /auth/login` and restore sessions with the httpOnly
+refresh cookie; school data still comes from the browser store until the
+adapter cutover.
+
 Run both apps:
 
 ```bash
@@ -68,6 +74,7 @@ npm run dev:api
 | `npm run db:generate` | Generates Drizzle SQL migrations |
 | `npm run db:migrate` | Applies migrations |
 | `npm run db:seed` | Seeds demo accounts and content |
+| `npm run db:reset` | **Destructive:** truncates all tables, then migrates and seeds (local only) |
 | `npm run db:studio` | Opens Drizzle Studio |
 
 ## API
@@ -97,17 +104,31 @@ Bearer <token>` header and an httpOnly refresh cookie scoped to
 
 ## Demo accounts
 
-After `npm run db:seed`, every account uses the password `Password123!`:
+The API seed and the browser demo use the same accounts. After `npm run db:seed`,
+every API account uses the password `Password123!`; the browser demo accepts any
+non-empty password.
 
-- `admin@lumina.test`
-- `manager@lumina.test`
-- `teacher@lumina.test`
-- `student@lumina.test`
+| Role | Name | Email |
+| --- | --- | --- |
+| Admin | Jamie Smith | `admin@lumina.school` |
+| Manager | Priya Raman | `manager@lumina.school` |
+| Manager | Marco Bianchi | `manager2@lumina.school` |
+| Teacher | Alex Johnson | `teacher@lumina.school` |
+| Student | Mia Chen | `student@lumina.school` |
+
+The API seed creates these identities and their profile links only. The full
+roster, courses, lessons, and history arrive with the data-adapter cutover
+(`frontend/PROGRESS.md`).
+
+`npm run db:reset` is destructive: it truncates every Lumina table, then runs
+migrations and the seed. It refuses to run when `NODE_ENV=production`.
 
 ## Notes
 
-- The frontend still uses its browser-side store (`frontend/app/lib/school`).
-  Point it at `NEXT_PUBLIC_API_URL` and replace the store adapter module by
-  module as endpoints come online.
+- The frontend authenticates through `/auth/*` when `NEXT_PUBLIC_DEMO_MODE=false`
+  (access token in memory, refresh cookie httpOnly). School data still comes from
+  the browser-side store (`frontend/app/lib/school`); point it at
+  `NEXT_PUBLIC_API_URL` and replace the store adapter module by module as
+  endpoints come online.
 - `uploads/` is git-ignored; files are stored on the API host for local
   development. Swap the upload service for object storage before production.

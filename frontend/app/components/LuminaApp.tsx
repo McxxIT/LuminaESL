@@ -8,6 +8,9 @@ import TeacherDashboard from "./teacher/TeacherDashboard";
 import StudentDashboard from "./student/StudentDashboard";
 import NotificationPanel, { type AppNotification } from "./NotificationPanel";
 import { useNotifications } from "../lib/hooks/useNotifications";
+import { useAuth } from "../lib/hooks/useAuth";
+import { accountForUser, restoreSession, signOut } from "../lib/auth/session";
+import { isDemoMode } from "../lib/auth/mode";
 import { adminNavItems, managerNavItems, studentNavItems, teacherNavItems } from "../lib/data";
 import { friendlyRole, initials } from "../lib/student";
 import type { Account } from "../lib/types";
@@ -16,28 +19,48 @@ type ModalName = "help" | "logout" | null;
 
 export default function LuminaApp() {
   const [account, setAccount] = useState<Account | null>(null);
+  const [booting, setBooting] = useState(() => !isDemoMode());
   const [activeNav, setActiveNav] = useState("Overview");
   const [notice, setNotice] = useState("");
   const [studentCredits, setStudentCredits] = useState(24.5);
   const [openPopover, setOpenPopover] = useState<"notifications" | null>(null);
   const [modal, setModal] = useState<ModalName>(null);
-  const { notifications, unreadCount, markRead, markAllRead } = useNotifications(account);
+  const { user: authUser } = useAuth();
+  const effectiveAccount = isDemoMode() ? account : authUser ? accountForUser(authUser) : null;
+  const { notifications, unreadCount, markRead, markAllRead } = useNotifications(effectiveAccount);
   const noticeTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("lumina-account");
-    const restore = window.setTimeout(() => {
-      if (!stored) return;
-      try {
-        const parsed = JSON.parse(stored) as Account;
-        if (parsed.email && parsed.role && parsed.name) {
-          setAccount(parsed);
+    if (isDemoMode()) {
+      const stored = window.localStorage.getItem("lumina-account");
+      const restore = window.setTimeout(() => {
+        if (!stored) return;
+        try {
+          const parsed = JSON.parse(stored) as Account;
+          if (parsed.email && parsed.role && parsed.name) {
+            setAccount(parsed);
+          }
+        } catch {
+          window.localStorage.removeItem("lumina-account");
         }
-      } catch {
-        window.localStorage.removeItem("lumina-account");
-      }
-    }, 0);
-    return () => window.clearTimeout(restore);
+      }, 0);
+      return () => window.clearTimeout(restore);
+    }
+
+    let cancelled = false;
+    restoreSession()
+      .then(() => {
+        if (!cancelled) window.localStorage.removeItem("lumina-account");
+      })
+      .catch(() => {
+        if (!cancelled) window.localStorage.removeItem("lumina-account");
+      })
+      .finally(() => {
+        if (!cancelled) setBooting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -75,12 +98,19 @@ export default function LuminaApp() {
   }
 
   function logout() {
-    setAccount(null);
-    setActiveNav("Overview");
-    setStudentCredits(24.5);
-    window.localStorage.removeItem("lumina-account");
-    setOpenPopover(null);
-    setModal(null);
+    const finish = () => {
+      setAccount(null);
+      setActiveNav("Overview");
+      setStudentCredits(24.5);
+      window.localStorage.removeItem("lumina-account");
+      setOpenPopover(null);
+      setModal(null);
+    };
+    if (isDemoMode()) {
+      finish();
+      return;
+    }
+    void signOut().finally(finish);
   }
 
   function navigate(page: string) {
@@ -102,11 +132,16 @@ export default function LuminaApp() {
     navigate("Settings");
   }
 
-  if (!account) return <LoginScreen onLogin={login} />;
+  if (booting) return <main className="auth-shell"><section className="auth-card">
+    <div className="auth-brand"><div className="brand-mark">L</div><strong>Lumina <span>ESL</span></strong></div>
+    <div className="auth-heading"><p className="eyebrow">WELCOME BACK</p><h1>Restoring your session</h1><p>Checking your Lumina account.</p></div>
+  </section></main>;
 
-  const roleNavItems = { student: studentNavItems, teacher: teacherNavItems, manager: managerNavItems, admin: adminNavItems }[account.role];
-  const roleLabel = friendlyRole(account.role);
-  const accountInitials = initials(account.name);
+  if (!effectiveAccount) return <LoginScreen onLogin={login} />;
+
+  const roleNavItems = { student: studentNavItems, teacher: teacherNavItems, manager: managerNavItems, admin: adminNavItems }[effectiveAccount.role];
+  const roleLabel = friendlyRole(effectiveAccount.role);
+  const accountInitials = initials(effectiveAccount.name);
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -122,7 +157,7 @@ export default function LuminaApp() {
         <button type="button" className="nav-item logout-nav" onClick={() => setModal("logout")}><Icon name="logout" /><span>Log out</span></button>
         <button type="button" className={`profile-card profile-card-button ${activeNav === "Profile" ? "active" : ""}`} onClick={openProfile} aria-label="Open profile" aria-current={activeNav === "Profile" ? "page" : undefined}>
           <div className="avatar avatar-indigo">{accountInitials}</div>
-          <div><strong>{account.name}</strong><small>{roleLabel}</small></div>
+          <div><strong>{effectiveAccount.name}</strong><small>{roleLabel}</small></div>
           <span className="profile-card-more"><Icon name="user" size={16} /></span>
         </button>
       </div>
@@ -132,7 +167,7 @@ export default function LuminaApp() {
       <header className="topbar">
         <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{activeNav}</strong></div>
         <div className="topbar-actions">
-          {account.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} hrs</strong></button>}
+          {effectiveAccount.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} hrs</strong></button>}
           <div className="popover-anchor">
             <button type="button" className="icon-button notification-button" aria-label="Notifications" onClick={() => setOpenPopover(openPopover === "notifications" ? null : "notifications")}><Icon name="bell" /><span className={`notification-dot ${unreadCount > 0 ? "" : "hidden-dot"}`} /></button>
             {openPopover === "notifications" && <NotificationPanel notifications={notifications} onOpen={openNotification} onMarkAllRead={markAllRead} onClose={() => setOpenPopover(null)} />}
@@ -140,11 +175,11 @@ export default function LuminaApp() {
         </div>
       </header>
       <div className="content-wrap">
-        {account.role === "admin" || account.role === "manager"
-          ? <ManagerWorkspace account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
-          : account.role === "teacher"
-            ? <TeacherDashboard account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
-            : <StudentDashboard account={account} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onCreditChange={setStudentCredits} onRequestLogout={() => setModal("logout")} />}
+        {effectiveAccount.role === "admin" || effectiveAccount.role === "manager"
+          ? <ManagerWorkspace account={effectiveAccount} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
+          : effectiveAccount.role === "teacher"
+            ? <TeacherDashboard account={effectiveAccount} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onRequestLogout={() => setModal("logout")} />
+            : <StudentDashboard account={effectiveAccount} activeNav={activeNav} onNavigate={navigate} onNotice={showNotice} onUpdateAccount={updateAccount} onCreditChange={setStudentCredits} onRequestLogout={() => setModal("logout")} />}
       </div>
     </main>
 

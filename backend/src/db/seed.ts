@@ -54,28 +54,34 @@ async function upsertUser(input: {
 
 async function main() {
   const admin = await upsertUser({
-    name: "Ava Admin",
-    email: "admin@lumina.test",
+    name: "Jamie Smith",
+    email: "admin@lumina.school",
     role: "admin",
-    avatarColor: "#0f766e",
+    avatarColor: "#6366f1",
   });
   const manager = await upsertUser({
-    name: "Mila Manager",
-    email: "manager@lumina.test",
+    name: "Priya Raman",
+    email: "manager@lumina.school",
     role: "manager",
-    avatarColor: "#7c3aed",
+    avatarColor: "#8b5cf6",
+  });
+  await upsertUser({
+    name: "Marco Bianchi",
+    email: "manager2@lumina.school",
+    role: "manager",
+    avatarColor: "#10b981",
   });
   const teacher = await upsertUser({
-    name: "Theo Teacher",
-    email: "teacher@lumina.test",
+    name: "Alex Johnson",
+    email: "teacher@lumina.school",
     role: "teacher",
-    avatarColor: "#2563eb",
+    avatarColor: "#f97316",
   });
   const student = await upsertUser({
-    name: "Sara Student",
-    email: "student@lumina.test",
+    name: "Mia Chen",
+    email: "student@lumina.school",
     role: "student",
-    avatarColor: "#db2777",
+    avatarColor: "#6366f1",
   });
 
   await db
@@ -83,12 +89,17 @@ async function main() {
     .values({
       userId: teacher.id,
       managerId: manager.id,
-      headline: "Conversation and exam-prep coach",
-      specializations: ["IELTS", "Business English"],
-      languages: ["English", "Filipino"],
-      bio: "Demo teacher account.",
-      hireDate: isoDate(-180),
-      weeklyGoalHours: 20,
+      headline: "Business English and conversation coach",
+      specializations: [
+        "Business English",
+        "Conversation",
+        "Pronunciation",
+        "Interview preparation",
+      ],
+      languages: ["English", "Mandarin Chinese", "Spanish"],
+      bio: "I help ambitious professionals sound clear, calm, and confident in English. My lessons blend real workplace scenarios with focused correction, so students leave with language they can use the same day.",
+      hireDate: "2023-01-09",
+      weeklyGoalHours: 24,
     })
     .onConflictDoNothing({ target: teacherProfiles.userId });
 
@@ -97,11 +108,12 @@ async function main() {
     .values({
       userId: student.id,
       managerId: manager.id,
-      level: "intermediate",
-      targetLevel: "advanced",
-      goal: "Speak confidently in weekly team meetings.",
-      guardianName: "Pat Parent",
-      guardianEmail: "parent@lumina.test",
+      level: "B1 Intermediate",
+      targetLevel: "B2 Upper intermediate",
+      goal: "Lead client meetings with confidence",
+      guardianName: "Wei Chen",
+      guardianEmail: "wei.chen@example.com",
+      guardianRelationship: "Parent",
     })
     .onConflictDoNothing({ target: studentProfiles.userId });
 
@@ -226,8 +238,11 @@ async function main() {
 
   console.log("Seed complete.");
   console.log("Demo accounts (password: Password123!):");
-  console.log("  admin@lumina.test / manager@lumina.test");
-  console.log("  teacher@lumina.test / student@lumina.test");
+  console.log("  admin@lumina.school (Jamie Smith)");
+  console.log("  manager@lumina.school (Priya Raman)");
+  console.log("  manager2@lumina.school (Marco Bianchi)");
+  console.log("  teacher@lumina.school (Alex Johnson)");
+  console.log("  student@lumina.school (Mia Chen)");
   console.log(`Course id: ${courseId ?? "existing"}`);
 }
 
