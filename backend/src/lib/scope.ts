@@ -2,13 +2,14 @@ import { eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "../db/schema";
 import {
+  courses,
   enrollments,
   lessons,
   studentProfiles,
   teacherProfiles,
   users,
 } from "../db/schema";
-import { forbidden } from "./errors";
+import { forbidden, notFound } from "./errors";
 import type { TokenPayload } from "../types/fastify";
 
 export type Db = PostgresJsDatabase<typeof schema>;
@@ -123,6 +124,28 @@ export async function managerOwnsStudent(
   if (profile?.managerId === managerId) return true;
   const team = await managerTeam(db, managerId);
   return team.studentIds.includes(studentId);
+}
+
+/**
+ * Course write guard mirroring `canEditCourse` in
+ * `frontend/app/lib/school/services/curriculum.ts`: admins edit every course,
+ * managers only the courses they own.
+ */
+export async function assertCourseEditable(
+  db: Db,
+  actor: TokenPayload,
+  courseId: string,
+) {
+  const [course] = await db
+    .select({ ownerId: courses.ownerId })
+    .from(courses)
+    .where(eq(courses.id, courseId))
+    .limit(1);
+  if (!course) throw notFound("Course not found");
+  if (actor.role === "admin" || course.ownerId === actor.sub) return;
+  throw forbidden(
+    "Only the course owner or the school admin can change this course. Duplicate it to make your own version.",
+  );
 }
 
 /**

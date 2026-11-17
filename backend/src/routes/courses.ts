@@ -21,6 +21,8 @@ import {
 } from "../db/schema";
 import { badRequest, conflict, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import { assertCourseEditable } from "../lib/scope";
+import type { TokenPayload } from "../types/fastify";
 
 const idParams = z.object({ id: z.string().uuid() });
 const unitParams = z.object({
@@ -83,13 +85,26 @@ const attachmentSchema = z.object({
   storageKey: z.string().trim().min(1).max(500),
 });
 
-async function ensureCourse(app: FastifyInstance, id: string) {
-  const [course] = await app.db
-    .select({ id: courses.id })
-    .from(courses)
-    .where(eq(courses.id, id))
+/** Resolve a plan's owning course and enforce the owner/admin write rule. */
+async function assertPlanEditable(
+  app: FastifyInstance,
+  actor: TokenPayload,
+  unitId: string,
+  planId: string,
+) {
+  const [plan] = await app.db
+    .select({
+      id: lessonPlans.id,
+      unitId: lessonPlans.unitId,
+      courseId: courseUnits.courseId,
+    })
+    .from(lessonPlans)
+    .innerJoin(courseUnits, eq(courseUnits.id, lessonPlans.unitId))
+    .where(and(eq(lessonPlans.id, planId), eq(lessonPlans.unitId, unitId)))
     .limit(1);
-  if (!course) throw notFound("Course not found");
+  if (!plan) throw notFound("Lesson plan not found");
+  await assertCourseEditable(app.db, actor, plan.courseId);
+  return plan;
 }
 
 /** `plansForCourse` in the browser store: every plan under the course's units. */
@@ -265,7 +280,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         throw badRequest("No fields to update");
       }
 
-      await ensureCourse(app, id);
+      await assertCourseEditable(app.db, request.user, id);
       if (body.status === "published") {
         await assertCoursePublishable(app, id);
       }
@@ -298,7 +313,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
       const { id } = idParams.parse(request.params);
-      await ensureCourse(app, id);
+      await assertCourseEditable(app.db, request.user, id);
       await assertCourseArchivable(app, id);
       const [archived] = await app.db
         .update(courses)
@@ -317,6 +332,8 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParams.parse(request.params);
       const [source] = await app.db.select().from(courses).where(eq(courses.id, id)).limit(1);
       if (!source) throw notFound("Course not found");
+      // Any manager may duplicate a visible course; the copy is owned by the actor.
+      // Delete/update stay owner-only, like `canEditCourse` in the browser store.
       const copy = await app.db.transaction(async (tx) => {
         const [created] = await tx.insert(courses).values({
           title: `${source.title} (Copy)`, level: source.level, summary: source.summary,
@@ -346,7 +363,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const { id } = idParams.parse(request.params);
       const body = createUnitSchema.parse(request.body);
-      await ensureCourse(app, id);
+      await assertCourseEditable(app.db, request.user, id);
 
       const [maxRow] = await app.db
         .select({
@@ -374,11 +391,19 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     "/:id/units/:unitId",
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
-      const { unitId } = unitParams.parse(request.params);
+      const { id, unitId } = unitParams.parse(request.params);
       const body = updateUnitSchema.parse(request.body);
       if (Object.keys(body).length === 0) {
         throw badRequest("No fields to update");
       }
+
+      const [unit] = await app.db
+        .select({ courseId: courseUnits.courseId })
+        .from(courseUnits)
+        .where(eq(courseUnits.id, unitId))
+        .limit(1);
+      if (!unit || unit.courseId !== id) throw notFound("Unit not found");
+      await assertCourseEditable(app.db, request.user, id);
 
       const [updated] = await app.db
         .update(courseUnits)
@@ -406,6 +431,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(courseUnits.id, unitId))
         .limit(1);
       if (!unit || unit.courseId !== id) throw notFound("Unit not found");
+      await assertCourseEditable(app.db, request.user, id);
 
       const [planRow] = await app.db
         .select({ value: sql<number>`count(*)::int` })
@@ -436,15 +462,16 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     "/:id/units/:unitId/plans",
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request, reply) => {
-      const { unitId } = unitParams.parse(request.params);
+      const { id, unitId } = unitParams.parse(request.params);
       const body = createPlanSchema.parse(request.body);
 
       const [unit] = await app.db
-        .select({ id: courseUnits.id })
+        .select({ id: courseUnits.id, courseId: courseUnits.courseId })
         .from(courseUnits)
         .where(eq(courseUnits.id, unitId))
         .limit(1);
-      if (!unit) throw notFound("Unit not found");
+      if (!unit || unit.courseId !== id) throw notFound("Unit not found");
+      await assertCourseEditable(app.db, request.user, id);
 
       const [maxRow] = await app.db
         .select({
@@ -478,11 +505,13 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     "/:id/units/:unitId/plans/:planId",
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
-      const { planId } = planParams.parse(request.params);
+      const { unitId, planId } = planParams.parse(request.params);
       const body = updatePlanSchema.parse(request.body);
       if (Object.keys(body).length === 0) {
         throw badRequest("No fields to update");
       }
+
+      await assertPlanEditable(app, request.user, unitId, planId);
 
       const [updated] = await app.db
         .update(lessonPlans)
@@ -511,14 +540,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     async (request) => {
       const { unitId, planId } = planParams.parse(request.params);
 
-      const [plan] = await app.db
-        .select({ id: lessonPlans.id, unitId: lessonPlans.unitId })
-        .from(lessonPlans)
-        .where(eq(lessonPlans.id, planId))
-        .limit(1);
-      if (!plan || plan.unitId !== unitId) {
-        throw notFound("Lesson plan not found");
-      }
+      await assertPlanEditable(app, request.user, unitId, planId);
 
       const [usedRow] = await app.db
         .select({ value: sql<number>`count(*)::int` })
@@ -546,6 +568,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     async (request) => {
       const { unitId, planId } = planParams.parse(request.params);
       const body = attachmentSchema.parse(request.body);
+      await assertPlanEditable(app, request.user, unitId, planId);
       const [plan] = await app.db.select().from(lessonPlans).where(and(eq(lessonPlans.id, planId), eq(lessonPlans.unitId, unitId))).limit(1);
       if (!plan) throw notFound("Lesson plan not found");
       await app.db.insert(attachments).values({ ...body, uploadedBy: request.user.sub }).onConflictDoNothing();
@@ -560,6 +583,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
       const { unitId, planId, attachmentId } = attachmentParams.parse(request.params);
+      await assertPlanEditable(app, request.user, unitId, planId);
       const [plan] = await app.db.select().from(lessonPlans).where(and(eq(lessonPlans.id, planId), eq(lessonPlans.unitId, unitId))).limit(1);
       if (!plan) throw notFound("Lesson plan not found");
       const [updated] = await app.db.update(lessonPlans).set({ attachmentIds: plan.attachmentIds.filter((id) => id !== attachmentId), updatedAt: new Date() }).where(eq(lessonPlans.id, planId)).returning();

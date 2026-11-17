@@ -1,6 +1,7 @@
 # Lumina ESL - Frontend/Backend Cutover Plan
 
-Status: **Step A done. Step B (data adapter cutover) complete; Step B3 is next.**
+Status: **Step A done. Step B (data adapter cutover) complete; B3 domain slices in progress.**
+
 Companion to `PROGRESS.md` (current app state) and `ADMIN_PLAN.md` (admin/manager
 product plan). This file is the file-level execution plan for connecting the
 Next.js frontend to the Fastify/PostgreSQL API. Day-to-day status lives in
@@ -44,6 +45,7 @@ one login and one dataset to test against.
 | Write path | Services call REST commands, then refresh the cache. Start with a bootstrap after each successful write (correct, slower); optimise to patch the cache from the response later. |
 | Sync to async | Services become `Promise<ServiceResult>` because REST is async. Call sites add `await`; screens keep the same toast/error handling. Do this per domain slice, not as one big-bang. |
 | Authoritative write | The API response wins. A failed call changes nothing; the cache is never the only copy of a write. |
+| Course writes | Mirrors `canEditCourse`: admins edit every course, managers only the courses they own, and any manager may duplicate a visible course into their own draft. |
 
 ## Step B - Data adapter cutover
 
@@ -118,7 +120,7 @@ credits, homework, quality/absence, profile/notifications.
 | Settings | `quality.updateSchoolSettings` | `GET/PATCH /settings` | Admin-only write; already guarded. |
 | People | `people.ts` | `GET/POST /users`, `PATCH /users/:id`, `GET/PATCH /teachers/:id`, `GET/PATCH /students/:id` | Manager team scoping on reads (B0.2). |
 | Profile name | `profile.updateMyName` | `PATCH /users/:id` | Self-only; already guarded. |
-| Curriculum | `curriculum.ts` | `/courses` CRUD, `/courses/:id/units`, `/courses/:id/units/:unitId/plans` | Archive/delete rules (B0.2); owner-vs-admin edit scope still open. |
+| Curriculum | `curriculum.ts` | `/courses` CRUD, `/courses/:id/units`, `/courses/:id/units/:unitId/plans` | Archive/delete rules (B0.2) and owner-only edits landed in B3; duplicate stays open to any manager. |
 | Enrollments | `people.enrollStudent` | `GET/POST /enrollments`, `PATCH /enrollments/:id` | Progress advance on completion (B0.2). |
 | Bookings / slots | `bookings.ts`, `teaching.openSlot` | `GET/POST/DELETE /bookings/slots`, `POST /bookings` | Student cancellation route missing (B0.2); rebook/reschedule mapping still open. |
 | Lessons / teaching | `teaching.ts` | `GET/PATCH /lessons/:id`, `POST /lessons/:id/complete` | Absence route missing (B0.2). |
