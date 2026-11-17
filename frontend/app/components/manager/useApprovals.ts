@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { useSchool } from "../../lib/hooks/useSchool";
 import { lessonById, nameOf, pendingRequestsForUser, toTeacherLessonView, type SchoolData, type SchoolUser } from "../../lib/school";
-import { reviewRequest, type ReviewDecision, type ServiceResult } from "../../lib/school/services";
+import { reviewRequest, type ReviewDecision, type ServiceCall } from "../../lib/school/services";
 import type { TeacherLesson, TeacherSlotClosure } from "../../lib/types";
 
 type PendingCancellation = TeacherLesson & { requestId: string; teacherName: string };
@@ -33,11 +33,11 @@ export function useApprovals(user: SchoolUser | undefined) {
   const select = useCallback((data: SchoolData) => selectApprovals(data, user), [user]);
   const { closures, cancellations } = useSchool(select);
 
-  const reviewClosure = useCallback((requestId: string, decision: ReviewDecision, note: string): ServiceResult => (
+  const reviewClosure = useCallback((requestId: string, decision: ReviewDecision, note: string): ServiceCall => (
     user ? reviewRequest(user.id, requestId, decision, note) : { ok: false, error: "Sign in again to review requests." }
   ), [user]);
 
-  const reviewCancellation = useCallback((lessonId: string, decision: ReviewDecision, note: string): ServiceResult => {
+  const reviewCancellation = useCallback((lessonId: string, decision: ReviewDecision, note: string): ServiceCall => {
     const request = cancellations.find((item) => item.id === lessonId);
     if (!user || !request) return { ok: false, error: "That request is no longer pending." };
     return reviewRequest(user.id, request.requestId, decision, note);

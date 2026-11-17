@@ -10,6 +10,7 @@ import {
   ratings,
   settings,
   studentProfiles,
+  slotOpenings,
   users,
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
@@ -34,6 +35,7 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z
   .string()
   .refine(isValidClockTime, "Time must be in HH:MM 24-hour format");
+const rebookSchema = z.object({ date: dateSchema, time: timeSchema });
 
 const listQuerySchema = z.object({
   from: dateSchema.optional(),
@@ -392,6 +394,39 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       if (!updated) throw notFound("Lesson not found");
 
       return updated;
+    },
+  );
+
+  app.post(
+    "/:id/rebook",
+    { preHandler: app.requireRole(["admin", "manager", "student"]) },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const body = rebookSchema.parse(request.body);
+      const [original] = await app.db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
+      if (!original) throw notFound("Lesson not found");
+      if (request.user.role === "student" && original.studentId !== request.user.sub) throw forbidden();
+      if (request.user.role === "manager" && !(await managerOwnsStudent(app.db, request.user.sub, original.studentId))) throw forbidden();
+      if (original.status !== "scheduled") throw badRequest("Only scheduled lessons can be rebooked");
+
+      const result = await app.db.transaction(async (tx) => {
+        const [slot] = await tx.select().from(slotOpenings).where(and(eq(slotOpenings.teacherId, original.teacherId), eq(slotOpenings.date, body.date), eq(slotOpenings.time, body.time))).limit(1);
+        if (!slot) throw badRequest("That time is not open for booking");
+        const [balance] = await tx.select({ value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)` }).from(creditEntries).where(eq(creditEntries.studentId, original.studentId));
+        if ((balance?.value ?? 0) < 1) throw badRequest("The student does not have enough credits");
+        const [created] = await tx.insert(lessons).values({
+          teacherId: original.teacherId, studentId: original.studentId, enrollmentId: original.enrollmentId,
+          date: body.date, time: body.time, endTime: addMinutes(body.time, LESSON_MINUTES),
+          title: original.title, focus: original.focus, roomCode: original.roomCode,
+          lessonPlanId: original.lessonPlanId, createdBy: request.user.sub,
+        }).returning();
+        if (!created) throw new Error("Failed to rebook lesson");
+        await tx.delete(slotOpenings).where(eq(slotOpenings.id, slot.id));
+        await tx.insert(creditEntries).values({ studentId: original.studentId, hours: -1, reason: "booking", description: `${original.title} lesson`, lessonId: created.id, actorId: request.user.sub });
+        return created;
+      });
+      reply.status(201);
+      return result;
     },
   );
 

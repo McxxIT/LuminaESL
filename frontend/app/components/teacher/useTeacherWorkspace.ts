@@ -198,22 +198,22 @@ export default function useTeacherWorkspace(account: Account) {
     setPersonal((current) => ({ ...current, settings }));
   }, []);
 
-  const openSlot = useCallback((date: string, time: string) => teacherId ? openSlotService(teacherId, date, time) : notSignedIn, [teacherId]);
-  const requestSlotClosure = useCallback((date: string, time: string, reason: string) => teacherId ? requestSlotClosureService(teacherId, date, time, reason) : notSignedIn, [teacherId]);
-  const cancelSlotClosureRequest = useCallback((date: string, time: string) => teacherId ? withdrawSlotClosure(teacherId, date, time) : notSignedIn, [teacherId]);
+  const openSlot = useCallback((date: string, time: string) => teacherId ? openSlotService(teacherId, date, time) : Promise.resolve(notSignedIn), [teacherId]);
+  const requestSlotClosure = useCallback((date: string, time: string, reason: string) => teacherId ? requestSlotClosureService(teacherId, date, time, reason) : Promise.resolve(notSignedIn), [teacherId]);
+  const cancelSlotClosureRequest = useCallback((date: string, time: string) => teacherId ? withdrawSlotClosure(teacherId, date, time) : Promise.resolve(notSignedIn), [teacherId]);
 
   const addLesson = useCallback((input: AddTeacherLessonInput) => {
-    if (!teacherId) return notSignedIn;
+    if (!teacherId) return Promise.resolve(notSignedIn);
     return scheduleLessonForStudent(teacherId, { teacherId, studentId: input.studentId, date: input.date, time: input.time, title: input.title, focus: input.focus, notes: input.notes });
   }, [teacherId]);
 
-  const requestLessonCancellation = useCallback((id: string, input: CancelLessonRequestInput) => teacherId ? requestLessonCancellationService(teacherId, id, input) : notSignedIn, [teacherId]);
-  const withdrawLessonCancellationRequest = useCallback((id: string) => teacherId ? withdrawLessonCancellation(teacherId, id) : notSignedIn, [teacherId]);
+  const requestLessonCancellation = useCallback((id: string, input: CancelLessonRequestInput) => teacherId ? requestLessonCancellationService(teacherId, id, input) : Promise.resolve(notSignedIn), [teacherId]);
+  const withdrawLessonCancellationRequest = useCallback((id: string) => teacherId ? withdrawLessonCancellation(teacherId, id) : Promise.resolve(notSignedIn), [teacherId]);
 
-  const completeLesson = useCallback((id: string, input: CompleteLessonInput) => {
+  const completeLesson = useCallback(async (id: string, input: CompleteLessonInput) => {
     if (!teacherId) return notSignedIn;
     const studentId = state.lessons.find((lesson) => lesson.id === id)?.studentId;
-    const result = completeLessonService(teacherId, id, input);
+    const result = await completeLessonService(teacherId, id, input);
     // Keep this teacher's private roster counters in step, as before.
     if (result.ok && result.value.firstCompletion && studentId) {
       const attended = input.attendance === "attended";

@@ -1,10 +1,14 @@
 import { createLocalStorageAdapter, type StorageAdapter } from "./adapter";
+import { isApiDataMode } from "../auth/mode";
 import { migrateLegacyWorkspaces } from "./migrate";
 import { createSeedSchool, defaultSchoolSettings } from "./seed";
 import { SCHOOL_SCHEMA_VERSION, type SchoolData } from "./types";
 
 export const SCHOOL_STORAGE_KEY = "lumina-school:v1";
 export { SCHOOL_SCHEMA_VERSION };
+
+/** `local` keeps the browser store; `api` hydrates it from `GET /school/bootstrap`. */
+export type SchoolDataSource = "local" | "api";
 
 export function createEmptySchool(): SchoolData {
   return {
@@ -38,6 +42,7 @@ const SERVER_SNAPSHOT: SchoolData = createEmptySchool();
 let adapter: StorageAdapter = createLocalStorageAdapter(SCHOOL_STORAGE_KEY);
 /** True until `configureSchoolStore` swaps in another adapter; the default one needs a browser. */
 let adapterIsBrowserDefault = true;
+let dataSource: SchoolDataSource = isApiDataMode() ? "api" : "local";
 let snapshot: SchoolData | null = null;
 let detachAdapter: (() => void) | null = null;
 const listeners = new Set<() => void>();
@@ -62,6 +67,12 @@ function upgrade(data: SchoolData | null): SchoolData | null {
 
 function ensureLoaded(): SchoolData {
   if (snapshot) return snapshot;
+  // API mode starts empty; `bootstrap.ts` fills it from the server (or its cache).
+  // Never fall back to the demo seed, so no screen shows another school's records.
+  if (dataSource === "api") {
+    snapshot = createEmptySchool();
+    return snapshot;
+  }
   const stored = upgrade(adapter.load());
   snapshot = stored ?? createSeedSchool();
   let changed = !stored;
@@ -112,16 +123,36 @@ export function updateSchool<T>(mutator: (draft: SchoolData) => T): T {
   const draft = structuredClone(ensureLoaded());
   const result = mutator(draft);
   snapshot = draft;
-  adapter.save(draft);
+  // In API mode the server is the source of truth; writes land in B2. Do not
+  // overwrite the offline cache with browser-only edits.
+  if (dataSource === "local") adapter.save(draft);
   emit();
   return result;
+}
+
+/**
+ * Replace the snapshot with data fetched from the API (or its offline cache).
+ * Unlike `updateSchool` this is always persisted, so the last good payload can
+ * be used the next time the API is unreachable.
+ */
+export function hydrateSchool(data: SchoolData): SchoolData {
+  snapshot = data;
+  adapter.save(data);
+  emit();
+  return data;
+}
+
+/** Drop the in-memory snapshot (sign out) without touching the offline cache. */
+export function clearSchoolSnapshot() {
+  snapshot = createEmptySchool();
+  emit();
 }
 
 /** Wipe and re-seed the demo school (used by "Reset demo" actions and tests). */
 export function resetSchool(seed: SchoolData = createSeedSchool()) {
   ensureLoaded();
   snapshot = seed;
-  adapter.save(seed);
+  if (dataSource === "local") adapter.save(seed);
   emit();
   return seed;
 }
@@ -132,5 +163,14 @@ export function configureSchoolStore(next: StorageAdapter) {
   detachAdapter = null;
   adapter = next;
   adapterIsBrowserDefault = false;
+  snapshot = null;
+}
+
+/** Switch read source (tests, or an env-driven setup). Drops the cached snapshot. */
+export function configureSchoolDataSource(next: SchoolDataSource) {
+  if (next === dataSource) return;
+  detachAdapter?.();
+  detachAdapter = null;
+  dataSource = next;
   snapshot = null;
 }

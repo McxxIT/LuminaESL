@@ -13,6 +13,7 @@ import { z } from "zod";
 import {
   courseUnits,
   courses,
+  attachments,
   enrollments,
   lessonPlans,
   lessons,
@@ -30,6 +31,7 @@ const planParams = z.object({
   unitId: z.string().uuid(),
   planId: z.string().uuid(),
 });
+const attachmentParams = planParams.extend({ attachmentId: z.string().uuid() });
 
 const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
@@ -73,6 +75,13 @@ const createPlanSchema = z.object({
 });
 
 const updatePlanSchema = createPlanSchema.partial();
+const attachmentSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(255),
+  type: z.string().trim().min(1).max(120),
+  size: z.number().int().nonnegative(),
+  storageKey: z.string().trim().min(1).max(500),
+});
 
 async function ensureCourse(app: FastifyInstance, id: string) {
   const [course] = await app.db
@@ -302,6 +311,36 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
   );
 
   app.post(
+    "/:id/duplicate",
+    { preHandler: app.requireRole(["admin", "manager"]) },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const [source] = await app.db.select().from(courses).where(eq(courses.id, id)).limit(1);
+      if (!source) throw notFound("Course not found");
+      const copy = await app.db.transaction(async (tx) => {
+        const [created] = await tx.insert(courses).values({
+          title: `${source.title} (Copy)`, level: source.level, summary: source.summary,
+          objectives: source.objectives, status: "draft", ownerId: request.user.sub,
+        }).returning();
+        if (!created) throw new Error("Failed to duplicate course");
+        const units = await tx.select().from(courseUnits).where(eq(courseUnits.courseId, id)).orderBy(asc(courseUnits.order));
+        for (const unit of units) {
+          const [newUnit] = await tx.insert(courseUnits).values({ courseId: created.id, title: unit.title, order: unit.order }).returning();
+          if (!newUnit) continue;
+          const plans = await tx.select().from(lessonPlans).where(eq(lessonPlans.unitId, unit.id)).orderBy(asc(lessonPlans.order));
+          if (plans.length) await tx.insert(lessonPlans).values(plans.map((plan) => ({
+            unitId: newUnit.id, order: plan.order, title: plan.title, focus: plan.focus,
+            summary: plan.summary, sections: plan.sections, attachmentIds: plan.attachmentIds,
+          })));
+        }
+        return created;
+      });
+      reply.status(201);
+      return copy;
+    },
+  );
+
+  app.post(
     "/:id/units",
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request, reply) => {
@@ -498,6 +537,33 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         .returning({ id: lessonPlans.id });
       if (!deleted) throw notFound("Lesson plan not found");
       return { id: deleted.id, deleted: true };
+    },
+  );
+
+  app.post(
+    "/:id/units/:unitId/plans/:planId/attachments",
+    { preHandler: app.requireRole(["admin", "manager"]) },
+    async (request) => {
+      const { unitId, planId } = planParams.parse(request.params);
+      const body = attachmentSchema.parse(request.body);
+      const [plan] = await app.db.select().from(lessonPlans).where(and(eq(lessonPlans.id, planId), eq(lessonPlans.unitId, unitId))).limit(1);
+      if (!plan) throw notFound("Lesson plan not found");
+      await app.db.insert(attachments).values({ ...body, uploadedBy: request.user.sub }).onConflictDoNothing();
+      const ids = plan.attachmentIds.includes(body.id) ? plan.attachmentIds : [...plan.attachmentIds, body.id];
+      const [updated] = await app.db.update(lessonPlans).set({ attachmentIds: ids, updatedAt: new Date() }).where(eq(lessonPlans.id, planId)).returning();
+      return updated;
+    },
+  );
+
+  app.delete(
+    "/:id/units/:unitId/plans/:planId/attachments/:attachmentId",
+    { preHandler: app.requireRole(["admin", "manager"]) },
+    async (request) => {
+      const { unitId, planId, attachmentId } = attachmentParams.parse(request.params);
+      const [plan] = await app.db.select().from(lessonPlans).where(and(eq(lessonPlans.id, planId), eq(lessonPlans.unitId, unitId))).limit(1);
+      if (!plan) throw notFound("Lesson plan not found");
+      const [updated] = await app.db.update(lessonPlans).set({ attachmentIds: plan.attachmentIds.filter((id) => id !== attachmentId), updatedAt: new Date() }).where(eq(lessonPlans.id, planId)).returning();
+      return updated;
     },
   );
 };

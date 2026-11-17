@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
-import type { ServiceResult } from "../../lib/school/services";
+import type { ServiceCall } from "../../lib/school/services";
 import StudentModal from "../student/StudentModal";
 import {
   buildDaySlots,
@@ -29,9 +29,9 @@ type BookingSlotsProps = {
   lessons: TeacherLesson[];
   closedSlots: TeacherSlotClosure[];
   openedSlots: TeacherSlotOpening[];
-  onRequestSlotClosure: (date: string, time: string, reason: string) => ServiceResult<unknown>;
-  onCancelSlotClosureRequest: (date: string, time: string) => ServiceResult<unknown>;
-  onOpenSlot: (date: string, time: string) => ServiceResult<unknown>;
+  onRequestSlotClosure: (date: string, time: string, reason: string) => ServiceCall<unknown>;
+  onCancelSlotClosureRequest: (date: string, time: string) => ServiceCall<unknown>;
+  onOpenSlot: (date: string, time: string) => ServiceCall<unknown>;
   onNavigate: (page: string) => void;
   onNotice: (message: string) => void;
 };
@@ -98,7 +98,7 @@ export default function TeacherBookingSlots({ lessons, closedSlots, openedSlots,
     setClosureTarget(slot);
   }
 
-  function submitClosureRequest(event: FormEvent<HTMLFormElement>) {
+  async function submitClosureRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!closureTarget) return;
     const reason = closureReason.trim();
@@ -106,7 +106,7 @@ export default function TeacherBookingSlots({ lessons, closedSlots, openedSlots,
       onNotice("Add a short reason for closing this slot.");
       return;
     }
-    const result = onRequestSlotClosure(slotDate, closureTarget.time, reason);
+    const result = await onRequestSlotClosure(slotDate, closureTarget.time, reason);
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -115,17 +115,17 @@ export default function TeacherBookingSlots({ lessons, closedSlots, openedSlots,
     onNotice(`Closure request for ${formatLessonDate(slotDate)} ${closureTarget.time}–${closureTarget.endTime} sent to your manager.`);
   }
 
-  function withdrawClosureRequest(slot: DaySlot) {
-    const result = onCancelSlotClosureRequest(slotDate, slot.time);
+  async function withdrawClosureRequest(slot: DaySlot) {
+    const result = await onCancelSlotClosureRequest(slotDate, slot.time);
     onNotice(result.ok ? `${slot.time}–${slot.endTime} closure request withdrawn. The slot is open for booking again.` : result.error);
   }
 
-  function openSlot(slot: DaySlot) {
+  async function openSlot(slot: DaySlot) {
     if (isSlotInPast(slotDate, slot.time, now)) {
       onNotice("This slot is in the past and can no longer be opened for booking.");
       return;
     }
-    const result = onOpenSlot(slotDate, slot.time);
+    const result = await onOpenSlot(slotDate, slot.time);
     onNotice(result.ok ? `${slot.time}–${slot.endTime} opened for bookings. No approval needed.` : result.error);
   }
 

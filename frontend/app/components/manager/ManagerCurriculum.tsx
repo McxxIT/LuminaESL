@@ -36,7 +36,7 @@ import {
   setCourseStatus,
   updateCourse,
   uploadPlanFile,
-  type ServiceResult,
+  type ServiceCall,
 } from "../../lib/school/services";
 
 const statusLabel: Record<CourseStatus, string> = { draft: "Draft", published: "Published", archived: "Archived" };
@@ -90,12 +90,12 @@ async function downloadFile(file: AttachmentMeta, onNotice: (message: string) =>
   link.remove();
 }
 
-function UnitNameModal({ initial, onSubmit, onClose }: { initial: string; onSubmit: (title: string) => ServiceResult<unknown>; onClose: () => void }) {
+function UnitNameModal({ initial, onSubmit, onClose }: { initial: string; onSubmit: (title: string) => ServiceCall<unknown>; onClose: () => void }) {
   const [title, setTitle] = useState(initial);
   const [error, setError] = useState("");
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = onSubmit(title);
+    const result = await onSubmit(title);
     if (result.ok) onClose();
     else setError(result.error);
   }
@@ -117,7 +117,7 @@ export default function ManagerCurriculum({ user, onNotice }: { user: SchoolUser
   const selectOpen = useCallback((data: SchoolData) => selectCourse(data, courseId), [courseId]);
   const open = useSchool(selectOpen);
 
-  const notify = (result: ServiceResult<unknown>, success: string) => onNotice(result.ok ? success : result.error);
+  const notify = async (result: ServiceCall<unknown>, success: string) => { const resolved = await result; onNotice(resolved.ok ? success : resolved.error); };
   const editable = open ? canEditCourse(user, open.course) : false;
   const planDialog = dialog?.kind === "plan" && open ? (() => {
     const unitRow = open.units.find((row) => row.unit.id === dialog.unitId);
@@ -126,13 +126,13 @@ export default function ManagerCurriculum({ user, onNotice }: { user: SchoolUser
   })() : null;
 
   const dialogs = <>
-    {dialog?.kind === "create" && <CourseFormModal onClose={() => setDialog(null)} onSubmit={(values: CourseFormValues) => {
-      const result = createCourse(user.id, values);
+    {dialog?.kind === "create" && <CourseFormModal onClose={() => setDialog(null)} onSubmit={async (values: CourseFormValues) => {
+      const result = await createCourse(user.id, values);
       if (result.ok) { setCourseId(result.value.id); onNotice(`${result.value.title} created as a draft. Add lesson plans, then publish.`); }
       return result;
-    }} />}
-    {dialog?.kind === "edit" && <CourseFormModal initial={{ title: dialog.course.title, level: dialog.course.level, summary: dialog.course.summary, objectives: dialog.course.objectives.join("\n") }} onClose={() => setDialog(null)} onSubmit={(values) => {
-      const result = updateCourse(user.id, dialog.course.id, values);
+    }} /> }
+    {dialog?.kind === "edit" && <CourseFormModal initial={{ title: dialog.course.title, level: dialog.course.level, summary: dialog.course.summary, objectives: dialog.course.objectives.join("\n") }} onClose={() => setDialog(null)} onSubmit={async (values) => {
+      const result = await updateCourse(user.id, dialog.course.id, values);
       if (result.ok) onNotice("Course details saved.");
       return result;
     }} />}
@@ -168,7 +168,7 @@ export default function ManagerCurriculum({ user, onNotice }: { user: SchoolUser
           <p className="course-meta">{totalPlans} lesson plan{totalPlans === 1 ? "" : "s"} · {open.units.length} unit{open.units.length === 1 ? "" : "s"} · {open.students} enrolled student{open.students === 1 ? "" : "s"} · owned by {open.owner}</p>
         </div>
         <div className="page-heading-actions">
-          <button type="button" className="secondary-button" onClick={() => { const result = duplicateCourse(user.id, course.id); if (result.ok) setCourseId(result.value.id); notify(result, "Copied as a new draft you own."); }}><Icon name="repeat" size={15} /> Duplicate</button>
+          <button type="button" className="secondary-button" onClick={async () => { const result = await duplicateCourse(user.id, course.id); if (result.ok) setCourseId(result.value.id); onNotice(result.ok ? "Copied as a new draft you own." : result.error); }}><Icon name="repeat" size={15} /> Duplicate</button>
           {editable && <>
             <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "edit", course })}><Icon name="edit" size={15} /> Details</button>
             {course.status === "published"

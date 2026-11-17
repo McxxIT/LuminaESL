@@ -4,15 +4,15 @@ import { useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
 import StudentModal from "../student/StudentModal";
 import { downloadTextFile, formatLessonDate, todayISO } from "../../lib/student";
-import type { ServiceResult } from "../../lib/school/services";
+import type { ServiceCall } from "../../lib/school/services";
 import type { TeacherHomework, TeacherLesson, TeacherStudent } from "../../lib/types";
 
 type StudentsProps = {
   students: TeacherStudent[];
   lessons: TeacherLesson[];
   onAddNote: (studentId: string, body: string) => void;
-  onAssignHomework: (studentId: string, title: string, dueLabel: string) => ServiceResult<unknown>;
-  onReviewHomework: (homeworkId: string, feedback: string, grade: string) => ServiceResult<unknown>;
+  onAssignHomework: (studentId: string, title: string, dueLabel: string) => ServiceCall<unknown>;
+  onReviewHomework: (homeworkId: string, feedback: string, grade: string) => ServiceCall<unknown>;
   onNotice: (message: string) => void;
 };
 
@@ -89,14 +89,14 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
     setHomeworkForm({ title: "", dueLabel: "Due in 3 days" });
   }
 
-  function submitHomework(event: FormEvent<HTMLFormElement>) {
+  async function submitHomework(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!homeworkTarget) return;
     if (!homeworkForm.title.trim()) {
       onNotice("Give the homework a clear title.");
       return;
     }
-    const result = onAssignHomework(homeworkTarget.id, homeworkForm.title, homeworkForm.dueLabel);
+    const result = await onAssignHomework(homeworkTarget.id, homeworkForm.title, homeworkForm.dueLabel);
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -110,10 +110,10 @@ export default function TeacherStudents({ students, lessons, onAddNote, onAssign
     setReviewTarget(homework);
   }
 
-  function submitReview(event: FormEvent<HTMLFormElement>) {
+  async function submitReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!reviewTarget) return;
-    const result = onReviewHomework(reviewTarget.id, reviewForm.feedback, reviewForm.grade);
+    const result = await onReviewHomework(reviewTarget.id, reviewForm.feedback, reviewForm.grade);
     if (!result.ok) {
       onNotice(result.error);
       return;

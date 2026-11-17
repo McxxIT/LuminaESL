@@ -4,6 +4,7 @@ import {
   date,
   index,
   integer,
+  numeric,
   jsonb,
   pgEnum,
   pgTable,
@@ -456,7 +457,7 @@ export const creditEntries = pgTable(
     studentId: uuid("student_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    hours: integer("hours").notNull(),
+    hours: numeric("hours").$type<number>().notNull(),
     amount: integer("amount"),
     reason: creditReason("reason").notNull(),
     description: text("description").notNull(),

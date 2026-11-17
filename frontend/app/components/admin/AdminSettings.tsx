@@ -48,9 +48,9 @@ function RulesForm({ user, settings, onNotice }: { user: SchoolUser; settings: R
     || Number(form.studentLateCancellationHours) !== settings.studentLateCancellationHours
     || form.refundTeacherCancellations !== settings.refundTeacherCancellations;
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = updateSchoolSettings(user.id, {
+    const result = await updateSchoolSettings(user.id, {
       schoolName: form.schoolName,
       onTheSpotCancellationHours: Number(form.onTheSpotCancellationHours),
       performanceWindowDays: Number(form.performanceWindowDays),

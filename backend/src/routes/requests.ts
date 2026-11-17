@@ -238,4 +238,29 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
       return reviewed;
     },
   );
+
+  app.post(
+    "/:id/withdraw",
+    { preHandler: app.requireRole(["admin", "manager", "teacher"]) },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      const [existing] = await app.db.select().from(requests).where(eq(requests.id, id)).limit(1);
+      if (!existing) throw notFound("Request not found");
+      if (existing.status !== "pending") throw badRequest("Only pending requests can be withdrawn");
+      if (request.user.role === "teacher" && existing.requestedBy !== request.user.sub) throw forbidden();
+      if (request.user.role === "manager" && !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))) throw forbidden();
+
+      const result = await app.db.transaction(async (tx) => {
+        if (existing.type === "slot-closure" && existing.date && existing.time) {
+          const [slot] = await tx.select({ id: slotOpenings.id }).from(slotOpenings)
+            .where(and(eq(slotOpenings.teacherId, existing.teacherId), eq(slotOpenings.date, existing.date), eq(slotOpenings.time, existing.time))).limit(1);
+          if (!slot) await tx.insert(slotOpenings).values({ teacherId: existing.teacherId, date: existing.date, time: existing.time, openedBy: request.user.sub });
+        }
+        const [deleted] = await tx.delete(requests).where(eq(requests.id, id)).returning({ id: requests.id });
+        if (!deleted) throw notFound("Request not found");
+        return deleted;
+      });
+      return { ...result, withdrawn: true };
+    },
+  );
 };

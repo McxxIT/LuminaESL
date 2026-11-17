@@ -10,22 +10,31 @@ import NotificationPanel, { type AppNotification } from "./NotificationPanel";
 import { useNotifications } from "../lib/hooks/useNotifications";
 import { useAuth } from "../lib/hooks/useAuth";
 import { accountForUser, restoreSession, signOut } from "../lib/auth/session";
-import { isDemoMode } from "../lib/auth/mode";
+import { isApiDataMode, isDemoMode } from "../lib/auth/mode";
+import { loadSchoolFromApi, refreshSchoolFromApi } from "../lib/school/api/bootstrap";
+import { clearSchoolSnapshot } from "../lib/school/store";
 import { adminNavItems, managerNavItems, studentNavItems, teacherNavItems } from "../lib/data";
 import { friendlyRole, initials } from "../lib/student";
 import type { Account } from "../lib/types";
 
 type ModalName = "help" | "logout" | null;
+type SchoolStatus = "idle" | "loading" | "ready" | "error";
 
 export default function LuminaApp() {
   const [account, setAccount] = useState<Account | null>(null);
   const [booting, setBooting] = useState(() => !isDemoMode());
+  const [schoolStatus, setSchoolStatus] = useState<SchoolStatus>("idle");
+  const [schoolFor, setSchoolFor] = useState<string | null>(null);
+  const [schoolAttempt, setSchoolAttempt] = useState(0);
+  const [schoolStale, setSchoolStale] = useState(false);
   const [activeNav, setActiveNav] = useState("Overview");
   const [notice, setNotice] = useState("");
   const [studentCredits, setStudentCredits] = useState(24.5);
   const [openPopover, setOpenPopover] = useState<"notifications" | null>(null);
   const [modal, setModal] = useState<ModalName>(null);
   const { user: authUser } = useAuth();
+  const apiData = isApiDataMode();
+  const authEmail = authUser?.email ?? null;
   const effectiveAccount = isDemoMode() ? account : authUser ? accountForUser(authUser) : null;
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications(effectiveAccount);
   const noticeTimer = useRef<number | null>(null);
@@ -62,6 +71,51 @@ export default function LuminaApp() {
       cancelled = true;
     };
   }, []);
+
+  // API mode: fill the store from the role-scoped bootstrap once a session exists.
+  useEffect(() => {
+    if (!apiData || !authEmail) return;
+    let cancelled = false;
+    loadSchoolFromApi(authEmail)
+      .then(({ source }) => {
+        if (cancelled) return;
+        setSchoolStale(source === "cache");
+        setSchoolFor(authEmail);
+        setSchoolStatus("ready");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("Lumina: school bootstrap failed.", error);
+        setSchoolFor(null);
+        setSchoolStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiData, authEmail, schoolAttempt]);
+
+  // API mode has no storage events, so re-read on focus/visibility instead.
+  useEffect(() => {
+    if (!apiData || !authEmail || schoolStatus !== "ready" || schoolFor !== authEmail) return;
+    let lastRefresh = 0;
+    const refresh = () => {
+      const now = Date.now();
+      if (now - lastRefresh < 15_000) return;
+      lastRefresh = now;
+      void refreshSchoolFromApi(authEmail)
+        .then(() => setSchoolStale(false))
+        .catch((error) => console.warn("Lumina: school refresh failed.", error));
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [apiData, authEmail, schoolFor, schoolStatus]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -105,6 +159,12 @@ export default function LuminaApp() {
       window.localStorage.removeItem("lumina-account");
       setOpenPopover(null);
       setModal(null);
+      if (apiData) {
+        clearSchoolSnapshot();
+        setSchoolStatus("idle");
+        setSchoolFor(null);
+        setSchoolStale(false);
+      }
     };
     if (isDemoMode()) {
       finish();
@@ -138,6 +198,19 @@ export default function LuminaApp() {
   </section></main>;
 
   if (!effectiveAccount) return <LoginScreen onLogin={login} />;
+
+  const schoolReady = schoolStatus === "ready" && schoolFor === authEmail;
+  if (apiData && !schoolReady) {
+    if (schoolStatus === "error") return <main className="auth-shell"><section className="auth-card">
+      <div className="auth-brand"><div className="brand-mark">L</div><strong>Lumina <span>ESL</span></strong></div>
+      <div className="auth-heading"><p className="eyebrow">CONNECTION LOST</p><h1>Could not load your school</h1><p>The Lumina API did not return your school data. Check that the backend is running, then try again.</p></div>
+      <div className="auth-form"><button type="button" className="primary-button" onClick={() => { setSchoolStatus("loading"); setSchoolAttempt((attempt) => attempt + 1); }}>Try again</button><button type="button" className="cancel-button" onClick={logout}>Log out</button></div>
+    </section></main>;
+    return <main className="auth-shell"><section className="auth-card">
+      <div className="auth-brand"><div className="brand-mark">L</div><strong>Lumina <span>ESL</span></strong></div>
+      <div className="auth-heading"><p className="eyebrow">LOADING</p><h1>Loading your school</h1><p>Fetching your courses, lessons, and team from the Lumina API.</p></div>
+    </section></main>;
+  }
 
   const roleNavItems = { student: studentNavItems, teacher: teacherNavItems, manager: managerNavItems, admin: adminNavItems }[effectiveAccount.role];
   const roleLabel = friendlyRole(effectiveAccount.role);
@@ -184,6 +257,7 @@ export default function LuminaApp() {
     </main>
 
     {notice && <div className="toast" role="status">{notice}</div>}
+    {!notice && schoolStale && <div className="toast" role="status">API unreachable — showing saved school data.</div>}
 
     {modal && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
       <section className="general-modal" role="dialog" aria-modal="true">

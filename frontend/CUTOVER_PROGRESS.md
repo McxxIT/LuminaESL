@@ -3,7 +3,7 @@
 Live status for the frontend/backend integration. The plan is in
 `CUTOVER_PLAN.md`; app-wide state stays in `PROGRESS.md`.
 
-**Current step:** Step B - B0 backend prerequisites done; B1 read path next.
+**Current step:** Step B - B2 write path complete; B3 domain slices next.
 **Last updated:** November 17, 2026.
 
 ## Board
@@ -15,9 +15,9 @@ Live status for the frontend/backend integration. The plan is in
 | B0.2 - Domain rule gaps | ✅ Done | All 7 gaps plus manager write scoping and course unit/publish guards. |
 | B0.3 - Stable response shapes | ✅ Done | Bootstrap mappers use ISO strings/arrays; lesson reads expose plan provenance. |
 | B0.4 - Contract tests | ✅ Done | `backend/tests/contract.test.ts` + live role/command smoke matrix. |
-| B1 - Read path | ⬜ Next | `api/bootstrap.ts`, hydrate in API mode. |
-| B2 - Write path | ⬜ Not started | Typed commands, async services. |
-| B3 - Domain slices | ⬜ Not started | Settings -> ... -> notifications. |
+| B1 - Read path | ✅ Done | `api/bootstrap.ts`; API mode hydrates from bootstrap, demo/local unchanged. |
+| B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
+| B3 - Domain slices | ⬜ Next | B2 write-path gate is complete; domain parity and ownership work begins here. |
 | Step C - Uploads + notifications | ⬜ Not started | Depends on B. |
 | Step D - Parity + removal | ⬜ Not started | Depends on C. |
 
@@ -35,6 +35,32 @@ Live status for the frontend/backend integration. The plan is in
 - [x] New courses start with `Unit 1`, matching the browser store.
 - [x] Manager writes on teachers/students/enrollments/requests/credits/bookings/homework are team-scoped.
 
+## Read-path checklist (B1)
+
+- [x] `app/lib/school/api/bootstrap.ts` fetches `/school/bootstrap` with the typed client and
+  validates version, settings, and all 16 collections before use (`parseSchoolData`).
+- [x] API mode (`NEXT_PUBLIC_DATA_SOURCE=api` + `NEXT_PUBLIC_DEMO_MODE=false`) starts from an empty
+  store, never the demo seed, and hydrates only after the API session is known.
+- [x] Shell shows "Loading your school" while bootstrapping and a retry/logout card on failure.
+- [x] Last good payload is cached in `lumina-school:v1` with `lumina-school:cache-owner`; the cache
+  is only used for the same account. Local/demo mode keeps the old seed path.
+- [x] Window focus / tab visibility re-reads the snapshot in API mode (15 s throttle). Cross-tab
+  storage events stay local-mode only.
+- [x] Refresh after every API mutation: all migrated commands refresh the role-scoped snapshot.
+
+## Write-path checklist (B2)
+
+- [x] Dedicated API modules provide typed commands for settings, people, curriculum,
+  bookings, teaching, approvals, homework, credits, and profile writes.
+- [x] API service errors are converted to `ServiceResult.error` using `ApiError.message`.
+- [x] Every current write service has a local/API branch and async UI call sites.
+- [x] Every successful API write refreshes the bootstrap; failed writes do not update
+  the server cache.
+- [x] Align the backend credit-hour contract with the UI's fractional-hour adjustments.
+- [x] Added backend routes for request withdrawal, course duplication, attachments,
+  and dedicated rebooking.
+- [ ] Add mutation-specific browser/API smoke coverage for each migrated domain.
+
 ## Verification log
 
 | Date | Slice | What was checked | Result |
@@ -43,6 +69,10 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 17, 2026 | B0.1 | `GET /school/bootstrap` as admin, both managers, teacher, student; settings `2 h` / `23:30`; scoped counts; referenced users resolvable; manager2 sees published course only | Pass |
 | Nov 17, 2026 | B0.2 | Publish no plan 400; archive enrolled 409; delete attached plan 409; delete unit with plans 409; delete last unit 409; duplicate student/parent rating 409; absence before start 400; absence after start 201 + refund; duplicate absence 409; far cancel refunded=true; near cancel refunded=false; foreign manager read/write 403 | Pass |
 | Nov 17, 2026 | B0.3/B0.4 | `typecheck`, `lint`, `npm test` (11/11, including new contract suite); bootstrap key/route/auth contract; seed now has enrollment, 2 lessons, 1 rating | Pass |
+| Nov 17, 2026 | B1.1 | Live bootstrap from the API parsed by the frontend `parseSchoolData` for all five accounts; settings `Lumina ESL` / `23:30`; counts match the role scopes; broken payload rejected with `SchoolBootstrapError` | Pass |
+| Nov 17, 2026 | B1.2 | Browser (`DATA_SOURCE=api`, `DEMO_MODE=false`): admin and student sign-in hydrate the shell, cache owner matches the account, no demo data, no auth card, no console errors; student reload restores the session through the refresh cookie; manager2 renders an empty team without errors | Pass |
+| Nov 17, 2026 | B1.3 | Focus/visibility refresh path compiled and shipped; mutation-time refresh deferred to B2.2 by design | Partial (expected) |
+| Nov 17, 2026 | B1 wrap-up | Root `typecheck`, `lint`, backend `npm test`; demo-mode browser login still works after restoring `.env.local` | Pass |
 
 ## Change log
 
@@ -50,6 +80,10 @@ Live status for the frontend/backend integration. The plan is in
 | --- | --- | --- |
 | Nov 16, 2026 | Split the cutover plan and status out of `PROGRESS.md` into `CUTOVER_PLAN.md` and this file. | `PROGRESS.md`, `CUTOVER_PLAN.md`, `CUTOVER_PROGRESS.md` |
 | Nov 17, 2026 | Added role-scoped bootstrap, team helpers, lesson commands (cancel/absence/rating/completion), course guards, manager scoping across people/booking/request/credit/homework, contract tests, and richer demo seed data. | `backend/src/routes/school.ts`, `backend/src/lib/scope.ts`, `backend/src/routes/*.ts`, `backend/src/db/seed.ts`, `backend/tests/contract.test.ts` |
+| Nov 17, 2026 | B1 read path: API bootstrap loader + runtime guard, API-mode store hydration, shell loading/retry gate, per-account offline cache, focus refresh. | `frontend/app/lib/school/api/bootstrap.ts`, `frontend/app/lib/school/store.ts`, `frontend/app/lib/auth/mode.ts`, `frontend/app/components/LuminaApp.tsx`, `frontend/.env.example` |
+| Nov 17, 2026 | B2 first slice: typed settings and self-name commands, async service error handling, and refresh after successful API writes. | `frontend/app/lib/school/api/school.ts`, `frontend/app/lib/school/services/result.ts`, `frontend/app/lib/school/services/quality.ts`, `frontend/app/lib/school/services/profile.ts` |
+| Nov 17, 2026 | B2 people slice: API-backed manager/teacher/student create and update, status changes, teacher assignment, enrollment, email updates, and whole-hour credit creation; async people forms. | `frontend/app/lib/school/api/school.ts`, `frontend/app/lib/school/services/people.ts`, `frontend/app/components/manager/PeopleForms.tsx`, `backend/src/routes/users.ts` |
+| Nov 17, 2026 | B2 write-path completion: migrated curriculum, bookings, teaching, approvals, homework, credits, request withdrawal, course duplication, attachments, dedicated rebooking, and fractional credits. | `frontend/app/lib/school/api/*.ts`, `frontend/app/lib/school/services/*.ts`, `backend/src/routes/*.ts`, `backend/src/db/migrations/0001_fractional_credit_hours.sql` |
 
 ## Open decisions / blockers
 
@@ -63,9 +97,17 @@ Live status for the frontend/backend integration. The plan is in
   remain part of item 13 / Step D.
 - **`seededAt`.** Bootstrap currently reports `new Date().toISOString()`; switch to
   a stored seed timestamp when the adapter needs cache invalidation.
+- **Data-source flags.** `NEXT_PUBLIC_DATA_SOURCE=api` only takes effect with API
+  auth (`NEXT_PUBLIC_DEMO_MODE=false`); demo sign-in keeps the browser store so the
+  offline demo stays intact. `NEXT_PUBLIC_DATA_SOURCE` defaults to `local`.
+- **Offline cache.** API mode writes the last good bootstrap to `lumina-school:v1`
+  and the account email to `lumina-school:cache-owner`. It is only read back for the
+  same account, and only when bootstrap fails after a valid session.
+- **Writes in API mode.** All current school service writes use the API and refresh
+  the role-scoped snapshot. Local/demo writes remain synchronous and local.
 
 ## Next action
 
-Start B1: add `app/lib/school/api/bootstrap.ts`, hydrate the existing store from
-`GET /api/v1/school/bootstrap` when `NEXT_PUBLIC_DATA_SOURCE=api`, and keep
-`lumina-school:v1` only as the demo/offline fallback.
+Begin B3 domain parity work. B2's write-path gate is complete; remaining work is
+ownership parity, read-model gaps, browser/API smoke coverage, and the later
+uploads/notifications steps.

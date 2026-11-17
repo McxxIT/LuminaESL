@@ -74,20 +74,20 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
   }, [rows, query, managerFilter]);
   const selected: TeacherRow | undefined = rows.find((row) => row.teacher.id === selectedId);
 
-  function submitCreate(values: TeacherFormValues) {
-    const result = createTeacher(user.id, { ...values, managerId: values.managerId || null });
+  async function submitCreate(values: TeacherFormValues) {
+    const result = await createTeacher(user.id, { ...values, managerId: values.managerId || null });
     if (result.ok) onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
     return result;
   }
 
-  function submitEdit(row: TeacherRow, values: TeacherFormValues) {
-    const result = updateTeacher(user.id, row.teacher.id, values);
+  async function submitEdit(row: TeacherRow, values: TeacherFormValues) {
+    const result = await updateTeacher(user.id, row.teacher.id, values);
     if (result.ok) onNotice(`${values.name} was updated.`);
     return result;
   }
 
-  function moveTeacher(row: TeacherRow, managerId: string) {
-    const result = assignTeacherToManager(user.id, row.teacher.id, managerId || null);
+  async function moveTeacher(row: TeacherRow, managerId: string) {
+    const result = await assignTeacherToManager(user.id, row.teacher.id, managerId || null);
     onNotice(result.ok ? `${row.teacher.name} now reports to ${managers.find((manager) => manager.id === managerId)?.name ?? "no manager"}${result.value.studentsMoved ? ` (${result.value.studentsMoved} student${result.value.studentsMoved === 1 ? "" : "s"} moved too)` : ""}.` : result.error);
   }
 
@@ -179,14 +179,14 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
     {dialog?.kind === "edit" && <TeacherFormModal
       initial={{ name: dialog.row.teacher.name, email: dialog.row.teacher.email, headline: dialog.row.profile?.headline ?? "", specializations: dialog.row.profile?.specializations.join(", ") ?? "", bio: dialog.row.profile?.bio ?? "", managerId: dialog.row.managerId ?? "" }}
       onSubmit={(values) => submitEdit(dialog.row, values)} onClose={() => setDialog(null)} />}
-    {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.teacher} onClose={() => setDialog(null)} onConfirm={() => {
+    {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.teacher} onClose={() => setDialog(null)} onConfirm={async () => {
       const pausing = dialog.row.teacher.status === "active";
-      const result = setPersonStatus(user.id, dialog.row.teacher.id, pausing ? "paused" : "active");
+      const result = await setPersonStatus(user.id, dialog.row.teacher.id, pausing ? "paused" : "active");
       if (result.ok) onNotice(`${dialog.row.teacher.name} was ${pausing ? "paused" : "reactivated"}.`);
       return result;
     }} />}
-    {dialog?.kind === "absence" && <AbsenceModal lessonLabel={dialog.label} onClose={() => setDialog(null)} onSubmit={(note) => {
-      const result = recordTeacherAbsence(user.id, dialog.lesson.id, note);
+    {dialog?.kind === "absence" && <AbsenceModal lessonLabel={dialog.label} onClose={() => setDialog(null)} onSubmit={async (note) => {
+      const result = await recordTeacherAbsence(user.id, dialog.lesson.id, note);
       if (result.ok) onNotice("Absence recorded. The lesson is cancelled and the student refunded.");
       return result;
     }} />}

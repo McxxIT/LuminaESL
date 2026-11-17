@@ -1,7 +1,9 @@
 import { PermissionError } from "../permissions";
+import { ApiError } from "../../api/client";
 
 /** Every service returns this instead of throwing, so screens can show `error` in a toast. */
 export type ServiceResult<T = void> = { ok: true; value: T } | { ok: false; error: string };
+export type ServiceCall<T = void> = ServiceResult<T> | Promise<ServiceResult<T>>;
 
 export function ok<T>(value: T): ServiceResult<T>;
 export function ok(): ServiceResult<void>;
@@ -23,6 +25,18 @@ export function run<T>(body: () => T): ServiceResult<T> {
   } catch (error) {
     if (error instanceof ServiceError) return fail(error.message);
     if (error instanceof PermissionError) return fail("You don't have permission to do that.");
+    throw error;
+  }
+}
+
+/** Async equivalent used by API-backed services while keeping the same UI result contract. */
+export async function runAsync<T>(body: () => Promise<T>): Promise<ServiceResult<T>> {
+  try {
+    return { ok: true, value: await body() };
+  } catch (error) {
+    if (error instanceof ServiceError) return fail(error.message);
+    if (error instanceof PermissionError) return fail("You don't have permission to do that.");
+    if (error instanceof ApiError) return fail(error.message);
     throw error;
   }
 }

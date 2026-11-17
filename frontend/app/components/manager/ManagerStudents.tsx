@@ -95,8 +95,8 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
   }, [rows, query, teacherFilter]);
   const selected: StudentRow | undefined = rows.find((row) => row.student.id === selectedId);
 
-  function submitCreate(values: StudentFormValues) {
-    const result = createStudent(user.id, {
+  async function submitCreate(values: StudentFormValues) {
+    const result = await createStudent(user.id, {
       ...values,
       guardian: toGuardian(values),
       teacherId: values.teacherId || undefined,
@@ -188,18 +188,18 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
     </Modal>}
 
     {dialog?.kind === "create" && <StudentFormModal teachers={teachers} courses={courses} onSubmit={submitCreate} onClose={() => setDialog(null)} />}
-    {dialog?.kind === "edit" && <StudentFormModal initial={formValues(dialog.row)} onClose={() => setDialog(null)} onSubmit={(values) => {
-      const result = updateStudent(user.id, dialog.row.student.id, { ...values, guardian: toGuardian(values) });
+    {dialog?.kind === "edit" && <StudentFormModal initial={formValues(dialog.row)} onClose={() => setDialog(null)} onSubmit={async (values) => {
+      const result = await updateStudent(user.id, dialog.row.student.id, { ...values, guardian: toGuardian(values) });
       if (result.ok) onNotice(`${values.name} was updated.`);
       return result;
     }} />}
-    {dialog?.kind === "enroll" && <EnrollmentModal studentName={dialog.row.student.name} teachers={teachers} courses={courses} initialTeacherId={dialog.row.teacherId} initialCourseId={dialog.row.courseId} onClose={() => setDialog(null)} onSubmit={({ teacherId, courseId }) => {
-      const result = enrollStudent(user.id, dialog.row.student.id, teacherId, courseId);
+    {dialog?.kind === "enroll" && <EnrollmentModal studentName={dialog.row.student.name} teachers={teachers} courses={courses} initialTeacherId={dialog.row.teacherId} initialCourseId={dialog.row.courseId} onClose={() => setDialog(null)} onSubmit={async ({ teacherId, courseId }) => {
+      const result = await enrollStudent(user.id, dialog.row.student.id, teacherId, courseId);
       if (result.ok) onNotice(`${dialog.row.student.name} now learns with ${teachers.find((teacher) => teacher.id === teacherId)?.name}.`);
       return result;
     }} />}
-    {dialog?.kind === "credits" && <CreditAdjustModal studentName={dialog.row.student.name} balance={dialog.row.credits} onClose={() => setDialog(null)} onSubmit={({ hours, reason }) => {
-      const result = adjustCredits(user.id, dialog.row.student.id, hours, reason);
+    {dialog?.kind === "credits" && <CreditAdjustModal studentName={dialog.row.student.name} balance={dialog.row.credits} onClose={() => setDialog(null)} onSubmit={async ({ hours, reason }) => {
+      const result = await adjustCredits(user.id, dialog.row.student.id, hours, reason);
       if (result.ok) onNotice(`Credits ${hours > 0 ? "added" : "removed"} for ${dialog.row.student.name}.`);
       return result;
     }} />}
@@ -209,14 +209,14 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       currentPlanId={dialog.lesson.lessonPlanId}
       preferredCourseId={dialog.row.progress?.courseId}
       onClose={() => setDialog(null)}
-      onSubmit={(planId) => {
-        const result = assignPlanToLesson(user.id, dialog.lesson.id, planId);
+      onSubmit={async (planId) => {
+        const result = await assignPlanToLesson(user.id, dialog.lesson.id, planId);
         if (result.ok) onNotice(planId ? "Plan updated. The teacher and student see it now." : "Plan removed from the lesson.");
         return result;
       }} />}
-    {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.student} onClose={() => setDialog(null)} onConfirm={() => {
+    {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.student} onClose={() => setDialog(null)} onConfirm={async () => {
       const pausing = dialog.row.student.status === "active";
-      const result = setPersonStatus(user.id, dialog.row.student.id, pausing ? "paused" : "active");
+      const result = await setPersonStatus(user.id, dialog.row.student.id, pausing ? "paused" : "active");
       if (result.ok) onNotice(`${dialog.row.student.name} was ${pausing ? "paused" : "reactivated"}.`);
       return result;
     }} />}

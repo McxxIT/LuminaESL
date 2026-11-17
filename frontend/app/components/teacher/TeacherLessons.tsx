@@ -6,7 +6,7 @@ import Icon from "../Icon";
 import StudentModal from "../student/StudentModal";
 import type { AddTeacherLessonInput, CancelLessonRequestInput, CompleteLessonInput } from "./useTeacherWorkspace";
 import { teacherFocusOptions } from "../../lib/data";
-import type { ServiceResult } from "../../lib/school/services";
+import type { ServiceCall } from "../../lib/school/services";
 import { readFileAsync } from "../../lib/school/files";
 import { buildDaySlots, canJoinLesson, LESSON_SLOT_MINUTES, slotStartDate } from "../../lib/scheduling";
 import { ON_THE_SPOT_CANCELLATION_POINTS } from "../../lib/teacherPerformance";
@@ -50,10 +50,10 @@ type LessonsProps = {
   students: TeacherStudent[];
   closedSlots: TeacherSlotClosure[];
   openedSlots: TeacherSlotOpening[];
-  onAddLesson: (input: AddTeacherLessonInput) => ServiceResult<unknown>;
-  onRequestLessonCancellation: (id: string, input: CancelLessonRequestInput) => ServiceResult<unknown>;
-  onWithdrawLessonCancellationRequest: (id: string) => ServiceResult<unknown>;
-  onCompleteLesson: (id: string, input: CompleteLessonInput) => ServiceResult<unknown>;
+  onAddLesson: (input: AddTeacherLessonInput) => ServiceCall<unknown>;
+  onRequestLessonCancellation: (id: string, input: CancelLessonRequestInput) => ServiceCall<unknown>;
+  onWithdrawLessonCancellationRequest: (id: string) => ServiceCall<unknown>;
+  onCompleteLesson: (id: string, input: CompleteLessonInput) => ServiceCall<unknown>;
   onNavigate: (page: string) => void;
   onNotice: (message: string) => void;
 };
@@ -154,7 +154,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
     }));
   }
 
-  function submitAdd(event: FormEvent<HTMLFormElement>) {
+  async function submitAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const student = students.find((item) => item.id === addForm.studentId);
     if (!student) {
@@ -169,7 +169,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
       onNotice("Choose an open 25-minute slot for this lesson.");
       return;
     }
-    const result = onAddLesson({
+    const result = await onAddLesson({
       studentId: student.id,
       date: addForm.date,
       time: addForm.time,
@@ -219,7 +219,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
     reader.readAsDataURL(file);
   }
 
-  function submitCancel(event: FormEvent<HTMLFormElement>) {
+  async function submitCancel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cancelTarget) return;
     const comment = cancelComment.trim();
@@ -231,7 +231,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
       onNotice("Attach an image or PDF as supporting evidence for the cancellation.");
       return;
     }
-    const result = onRequestLessonCancellation(cancelTarget.id, { reason: cancelReason.trim(), comment, attachment: cancelAttachment });
+    const result = await onRequestLessonCancellation(cancelTarget.id, { reason: cancelReason.trim(), comment, attachment: cancelAttachment });
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -246,10 +246,10 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
     setCompleteId(lesson.id);
   }
 
-  function submitComplete(event: FormEvent<HTMLFormElement>) {
+  async function submitComplete(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!completeTarget) return;
-    const result = onCompleteLesson(completeTarget.id, completeForm);
+    const result = await onCompleteLesson(completeTarget.id, completeForm);
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -293,8 +293,8 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
     onNotice(`Classroom ${lesson.roomCode} is open. You can join ${lesson.studentName}'s lesson in advance.`);
   }
 
-  function withdrawCancellation(lesson: TeacherLesson) {
-    const result = onWithdrawLessonCancellationRequest(lesson.id);
+  async function withdrawCancellation(lesson: TeacherLesson) {
+    const result = await onWithdrawLessonCancellationRequest(lesson.id);
     onNotice(result.ok ? `Cancellation request for ${lesson.title} withdrawn.` : result.error);
   }
 

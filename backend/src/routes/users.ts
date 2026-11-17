@@ -10,7 +10,12 @@ import {
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { hashPassword } from "../lib/password";
-import { assertCanViewUser, managerTeam } from "../lib/scope";
+import {
+  assertCanViewUser,
+  managerOwnsStudent,
+  managerOwnsTeacher,
+  managerTeam,
+} from "../lib/scope";
 
 const userColumns = {
   id: users.id,
@@ -49,6 +54,7 @@ const createUserSchema = z.object({
 
 const updateUserSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
+  email: z.string().trim().email().transform((value) => value.toLowerCase()).optional(),
   avatarColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -204,7 +210,21 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
       const isAdmin = request.user.role === "admin";
       if (!isSelf && !isAdmin) throw forbidden();
       if (body.status && !isAdmin) {
-        throw forbidden("Only admins can change account status");
+        const [target] = await app.db
+          .select({ role: users.role })
+          .from(users)
+          .where(eq(users.id, id))
+          .limit(1);
+        const canManageTeamMember =
+          request.user.role === "manager" &&
+          target &&
+          ((target.role === "teacher" &&
+            (await managerOwnsTeacher(app.db, request.user.sub, id))) ||
+            (target.role === "student" &&
+              (await managerOwnsStudent(app.db, request.user.sub, id))));
+        if (!canManageTeamMember) {
+          throw forbidden("Only admins can change this account status");
+        }
       }
       if (Object.keys(body).length === 0) {
         throw badRequest("No fields to update");
@@ -214,6 +234,15 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
         updatedAt: new Date(),
       };
       if (body.name !== undefined) updates.name = body.name;
+      if (body.email !== undefined) {
+        const [existing] = await app.db
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.email, body.email), sql`${users.id} <> ${id}`))
+          .limit(1);
+        if (existing) throw conflict("Email is already registered");
+        updates.email = body.email;
+      }
       if (body.avatarColor !== undefined) {
         updates.avatarColor = body.avatarColor;
       }

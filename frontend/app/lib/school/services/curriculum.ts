@@ -1,10 +1,26 @@
 import { assertCan } from "../permissions";
 import { createId, get, patch, query, recordActivity, remove, upsert } from "../repositories";
 import { plansForCourse } from "../selectors";
-import { updateSchool } from "../store";
+import { getSchoolSnapshot, updateSchool } from "../store";
+import { isApiDataMode } from "../../auth/mode";
+import {
+  archiveCourse,
+  attachLessonPlanFile,
+  createCourse as createCourseApi,
+  createLessonPlan,
+  createUnit,
+  deleteLessonPlan,
+  deleteUnit,
+  detachLessonPlanFile,
+  duplicateCourse as duplicateCourseApi,
+  updateCourse as updateCourseApi,
+  updateLessonPlan,
+  updateLessonPlanAssignment,
+  updateUnit,
+} from "../api/curriculum";
 import type { Course, CourseStatus, LessonPlan, LessonPlanSection, SchoolData, SchoolUser } from "../types";
 import { requireUser } from "./common";
-import { run, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceCall } from "./result";
 
 /**
  * Curriculum: courses -> units -> 25-minute lesson plans (+ attachments). The admin edits every
@@ -52,7 +68,8 @@ function cleanObjectives(value: string[] | string) {
   return (Array.isArray(value) ? value : value.split("\n")).map((item) => item.trim()).filter(Boolean);
 }
 
-export function createCourse(actorId: string, input: CourseInput): ServiceResult<Course> {
+export function createCourse(actorId: string, input: CourseInput): ServiceCall<Course> {
+  if (isApiDataMode()) return runAsync(async () => await createCourseApi({ title: cleanTitle(input.title), level: input.level.trim() || "All levels", summary: input.summary.trim(), objectives: cleanObjectives(input.objectives) }) as Course);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "course.edit");
@@ -65,7 +82,8 @@ export function createCourse(actorId: string, input: CourseInput): ServiceResult
   }));
 }
 
-export function updateCourse(actorId: string, courseId: string, input: CourseInput): ServiceResult {
+export function updateCourse(actorId: string, courseId: string, input: CourseInput): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await updateCourseApi(courseId, { title: cleanTitle(input.title), level: input.level.trim() || "All levels", summary: input.summary.trim(), objectives: cleanObjectives(input.objectives) }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     requireEditableCourse(draft, actor, courseId);
@@ -73,7 +91,8 @@ export function updateCourse(actorId: string, courseId: string, input: CourseInp
   }));
 }
 
-export function setCourseStatus(actorId: string, courseId: string, status: CourseStatus): ServiceResult {
+export function setCourseStatus(actorId: string, courseId: string, status: CourseStatus): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { if (status === "archived") await archiveCourse(courseId); else await updateCourseApi(courseId, { status }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const course = requireEditableCourse(draft, actor, courseId);
@@ -88,7 +107,9 @@ export function setCourseStatus(actorId: string, courseId: string, status: Cours
 }
 
 /** Copies a course (units, plans, attachment links) as a new draft owned by the actor. */
-export function duplicateCourse(actorId: string, courseId: string): ServiceResult<Course> {
+export function duplicateCourse(actorId: string, courseId: string): ServiceCall<Course> {
+  if (isApiDataMode()) return runAsync(async () => await duplicateCourseApi(courseId) as Course);
+  if (isApiDataMode()) return runAsync(async () => { throw new ServiceError("Course duplication is not supported by the current API."); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "course.edit");
@@ -109,7 +130,8 @@ export function duplicateCourse(actorId: string, courseId: string): ServiceResul
 
 // Units -----------------------------------------------------------------------------------
 
-export function addUnit(actorId: string, courseId: string, title: string): ServiceResult {
+export function addUnit(actorId: string, courseId: string, title: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await createUnit(courseId, cleanTitle(title, "a unit name")); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     requireEditableCourse(draft, actor, courseId);
@@ -119,7 +141,8 @@ export function addUnit(actorId: string, courseId: string, title: string): Servi
   }));
 }
 
-export function renameUnit(actorId: string, unitId: string, title: string): ServiceResult {
+export function renameUnit(actorId: string, unitId: string, title: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const unit = getSchoolSnapshot().collections.courseUnits[unitId]; if (!unit) throw new ServiceError("That unit no longer exists."); await updateUnit(unit.courseId, unitId, { title: cleanTitle(title, "a unit name") }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const unit = courseOfUnit(draft, unitId);
@@ -129,7 +152,8 @@ export function renameUnit(actorId: string, unitId: string, title: string): Serv
   }));
 }
 
-export function removeUnit(actorId: string, unitId: string): ServiceResult {
+export function removeUnit(actorId: string, unitId: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const unit = getSchoolSnapshot().collections.courseUnits[unitId]; if (!unit) throw new ServiceError("That unit no longer exists."); await deleteUnit(unit.courseId, unitId); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const unit = courseOfUnit(draft, unitId);
@@ -151,7 +175,8 @@ function reorder<T extends { id: string; order: number }>(items: T[], id: string
   return sorted.map((item, position) => ({ ...item, order: position + 1 }));
 }
 
-export function moveUnit(actorId: string, unitId: string, direction: -1 | 1): ServiceResult {
+export function moveUnit(actorId: string, unitId: string, direction: -1 | 1): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const snapshot = getSchoolSnapshot(); const unit = snapshot.collections.courseUnits[unitId]; if (!unit) throw new ServiceError("That unit no longer exists."); const units = Object.values(snapshot.collections.courseUnits).filter((item) => item.courseId === unit.courseId).sort((a, b) => a.order - b.order); const index = units.findIndex((item) => item.id === unitId); const target = units[index + direction]; if (!target) return; await updateUnit(unit.courseId, unitId, { order: target.order }); await updateUnit(unit.courseId, target.id, { order: unit.order }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const unit = courseOfUnit(draft, unitId);
@@ -172,7 +197,8 @@ function cleanSections(sections: LessonPlanSection[]) {
 }
 
 /** Creates a plan at the end of the unit, or updates an existing plan. */
-export function saveLessonPlan(actorId: string, unitId: string, input: LessonPlanInput, planId?: string): ServiceResult<LessonPlan> {
+export function saveLessonPlan(actorId: string, unitId: string, input: LessonPlanInput, planId?: string): ServiceCall<LessonPlan> {
+  if (isApiDataMode()) return runAsync(async () => { const unit = getSchoolSnapshot().collections.courseUnits[unitId]; if (!unit) throw new ServiceError("That unit no longer exists."); const body = { title: cleanTitle(input.title), focus: (Array.isArray(input.focus) ? input.focus : input.focus.split(",")).map((item) => item.trim()).filter(Boolean), summary: input.summary.trim(), sections: cleanSections(input.sections) }; const result = planId ? await updateLessonPlan(unit.courseId, unitId, planId, body) : await createLessonPlan(unit.courseId, unitId, body); return result as LessonPlan; });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const unit = courseOfUnit(draft, unitId);
@@ -200,7 +226,8 @@ export function saveLessonPlan(actorId: string, unitId: string, input: LessonPla
 }
 
 /** Plans used by lessons cannot be deleted (teachers and students would lose them). */
-export function removeLessonPlan(actorId: string, planId: string): ServiceResult {
+export function removeLessonPlan(actorId: string, planId: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const snapshot = getSchoolSnapshot(); const plan = snapshot.collections.lessonPlans[planId]; const unit = plan && snapshot.collections.courseUnits[plan.unitId]; if (!unit) throw new ServiceError("That lesson plan no longer exists."); await deleteLessonPlan(unit.courseId, unit.id, planId); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const plan = get(draft, "lessonPlans", planId);
@@ -215,7 +242,8 @@ export function removeLessonPlan(actorId: string, planId: string): ServiceResult
   }));
 }
 
-export function moveLessonPlan(actorId: string, planId: string, direction: -1 | 1): ServiceResult {
+export function moveLessonPlan(actorId: string, planId: string, direction: -1 | 1): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const snapshot = getSchoolSnapshot(); const plan = snapshot.collections.lessonPlans[planId]; const unit = plan && snapshot.collections.courseUnits[plan.unitId]; if (!unit) throw new ServiceError("That lesson plan no longer exists."); const plans = Object.values(snapshot.collections.lessonPlans).filter((item) => item.unitId === unit.id).sort((a, b) => a.order - b.order); const index = plans.findIndex((item) => item.id === planId); const target = plans[index + direction]; if (!target) return; await updateLessonPlan(unit.courseId, unit.id, planId, { order: target.order }); await updateLessonPlan(unit.courseId, unit.id, target.id, { order: plan.order }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const plan = get(draft, "lessonPlans", planId);
@@ -231,7 +259,14 @@ export function moveLessonPlan(actorId: string, planId: string, direction: -1 | 
  * Records an uploaded file on a plan. The bytes must already be stored (see `files.ts`
  * `saveLargeFile`) under `storageKey`; this only writes the metadata.
  */
-export function attachFileToPlan(actorId: string, planId: string, file: { name: string; type: string; size: number; storageKey: string; id: string }): ServiceResult {
+export function attachFileToPlan(actorId: string, planId: string, file: { name: string; type: string; size: number; storageKey: string; id: string }): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => {
+    const plan = getSchoolSnapshot().collections.lessonPlans[planId];
+    const unit = plan && getSchoolSnapshot().collections.courseUnits[plan.unitId];
+    if (!plan || !unit) throw new ServiceError("Lesson plan not found.");
+    await attachLessonPlanFile(unit.courseId, unit.id, planId, file);
+  });
+  if (isApiDataMode()) return runAsync(async () => { throw new ServiceError("File uploads are not part of the curriculum API yet."); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "attachment.upload");
@@ -243,7 +278,14 @@ export function attachFileToPlan(actorId: string, planId: string, file: { name: 
   }));
 }
 
-export function detachFileFromPlan(actorId: string, planId: string, attachmentId: string): ServiceResult {
+export function detachFileFromPlan(actorId: string, planId: string, attachmentId: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => {
+    const plan = getSchoolSnapshot().collections.lessonPlans[planId];
+    const unit = plan && getSchoolSnapshot().collections.courseUnits[plan.unitId];
+    if (!plan || !unit) throw new ServiceError("Lesson plan not found.");
+    await detachLessonPlanFile(unit.courseId, unit.id, planId, attachmentId);
+  });
+  if (isApiDataMode()) return runAsync(async () => { throw new ServiceError("File uploads are not part of the curriculum API yet."); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const plan = get(draft, "lessonPlans", planId);
@@ -259,7 +301,8 @@ export function detachFileFromPlan(actorId: string, planId: string, attachmentId
  * A manager changes (or removes) the lesson plan on one upcoming lesson. The teacher and student
  * see the new plan immediately; the plan is credited to the person who attached it.
  */
-export function assignPlanToLesson(actorId: string, lessonId: string, planId: string | null): ServiceResult {
+export function assignPlanToLesson(actorId: string, lessonId: string, planId: string | null): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await updateLessonPlanAssignment(lessonId, planId); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = get(draft, "lessons", lessonId);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Icon from "../Icon";
-import type { RateLessonInput, ServiceResult } from "../../lib/school/services";
+import type { RateLessonInput, ServiceCall } from "../../lib/school/services";
 import type { StudentLesson } from "../../lib/types";
 
 const labels = ["", "Poor", "Fair", "Good", "Great", "Excellent"];
@@ -13,7 +13,7 @@ const labels = ["", "Poor", "Fair", "Good", "Great", "Excellent"];
  */
 export default function LessonRating({ lesson, onRate, onNotice }: {
   lesson: StudentLesson;
-  onRate: (lessonId: string, input: RateLessonInput) => ServiceResult<unknown>;
+  onRate: (lessonId: string, input: RateLessonInput) => ServiceCall<unknown>;
   onNotice: (message: string) => void;
 }) {
   const ratings = lesson.ratings ?? [];
@@ -28,10 +28,10 @@ export default function LessonRating({ lesson, onRate, onNotice }: {
   if (lesson.status !== "completed") return null;
   if (lesson.attendance === "no-show") return <div className="lesson-detail-section"><span className="eyebrow">RATE THIS LESSON</span><p className="lesson-rating-hint">This lesson was marked as missed, so it can&apos;t be rated.</p></div>;
 
-  function submit() {
+  async function submit() {
     if (!source) return;
     if (!score) return setError("Choose how many stars.");
-    const result = onRate(lesson.id, { from: source, score, comment });
+    const result = await onRate(lesson.id, { from: source, score, comment });
     if (!result.ok) return setError(result.error);
     setError("");
     setScore(0);

@@ -89,19 +89,19 @@ export default function AdminManagers({ user, onNavigate, onNotice }: { user: Sc
       {rows.length === 0 && <section className="panel student-panel"><div className="student-empty-inline"><Icon name="shield" /><p>No managers yet. Add one to start building teams.</p></div></section>}
     </section>
 
-    {dialog?.kind === "create" && <ManagerFormModal onClose={() => setDialog(null)} onSubmit={(values) => {
-      const result = createManager(user.id, values);
+    {dialog?.kind === "create" && <ManagerFormModal onClose={() => setDialog(null)} onSubmit={async (values) => {
+      const result = await createManager(user.id, values);
       if (result.ok) onNotice(`${result.value.name} was added. Assign teachers to them from Teachers.`);
       return result;
     }} />}
-    {dialog?.kind === "edit" && <ManagerFormModal initial={{ name: dialog.manager.name, email: dialog.manager.email }} onClose={() => setDialog(null)} onSubmit={(values) => {
-      const result = updateManager(user.id, dialog.manager.id, values);
+    {dialog?.kind === "edit" && <ManagerFormModal initial={{ name: dialog.manager.name, email: dialog.manager.email }} onClose={() => setDialog(null)} onSubmit={async (values) => {
+      const result = await updateManager(user.id, dialog.manager.id, values);
       if (result.ok) onNotice(`${values.name} was updated.`);
       return result;
     }} />}
-    {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.manager} onClose={() => setDialog(null)} onConfirm={() => {
+    {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.manager} onClose={() => setDialog(null)} onConfirm={async () => {
       const pausing = dialog.manager.status === "active";
-      const result = setPersonStatus(user.id, dialog.manager.id, pausing ? "paused" : "active");
+      const result = await setPersonStatus(user.id, dialog.manager.id, pausing ? "paused" : "active");
       if (result.ok) onNotice(`${dialog.manager.name} was ${pausing ? "paused" : "reactivated"}.`);
       return result;
     }} />}

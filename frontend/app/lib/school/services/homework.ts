@@ -2,15 +2,18 @@ import { assertCan } from "../permissions";
 import { createId, get, patch, recordActivity, upsert } from "../repositories";
 import { studentsForUser } from "../selectors";
 import { updateSchool } from "../store";
+import { isApiDataMode } from "../../auth/mode";
+import { assignHomework as assignHomeworkApi, reviewHomework as reviewHomeworkApi, submitHomework as submitHomeworkApi } from "../api/homework";
 import type { Assignment, HomeworkType } from "../types";
 import { requireUser } from "./common";
-import { run, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceCall } from "./result";
 
 /** Shared homework: the teacher assigns, the student submits, the teacher reviews. */
 
 export type AssignHomeworkInput = { title: string; type?: HomeworkType; instructions?: string; dueLabel: string };
 
-export function assignHomework(actorId: string, studentId: string, input: AssignHomeworkInput): ServiceResult<Assignment> {
+export function assignHomework(actorId: string, studentId: string, input: AssignHomeworkInput): ServiceCall<Assignment> {
+  if (isApiDataMode()) return runAsync(async () => await assignHomeworkApi({ studentId, title: input.title.trim(), type: input.type ?? "writing", description: input.title.trim(), instructions: input.instructions?.trim() || "Complete the task and submit your work before the next lesson.", dueLabel: input.dueLabel.trim() }) as Assignment);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "homework.assign", { teacherId: actor.id });
@@ -35,7 +38,8 @@ export function assignHomework(actorId: string, studentId: string, input: Assign
   }));
 }
 
-export function submitHomework(actorId: string, assignmentId: string, response: string): ServiceResult {
+export function submitHomework(actorId: string, assignmentId: string, response: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await submitHomeworkApi(assignmentId, response); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const assignment = get(draft, "assignments", assignmentId);
@@ -48,7 +52,8 @@ export function submitHomework(actorId: string, assignmentId: string, response: 
   }));
 }
 
-export function reviewHomework(actorId: string, assignmentId: string, input: { feedback?: string; grade?: string }): ServiceResult {
+export function reviewHomework(actorId: string, assignmentId: string, input: { feedback?: string; grade?: string }): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await reviewHomeworkApi(assignmentId, input); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const assignment = get(draft, "assignments", assignmentId);

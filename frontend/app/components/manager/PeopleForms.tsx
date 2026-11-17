@@ -12,7 +12,7 @@ import type { ServiceResult } from "../../lib/school/services";
  * inline, and closes itself only when the service succeeds.
  */
 
-type Submit<T> = (values: T) => ServiceResult<unknown>;
+type Submit<T> = (values: T) => ServiceResult<unknown> | Promise<ServiceResult<unknown>>;
 
 function FormModal({ id, eyebrow, title, description, submitLabel, danger, onClose, onSubmit, children }: {
   id: string;
@@ -22,13 +22,13 @@ function FormModal({ id, eyebrow, title, description, submitLabel, danger, onClo
   submitLabel: string;
   danger?: boolean;
   onClose: () => void;
-  onSubmit: () => ServiceResult<unknown>;
+  onSubmit: () => ServiceResult<unknown> | Promise<ServiceResult<unknown>>;
   children: ReactNode;
 }) {
   const [error, setError] = useState("");
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = onSubmit();
+    const result = await onSubmit();
     if (result.ok) onClose();
     else setError(result.error);
   }
@@ -184,7 +184,7 @@ export function CreditAdjustModal({ studentName, balance, onSubmit, onClose }: {
 
 // Status and absences ---------------------------------------------------------------------
 
-export function ConfirmStatusModal({ person, onConfirm, onClose }: { person: SchoolUser; onConfirm: () => ServiceResult<unknown>; onClose: () => void }) {
+export function ConfirmStatusModal({ person, onConfirm, onClose }: { person: SchoolUser; onConfirm: () => ServiceResult<unknown> | Promise<ServiceResult<unknown>>; onClose: () => void }) {
   const pausing = person.status === "active";
   return <FormModal id="status-form" eyebrow={pausing ? "PAUSE ACCOUNT" : "REACTIVATE ACCOUNT"} title={`${pausing ? "Pause" : "Reactivate"} ${person.name}?`}
     submitLabel={pausing ? "Pause account" : "Reactivate"} danger={pausing} onClose={onClose} onSubmit={onConfirm}>

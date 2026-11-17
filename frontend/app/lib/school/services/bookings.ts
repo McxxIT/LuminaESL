@@ -3,9 +3,11 @@ import { LESSON_SLOT_MINUTES } from "../../scheduling";
 import { assertCan } from "../permissions";
 import { patch, recordActivity } from "../repositories";
 import { updateSchool } from "../store";
+import { isApiDataMode } from "../../auth/mode";
+import { bookSlot, cancelLesson as cancelLessonApi, createLesson as createLessonApi, rebookLesson as rebookLessonApi, slotIdFor, updateLesson } from "../api/bookings";
 import type { Lesson } from "../types";
 import { assertSlotOpen, changeCredits, createLesson, hoursUntil, LESSON_CREDIT_HOURS, requireLesson, requireUser } from "./common";
-import { run, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceCall } from "./result";
 
 export type BookLessonInput = {
   teacherId: string;
@@ -17,7 +19,8 @@ export type BookLessonInput = {
 };
 
 /** A student books an open slot. Creates one lesson the teacher and manager see, and spends credits. */
-export function bookLesson(actorId: string, input: BookLessonInput): ServiceResult<Lesson> {
+export function bookLesson(actorId: string, input: BookLessonInput): ServiceCall<Lesson> {
+  if (isApiDataMode()) return runAsync(async () => { const slotId = slotIdFor(input.teacherId, input.date, input.time); if (!slotId) throw new ServiceError("That slot is no longer open."); return await bookSlot(slotId) as Lesson; });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "lesson.book", { studentId: actor.id, teacherId: input.teacherId });
@@ -29,7 +32,8 @@ export function bookLesson(actorId: string, input: BookLessonInput): ServiceResu
 }
 
 /** A teacher adds a lesson for one of their students in one of their own open slots. */
-export function scheduleLessonForStudent(actorId: string, input: BookLessonInput & { studentId: string }): ServiceResult<Lesson> {
+export function scheduleLessonForStudent(actorId: string, input: BookLessonInput & { studentId: string }): ServiceCall<Lesson> {
+  if (isApiDataMode()) return runAsync(async () => await createLessonApi(input) as Lesson);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "lesson.schedule", { teacherId: input.teacherId });
@@ -40,7 +44,8 @@ export function scheduleLessonForStudent(actorId: string, input: BookLessonInput
   }));
 }
 
-export function rescheduleLesson(actorId: string, lessonId: string, date: string, time: string): ServiceResult<Lesson> {
+export function rescheduleLesson(actorId: string, lessonId: string, date: string, time: string): ServiceCall<Lesson> {
+  if (isApiDataMode()) return runAsync(async () => await rebookLessonApi(lessonId, date, time) as Lesson);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);
@@ -53,7 +58,8 @@ export function rescheduleLesson(actorId: string, lessonId: string, date: string
 }
 
 /** Student cancellation. Refunded only when made at least `studentLateCancellationHours` ahead. */
-export function cancelLessonByStudent(actorId: string, lessonId: string, reason: string): ServiceResult<{ refunded: boolean }> {
+export function cancelLessonByStudent(actorId: string, lessonId: string, reason: string): ServiceCall<{ refunded: boolean }> {
+  if (isApiDataMode()) return runAsync(async () => await cancelLessonApi(lessonId, reason) as { refunded: boolean });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);
@@ -68,7 +74,8 @@ export function cancelLessonByStudent(actorId: string, lessonId: string, reason:
 }
 
 /** Book the same lesson again with the same teacher at a new time. */
-export function rebookLesson(actorId: string, lessonId: string, date: string, time: string): ServiceResult<Lesson> {
+export function rebookLesson(actorId: string, lessonId: string, date: string, time: string): ServiceCall<Lesson> {
+  if (isApiDataMode()) return runAsync(async () => await updateLesson(lessonId, { date, time }) as Lesson);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const original = requireLesson(draft, lessonId);
@@ -85,7 +92,8 @@ export function rebookLesson(actorId: string, lessonId: string, date: string, ti
  * student booking: the slot must be open, the student must have credits, and the lesson gets
  * the next plan from the student's enrollment with that teacher.
  */
-export function bookLessonOnBehalf(actorId: string, input: BookLessonInput & { studentId: string }): ServiceResult<Lesson> {
+export function bookLessonOnBehalf(actorId: string, input: BookLessonInput & { studentId: string }): ServiceCall<Lesson> {
+  if (isApiDataMode()) return runAsync(async () => { const slotId = slotIdFor(input.teacherId, input.date, input.time); if (!slotId) throw new ServiceError("That slot is no longer open."); return await bookSlot(slotId, input.studentId) as Lesson; });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "lesson.bookOnBehalf", { teacherId: input.teacherId, studentId: input.studentId });

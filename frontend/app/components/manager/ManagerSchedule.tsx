@@ -69,11 +69,11 @@ function BookOnBehalfModal({ user, initial, teachers, onBooked, onClose }: {
   const chosenStudent = students.find((row) => row.student.id === studentId) ?? students[0];
   const chosenTime = slots.some((slot) => slot.time === time) ? time : slots[0]?.time ?? "";
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!chosenStudent) return setError("No active students on your team.");
     if (!chosenTime) return setError("Choose a day with an open slot.");
-    const result = bookLessonOnBehalf(user.id, { teacherId, studentId: chosenStudent.student.id, date, time: chosenTime, title, focus: [title.split(" ")[0], "Tutoring"] });
+    const result = await bookLessonOnBehalf(user.id, { teacherId, studentId: chosenStudent.student.id, date, time: chosenTime, title, focus: [title.split(" ")[0], "Tutoring"] });
     if (!result.ok) return setError(result.error);
     onBooked(`${title} booked for ${chosenStudent.student.name} with ${teachers.find((teacher) => teacher.id === teacherId)?.name} on ${formatLessonDate(date)} at ${chosenTime}.`);
     onClose();
@@ -193,15 +193,15 @@ export default function ManagerSchedule({ user, onNotice }: { user: SchoolUser; 
       lessonLabel={`${dialog.item.lesson.title} · ${dialog.item.teacherName} → ${dialog.item.studentName} · ${formatLessonDate(dialog.item.lesson.date)} ${dialog.item.time}`}
       groups={planGroups} currentPlanId={dialog.item.lesson.lessonPlanId} preferredCourseId={extras.preferredCourseId}
       onClose={() => setDialog(null)}
-      onSubmit={(planId) => {
-        const result = assignPlanToLesson(user.id, dialog.item.lesson.id, planId);
+      onSubmit={async (planId) => {
+        const result = await assignPlanToLesson(user.id, dialog.item.lesson.id, planId);
         if (result.ok) onNotice(planId ? "Plan updated. The teacher and student see it now." : "Plan removed from the lesson.");
         return result;
       }} />}
     {dialog?.kind === "absence" && <AbsenceModal lessonLabel={`${dialog.item.lesson.title} · ${dialog.item.teacherName} → ${dialog.item.studentName} · ${formatLessonDate(dialog.item.lesson.date)} ${dialog.item.time}`}
       onClose={() => setDialog(null)}
-      onSubmit={(note) => {
-        const result = recordTeacherAbsence(user.id, dialog.item.lesson.id, note);
+      onSubmit={async (note) => {
+        const result = await recordTeacherAbsence(user.id, dialog.item.lesson.id, note);
         if (result.ok) onNotice("Absence recorded. The lesson is cancelled and the student refunded.");
         return result;
       }} />}

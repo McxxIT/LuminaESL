@@ -1,6 +1,6 @@
 # Lumina ESL - Frontend/Backend Cutover Plan
 
-Status: **Step A done. Step B (data adapter cutover) in progress.**
+Status: **Step A done. Step B (data adapter cutover) complete; Step B3 is next.**
 Companion to `PROGRESS.md` (current app state) and `ADMIN_PLAN.md` (admin/manager
 product plan). This file is the file-level execution plan for connecting the
 Next.js frontend to the Fastify/PostgreSQL API. Day-to-day status lives in
@@ -10,7 +10,7 @@ Written November 16, 2026.
 
 ```text
 Step A  Align accounts and seeds        (item 11)  DONE
-Step B  Data adapter cutover            (item 2)   IN PROGRESS
+Step B  Data adapter cutover            (item 2)   DONE
 Step C  Uploads + notifications         (items 3, 4)
 Step D  Parity suite + remove fallback  (items 12, 13)
 ```
@@ -46,6 +46,10 @@ one login and one dataset to test against.
 | Authoritative write | The API response wins. A failed call changes nothing; the cache is never the only copy of a write. |
 
 ## Step B - Data adapter cutover
+
+**Gate:** B2 is complete. All current school write services have typed API/local
+branches, async UI call sites, post-write bootstrap refresh, and backend routes
+for their required commands.
 
 ### B0. Backend prerequisites
 
@@ -83,26 +87,26 @@ one login and one dataset to test against.
 
 ### B1. Read path
 
-- [ ] **B1.1** Add `app/lib/school/api/bootstrap.ts` that fetches and validates
+- [x] **B1.1** Add `app/lib/school/api/bootstrap.ts` that fetches and validates
   `/school/bootstrap` as `SchoolData`.
-- [ ] **B1.2** Hydrate the existing store from it on load when
+- [x] **B1.2** Hydrate the existing store from it on load when
   `NEXT_PUBLIC_DATA_SOURCE=api`; keep `lumina-school:v1` only as offline
   cache/demo fallback.
-- [ ] **B1.3** Refresh after mutations and on window focus. Keep cross-tab sync
-  for local mode only.
+- [x] **B1.3** Refresh on window focus and keep cross-tab sync for local mode only.
+  Mutation refresh is implemented for the migrated B2 settings and self-name
+  commands.
 
 ### B2. Write path and async services
 
-- [ ] **B2.1** Add `app/lib/school/api/school.ts` with one typed function per
-  command, named after the service action.
-- [ ] **B2.2** Switch inside services: `local` keeps `updateSchool`; `api` calls
-  REST, then refreshes the cache.
-- [ ] **B2.3** Convert service return types to `Promise<ServiceResult>` and update
-  call sites to `await`; keep the local branch internally synchronous.
-- [ ] **B2.4** Surface `ApiError.message` through the existing toast path and keep
-  the "failed service changes nothing" guarantee.
+- [x] **B2.1** Add typed API modules for all current school write commands,
+  named after their service actions.
+- [x] **B2.2** Switch every current service inside its local/API branch.
+- [x] **B2.3** Convert every current service return type and UI call site to
+  async API-compatible results while keeping the local branch synchronous.
+- [x] **B2.4** Surface `ApiError.message` through `ServiceResult.error` for the
+  migrated commands and keep failed API writes from updating the server cache.
 
-### B3. Domain slices
+### B3. Domain slices (next)
 
 Do reads first, then writes in this order: settings/users, curriculum,
 enrollments/progress, bookings/slots, lessons/teaching, requests/approvals,

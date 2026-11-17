@@ -1,11 +1,24 @@
 import { todayISO } from "../../student";
+import { isApiDataMode } from "../../auth/mode";
+import {
+  assignTeacherToManager as assignTeacherToManagerApi,
+  createStudent as createStudentApi,
+  createUser,
+  enrollStudent as enrollStudentApi,
+  recordCreditAdjustment,
+  refreshSchoolAfterCommand,
+  setUserStatus,
+  updateUser,
+  updateStudent as updateStudentApi,
+  updateTeacher as updateTeacherApi,
+} from "../api/school";
 import { assertCan } from "../permissions";
 import { createId, get, list, patch, query, recordActivity, upsert } from "../repositories";
 import { managerIdForTeacher } from "../selectors";
 import { updateSchool } from "../store";
 import type { Guardian, SchoolData, SchoolRole, SchoolUser, UserStatus } from "../types";
 import { changeCredits, requireUser } from "./common";
-import { run, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceResult } from "./result";
 
 /** People management: managers (admin only), teachers, students, enrollments, and credits. */
 
@@ -57,7 +70,22 @@ function manageActionFor(user: SchoolUser) {
 
 // Managers --------------------------------------------------------------------------------
 
-export function createManager(actorId: string, input: { name: string; email: string }): ServiceResult<SchoolUser> {
+export function createManager(actorId: string, input: { name: string; email: string }): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      const user = await createUser({ name: cleanName(input.name), email: input.email.trim().toLowerCase(), role: "manager" });
+      await refreshSchoolAfterCommand();
+      return {
+        id: user.id,
+        role: "manager" as const,
+        name: user.name,
+        email: user.email,
+        status: user.status,
+        avatarColor: user.avatarColor ?? AVATAR_COLORS[0],
+        createdAt: user.createdAt ?? new Date().toISOString(),
+      };
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "manager.manage");
@@ -80,7 +108,23 @@ export type TeacherInput = {
   managerId?: string | null;
 };
 
-export function createTeacher(actorId: string, input: TeacherInput): ServiceResult<SchoolUser> {
+export function createTeacher(actorId: string, input: TeacherInput): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      const user = await createUser({ name: cleanName(input.name), email: input.email.trim().toLowerCase(), role: "teacher", managerId: input.managerId });
+      await updateTeacherApi(user.id, input);
+      await refreshSchoolAfterCommand();
+      return {
+        id: user.id,
+        role: "teacher" as const,
+        name: user.name,
+        email: user.email,
+        status: user.status,
+        avatarColor: user.avatarColor ?? AVATAR_COLORS[0],
+        createdAt: user.createdAt ?? new Date().toISOString(),
+      };
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "teacher.create");
@@ -101,7 +145,13 @@ export function createTeacher(actorId: string, input: TeacherInput): ServiceResu
   }));
 }
 
-export function updateTeacher(actorId: string, teacherId: string, input: Omit<TeacherInput, "managerId">): ServiceResult {
+export function updateTeacher(actorId: string, teacherId: string, input: Omit<TeacherInput, "managerId">): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await updateTeacherApi(teacherId, input);
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "teacher.manage", { teacherId });
@@ -123,7 +173,14 @@ export function updateTeacher(actorId: string, teacherId: string, input: Omit<Te
  * Admin moves a teacher to another manager (or unassigns them). Students whose active enrollment
  * is with this teacher move too; pending requests follow automatically (they route by teacher).
  */
-export function assignTeacherToManager(actorId: string, teacherId: string, managerId: string | null): ServiceResult<{ studentsMoved: number }> {
+export function assignTeacherToManager(actorId: string, teacherId: string, managerId: string | null): ServiceResult<{ studentsMoved: number }> | Promise<ServiceResult<{ studentsMoved: number }>> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await assignTeacherToManagerApi(teacherId, managerId);
+      await refreshSchoolAfterCommand();
+      return { studentsMoved: 0 };
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "teacher.assignManager");
@@ -148,7 +205,27 @@ export type StudentInput = {
   guardian?: Guardian | null;
 };
 
-export function createStudent(actorId: string, input: StudentInput & { teacherId?: string; courseId?: string; startingCredits?: number; managerId?: string | null }): ServiceResult<SchoolUser> {
+export function createStudent(actorId: string, input: StudentInput & { teacherId?: string; courseId?: string; startingCredits?: number; managerId?: string | null }): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      if (input.startingCredits && !Number.isInteger(input.startingCredits)) {
+        throw new ServiceError("Starting credits must be a whole number in API mode.");
+      }
+      const user = await createStudentApi(input);
+      if (input.teacherId && input.courseId) await enrollStudentApi(user, input.teacherId, input.courseId);
+      if (input.startingCredits) await recordCreditAdjustment(user, input.startingCredits, "Starting credits");
+      await refreshSchoolAfterCommand();
+      return {
+        id: user,
+        role: "student" as const,
+        name: input.name.trim(),
+        email: input.email.trim().toLowerCase(),
+        status: "active",
+        avatarColor: AVATAR_COLORS[0],
+        createdAt: new Date().toISOString(),
+      };
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "student.create");
@@ -174,7 +251,13 @@ function cleanGuardian(guardian: Guardian | null | undefined): Guardian | undefi
   return { name: guardian.name.trim(), email, phone: guardian.phone?.trim() || undefined, relationship: guardian.relationship?.trim() || undefined };
 }
 
-export function updateStudent(actorId: string, studentId: string, input: StudentInput): ServiceResult {
+export function updateStudent(actorId: string, studentId: string, input: StudentInput): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await updateStudentApi(studentId, input);
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "student.manage", { studentId });
@@ -201,7 +284,13 @@ function addEnrollment(draft: SchoolData, studentId: string, teacherId: string, 
  * Enroll a student with a teacher in a course. Any current enrollment ends. Lessons already
  * booked stay with the teacher they were booked with.
  */
-export function enrollStudent(actorId: string, studentId: string, teacherId: string, courseId: string): ServiceResult {
+export function enrollStudent(actorId: string, studentId: string, teacherId: string, courseId: string): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await enrollStudentApi(studentId, teacherId, courseId);
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "enrollment.manage", { studentId, teacherId });
@@ -210,7 +299,13 @@ export function enrollStudent(actorId: string, studentId: string, teacherId: str
   }));
 }
 
-export function adjustCredits(actorId: string, studentId: string, hours: number, reason: string): ServiceResult {
+export function adjustCredits(actorId: string, studentId: string, hours: number, reason: string): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await recordCreditAdjustment(studentId, hours, reason.trim());
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "credits.adjust", { studentId });
@@ -224,7 +319,13 @@ export function adjustCredits(actorId: string, studentId: string, hours: number,
 // Any person ------------------------------------------------------------------------------
 
 /** Pause or reactivate a manager (admin), teacher, or student. Paused people cannot sign in or act. */
-export function setPersonStatus(actorId: string, userId: string, status: Exclude<UserStatus, "archived">): ServiceResult {
+export function setPersonStatus(actorId: string, userId: string, status: Exclude<UserStatus, "archived">): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await setUserStatus(userId, status);
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const person = get(draft, "users", userId);
@@ -237,7 +338,13 @@ export function setPersonStatus(actorId: string, userId: string, status: Exclude
   }));
 }
 
-export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult {
+export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await updateUser(managerId, { name: cleanName(input.name), email: input.email });
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "manager.manage");

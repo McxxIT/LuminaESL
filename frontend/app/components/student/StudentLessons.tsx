@@ -5,7 +5,7 @@ import Icon from "../Icon";
 import StudentModal from "./StudentModal";
 import LessonRating from "./LessonRating";
 import type { BookableTutor, BookLessonInput } from "./useStudentWorkspace";
-import type { RateLessonInput, ServiceResult } from "../../lib/school/services";
+import type { RateLessonInput, ServiceCall } from "../../lib/school/services";
 import { buildDaySlots, canJoinLesson, findNextOpenSlot } from "../../lib/scheduling";
 import { downloadTextFile, formatLessonDate, formatLongDate, isoDaysFromNow, todayISO } from "../../lib/student";
 import type { StudentLesson, TeacherLesson, TeacherSlotClosure, TeacherSlotOpening } from "../../lib/types";
@@ -19,11 +19,11 @@ type LessonsProps = {
   tutors: BookableTutor[];
   /** Live slot rules and every student's bookings for a teacher. */
   getTutorSchedule: (teacherId: string) => TutorSchedule;
-  onBookLesson: (input: BookLessonInput) => ServiceResult<StudentLesson>;
-  onRescheduleLesson: (id: string, date: string, time: string) => ServiceResult<StudentLesson>;
-  onCancelLesson: (id: string, reason: string) => ServiceResult<{ refunded: boolean }>;
-  onRebookLesson: (id: string, date: string, time: string) => ServiceResult<StudentLesson>;
-  onRateLesson: (id: string, input: RateLessonInput) => ServiceResult<unknown>;
+  onBookLesson: (input: BookLessonInput) => ServiceCall<StudentLesson>;
+  onRescheduleLesson: (id: string, date: string, time: string) => ServiceCall<StudentLesson>;
+  onCancelLesson: (id: string, reason: string) => ServiceCall<{ refunded: boolean }>;
+  onRebookLesson: (id: string, date: string, time: string) => ServiceCall<StudentLesson>;
+  onRateLesson: (id: string, input: RateLessonInput) => ServiceCall<unknown>;
   onNotice: (message: string) => void;
 };
 
@@ -134,7 +134,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
     }));
   }
 
-  function submitBooking(event: FormEvent<HTMLFormElement>) {
+  async function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const tutor = bookableTutors.find((item) => item.id === bookForm.tutor);
     if (!tutor || !bookForm.date || bookForm.date < todayISO()) {
@@ -145,7 +145,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
       onNotice("Choose an open 25-minute slot for your lesson.");
       return;
     }
-    const result = onBookLesson({
+    const result = await onBookLesson({
       teacherId: tutor.id,
       date: bookForm.date,
       time: bookForm.time,
@@ -179,7 +179,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
     }));
   }
 
-  function submitReschedule(event: FormEvent<HTMLFormElement>) {
+  async function submitReschedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!rescheduleTarget) return;
     if (!rescheduleForm.date || rescheduleForm.date < todayISO()) {
@@ -190,7 +190,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
       onNotice("Choose an open 25-minute slot for the reschedule.");
       return;
     }
-    const result = onRescheduleLesson(rescheduleTarget.id, rescheduleForm.date, rescheduleForm.time);
+    const result = await onRescheduleLesson(rescheduleTarget.id, rescheduleForm.date, rescheduleForm.time);
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -200,10 +200,10 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
     onNotice(`Lesson rescheduled to ${formatLessonDate(rescheduleForm.date)} at ${rescheduleForm.time}.`);
   }
 
-  function submitCancel(event: FormEvent<HTMLFormElement>) {
+  async function submitCancel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cancelTarget) return;
-    const result = onCancelLesson(cancelTarget.id, cancelReason.trim() || "Cancelled by student");
+    const result = await onCancelLesson(cancelTarget.id, cancelReason.trim() || "Cancelled by student");
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -214,7 +214,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
     onNotice(result.value.refunded ? "Lesson cancelled. Your lesson credit has been returned." : "Lesson cancelled. Cancellations within 24 hours of the start are not refunded.");
   }
 
-  function rebook(lesson: StudentLesson) {
+  async function rebook(lesson: StudentLesson) {
     if (!lesson.tutorId) {
       onNotice("This lesson's teacher is no longer available to rebook.");
       return;
@@ -230,7 +230,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
       onNotice("No open 25-minute slots in the next two weeks. Try another tutor.");
       return;
     }
-    const result = onRebookLesson(lesson.id, slot.date, slot.time);
+    const result = await onRebookLesson(lesson.id, slot.date, slot.time);
     if (!result.ok) {
       onNotice(result.error);
       return;

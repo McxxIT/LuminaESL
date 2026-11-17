@@ -34,10 +34,10 @@ export default function ManagerApprovals({ user, approvals, onNotice }: {
     setCancellationTarget({ lesson, decision });
   }
 
-  function submitClosure(event: FormEvent<HTMLFormElement>) {
+  async function submitClosure(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!closureTarget) return;
-    const result = reviewClosure(closureTarget.closure.id, closureTarget.decision, note);
+    const result = await reviewClosure(closureTarget.closure.id, closureTarget.decision, note);
     if (!result.ok) {
       onNotice(result.error);
       return;
@@ -46,10 +46,10 @@ export default function ManagerApprovals({ user, approvals, onNotice }: {
     setClosureTarget(null);
   }
 
-  function submitCancellation(event: FormEvent<HTMLFormElement>) {
+  async function submitCancellation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cancellationTarget) return;
-    const result = reviewCancellation(cancellationTarget.lesson.id, cancellationTarget.decision, note);
+    const result = await reviewCancellation(cancellationTarget.lesson.id, cancellationTarget.decision, note);
     if (!result.ok) {
       onNotice(result.error);
       return;

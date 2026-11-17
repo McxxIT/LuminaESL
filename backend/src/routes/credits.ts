@@ -15,7 +15,7 @@ const listQuerySchema = z.object({
 
 const createCreditSchema = z.object({
   studentId: z.string().uuid(),
-  hours: z.number().int().min(-100).max(100),
+  hours: z.number().finite().min(-100).max(100),
   amount: z.number().int().min(0).optional(),
   reason: z.enum(["purchase", "refund", "adjustment"]),
   description: z.string().trim().min(1).max(500),
@@ -110,7 +110,7 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
 
       const [row] = await app.db
         .select({
-          value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)::int`,
+          value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)::numeric`,
         })
         .from(creditEntries)
         .where(eq(creditEntries.studentId, params.studentId));
@@ -121,7 +121,7 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
 
   app.post(
     "/",
-    { preHandler: app.requireRole(["admin", "manager"]) },
+    { preHandler: app.requireRole(["admin", "manager", "student"]) },
     async (request, reply) => {
       const body = createCreditSchema.parse(request.body);
 
@@ -132,6 +132,9 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       if (!student || student.role !== "student") {
         throw badRequest("studentId must belong to a student");
+      }
+      if (request.user.role === "student" && (body.studentId !== request.user.sub || body.reason !== "purchase")) {
+        throw forbidden("Students may only purchase credits for their own account");
       }
       if (
         request.user.role === "manager" &&

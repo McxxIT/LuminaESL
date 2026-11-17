@@ -2,14 +2,18 @@ import { isSlotInPast } from "../../scheduling";
 import { fileStorageKey, saveFile } from "../files";
 import { assertCan } from "../permissions";
 import { createId, get, patch, query, recordActivity, remove, upsert } from "../repositories";
-import { updateSchool } from "../store";
+import { getSchoolSnapshot, updateSchool } from "../store";
+import { isApiDataMode } from "../../auth/mode";
+import { completeLesson as completeLessonApi, createRequest, withdrawRequest } from "../api/teaching";
+import { openSlot as openSlotApi } from "../api/bookings";
 import type { LessonAttendance, LessonCancellationRequest, SlotClosureRequest } from "../types";
 import { requireLesson, requireUser } from "./common";
-import { run, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceCall } from "./result";
 
 /** Teacher actions on their own slots and lessons. */
 
-export function openSlot(actorId: string, date: string, time: string): ServiceResult {
+export function openSlot(actorId: string, date: string, time: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await openSlotApi(actorId, date, time); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "slot.open", { teacherId: actor.id });
@@ -23,7 +27,8 @@ export function openSlot(actorId: string, date: string, time: string): ServiceRe
   }));
 }
 
-export function requestSlotClosure(actorId: string, date: string, time: string, reason: string): ServiceResult {
+export function requestSlotClosure(actorId: string, date: string, time: string, reason: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await createRequest({ type: "slot-closure", date, time, reason }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "request.create", { teacherId: actor.id });
@@ -37,7 +42,8 @@ export function requestSlotClosure(actorId: string, date: string, time: string, 
   }));
 }
 
-export function withdrawSlotClosure(actorId: string, date: string, time: string): ServiceResult {
+export function withdrawSlotClosure(actorId: string, date: string, time: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const request = Object.values(getSchoolSnapshot().collections.requests).find((item) => item.type === "slot-closure" && item.date === date && item.time === time && item.status === "pending"); if (!request) throw new ServiceError("That closure request is no longer pending."); await withdrawRequest(request.id); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "request.create", { teacherId: actor.id });
@@ -52,7 +58,8 @@ export type CancellationRequestInput = {
   attachment?: { name: string; type: string; dataUrl: string };
 };
 
-export function requestLessonCancellation(actorId: string, lessonId: string, input: CancellationRequestInput): ServiceResult {
+export function requestLessonCancellation(actorId: string, lessonId: string, input: CancellationRequestInput): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { await createRequest({ type: "lesson-cancellation", lessonId, reason: input.reason, comment: input.comment }); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);
@@ -74,7 +81,8 @@ export function requestLessonCancellation(actorId: string, lessonId: string, inp
   }));
 }
 
-export function withdrawLessonCancellation(actorId: string, lessonId: string): ServiceResult {
+export function withdrawLessonCancellation(actorId: string, lessonId: string): ServiceCall {
+  if (isApiDataMode()) return runAsync(async () => { const request = Object.values(getSchoolSnapshot().collections.requests).find((item) => item.type === "lesson-cancellation" && item.lessonId === lessonId && item.status === "pending"); if (!request) throw new ServiceError("That cancellation request is no longer pending."); await withdrawRequest(request.id); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "request.create", { lessonId });
@@ -86,7 +94,8 @@ export function withdrawLessonCancellation(actorId: string, lessonId: string): S
 export type CompleteLessonInput = { attendance: LessonAttendance; feedback: string; homework: string };
 
 /** Writes the lesson report once (both teacher and student see it) and advances the course. */
-export function completeLesson(actorId: string, lessonId: string, input: CompleteLessonInput): ServiceResult<{ firstCompletion: boolean }> {
+export function completeLesson(actorId: string, lessonId: string, input: CompleteLessonInput): ServiceCall<{ firstCompletion: boolean }> {
+  if (isApiDataMode()) return runAsync(async () => await completeLessonApi(lessonId, { attendance: input.attendance, feedback: input.feedback.trim() || undefined, homework: input.homework.trim() || undefined }) as { firstCompletion: boolean });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);

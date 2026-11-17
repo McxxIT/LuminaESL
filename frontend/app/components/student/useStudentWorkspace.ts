@@ -34,6 +34,7 @@ import {
   rebookLesson as rebookLessonService,
   rescheduleLesson as rescheduleLessonService,
   type ServiceResult,
+  type ServiceCall,
 } from "../../lib/school/services";
 import { initials } from "../../lib/student";
 import type {
@@ -112,8 +113,9 @@ function createPersonalState(account: Account): StudentPersonalState {
 const notSignedIn: ServiceResult<never> = { ok: false, error: "Your account was not found in the school." };
 
 /** Service results carry the shared lesson; student screens want their own view of it. */
-function toLessonResult(result: ServiceResult<Lesson>): ServiceResult<StudentLesson> {
-  return result.ok ? { ok: true, value: toStudentLessonView(getSchoolSnapshot(), result.value) } : result;
+async function toLessonResult(result: ServiceCall<Lesson>): Promise<ServiceResult<StudentLesson>> {
+  const resolved = await result;
+  return resolved.ok ? { ok: true, value: toStudentLessonView(getSchoolSnapshot(), resolved.value) } : resolved;
 }
 
 /** Teachers the student is enrolled with; every active teacher if they have no enrollment yet. */
@@ -193,13 +195,13 @@ export default function useStudentWorkspace(account: Account) {
     setPersonal((current) => ({ ...current, settings }));
   }, []);
 
-  const bookLesson = useCallback((input: BookLessonInput) => studentId ? toLessonResult(bookLessonService(studentId, input)) : notSignedIn, [studentId]);
+  const bookLesson = useCallback((input: BookLessonInput) => studentId ? toLessonResult(bookLessonService(studentId, input)) : Promise.resolve(notSignedIn), [studentId]);
 
-  const rescheduleLesson = useCallback((id: string, date: string, time: string) => studentId ? toLessonResult(rescheduleLessonService(studentId, id, date, time)) : notSignedIn, [studentId]);
+  const rescheduleLesson = useCallback((id: string, date: string, time: string) => studentId ? toLessonResult(rescheduleLessonService(studentId, id, date, time)) : Promise.resolve(notSignedIn), [studentId]);
 
-  const cancelLesson = useCallback((id: string, reason: string) => studentId ? cancelLessonByStudent(studentId, id, reason) : notSignedIn, [studentId]);
+  const cancelLesson = useCallback((id: string, reason: string) => studentId ? cancelLessonByStudent(studentId, id, reason) : Promise.resolve(notSignedIn), [studentId]);
 
-  const rebookLesson = useCallback((id: string, date: string, time: string) => studentId ? toLessonResult(rebookLessonService(studentId, id, date, time)) : notSignedIn, [studentId]);
+  const rebookLesson = useCallback((id: string, date: string, time: string) => studentId ? toLessonResult(rebookLessonService(studentId, id, date, time)) : Promise.resolve(notSignedIn), [studentId]);
 
   const toggleTask = useCallback((task: string) => {
     setPersonal((current) => ({

@@ -40,9 +40,9 @@ export default function ManagerProfile({ user, account, onUpdateAccount, onNavig
   const changed = draft.name !== user.name || draft.title !== prefs.title || draft.phone !== prefs.phone || draft.bio !== prefs.bio;
   const memberSince = new Date(user.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  function save(event?: FormEvent<HTMLFormElement>) {
+  async function save(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    const result = updateMyName(user.id, draft.name);
+    const result = await updateMyName(user.id, draft.name);
     if (!result.ok) return setError(result.error);
     setError("");
     setPrefs((current) => ({ ...current, title: draft.title.trim(), phone: draft.phone.trim(), bio: draft.bio.trim() }));

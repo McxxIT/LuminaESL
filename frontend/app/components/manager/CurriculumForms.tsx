@@ -5,20 +5,20 @@ import Icon from "../Icon";
 import Modal from "../shared/Modal";
 import { teacherLevelOptions } from "../../lib/data";
 import type { AttachmentMeta, LessonPlan, LessonPlanSection } from "../../lib/school";
-import { DEFAULT_PLAN_SECTIONS, type ServiceResult } from "../../lib/school/services";
+import { DEFAULT_PLAN_SECTIONS, type ServiceCall, type ServiceResult } from "../../lib/school/services";
 
 export type CourseFormValues = { title: string; level: string; summary: string; objectives: string };
 
 export function CourseFormModal({ initial, onSubmit, onClose }: {
   initial?: CourseFormValues;
-  onSubmit: (values: CourseFormValues) => ServiceResult<unknown>;
+  onSubmit: (values: CourseFormValues) => ServiceCall<unknown>;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<CourseFormValues>(initial ?? { title: "", level: "B1 Intermediate", summary: "", objectives: "" });
   const [error, setError] = useState("");
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = onSubmit(form);
+    const result = await onSubmit(form);
     if (result.ok) onClose();
     else setError(result.error);
   }
@@ -51,9 +51,9 @@ export function LessonPlanModal({ unitTitle, plan, files, readOnly = false, onSa
   readOnly?: boolean;
   plan?: LessonPlan;
   files: AttachmentMeta[];
-  onSave: (values: { title: string; focus: string; summary: string; sections: LessonPlanSection[] }) => ServiceResult<LessonPlan>;
+  onSave: (values: { title: string; focus: string; summary: string; sections: LessonPlanSection[] }) => ServiceCall<LessonPlan>;
   onUpload: (planId: string, file: File) => Promise<ServiceResult<unknown>>;
-  onRemoveFile: (planId: string, attachmentId: string) => ServiceResult<unknown>;
+  onRemoveFile: (planId: string, attachmentId: string) => ServiceCall<unknown>;
   onDownload: (file: AttachmentMeta) => void;
   onClose: () => void;
 }) {
@@ -68,8 +68,8 @@ export function LessonPlanModal({ unitTitle, plan, files, readOnly = false, onSa
   const [notice, setNotice] = useState("");
   const [uploading, setUploading] = useState(false);
 
-  function save(closeAfter: boolean) {
-    const result = onSave({ title, focus, summary, sections: sections.map((section) => ({ heading: section.heading, items: section.items.split("\n") })) });
+  async function save(closeAfter: boolean) {
+    const result = await onSave({ title, focus, summary, sections: sections.map((section) => ({ heading: section.heading, items: section.items.split("\n") })) });
     if (!result.ok) {
       setError(result.error);
       return false;
@@ -126,7 +126,7 @@ export function LessonPlanModal({ unitTitle, plan, files, readOnly = false, onSa
         <Icon name="file" size={16} />
         <button type="button" className="plan-file-name" onClick={() => onDownload(file)}>{file.name}</button>
         <small>{formatSize(file.size)}</small>
-        {!readOnly && savedPlanId && <button type="button" className="icon-button" aria-label={`Remove ${file.name}`} onClick={() => { const result = onRemoveFile(savedPlanId, file.id); if (!result.ok) setError(result.error); }}><Icon name="trash" size={15} /></button>}
+        {!readOnly && savedPlanId && <button type="button" className="icon-button" aria-label={`Remove ${file.name}`} onClick={async () => { const result = await onRemoveFile(savedPlanId, file.id); if (!result.ok) setError(result.error); }}><Icon name="trash" size={15} /></button>}
       </div>)}
       {readOnly && files.length === 0 && <p className="manager-help">No files attached.</p>}
       {!readOnly && <label className={`plan-upload ${uploading ? "is-busy" : ""} ${savedPlanId ? "" : "is-disabled"}`}>
@@ -147,15 +147,15 @@ export function PlanPickerModal({ lessonLabel, groups, currentPlanId, preferredC
   groups: { course: { id: string; title: string }; plans: LessonPlan[] }[];
   currentPlanId?: string;
   preferredCourseId?: string;
-  onSubmit: (planId: string | null) => ServiceResult<unknown>;
+  onSubmit: (planId: string | null) => ServiceCall<unknown>;
   onClose: () => void;
 }) {
   const [planId, setPlanId] = useState(currentPlanId ?? "");
   const [error, setError] = useState("");
   const ordered = [...groups].sort((a, b) => Number(b.course.id === preferredCourseId) - Number(a.course.id === preferredCourseId));
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = onSubmit(planId || null);
+    const result = await onSubmit(planId || null);
     if (result.ok) onClose();
     else setError(result.error);
   }

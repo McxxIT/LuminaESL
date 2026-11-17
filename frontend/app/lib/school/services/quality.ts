@@ -1,9 +1,11 @@
 import { assertCan } from "../permissions";
+import { isApiDataMode } from "../../auth/mode";
+import { refreshSchoolAfterCommand, updateSchoolSettings as updateSchoolSettingsApi } from "../api/school";
 import { createId, get, query, recordActivity, upsert } from "../repositories";
 import { updateSchool } from "../store";
 import type { RatingScore, RatingSource, SchoolSettings } from "../types";
 import { requireLesson, requireUser } from "./common";
-import { run, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceResult } from "./result";
 
 /** Quality: student/parent ratings and the admin's school-wide rules. */
 
@@ -50,7 +52,13 @@ function inRange(value: number | undefined, min: number, max: number, label: str
 }
 
 /** Admin-only. Changes apply everywhere immediately (scores, warnings, refunds). */
-export function updateSchoolSettings(actorId: string, input: SchoolSettingsInput): ServiceResult {
+export function updateSchoolSettings(actorId: string, input: SchoolSettingsInput): ServiceResult | Promise<ServiceResult> {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      await updateSchoolSettingsApi(input);
+      await refreshSchoolAfterCommand();
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "settings.edit");

@@ -5,7 +5,7 @@
 export * from "./types";
 export * from "./selectors";
 export { can, assertCan, PermissionError, type SchoolAction, type PermissionTarget } from "./permissions";
-export { getSchoolSnapshot, subscribeSchool, updateSchool, resetSchool, configureSchoolStore, SCHOOL_STORAGE_KEY } from "./store";
+export { getSchoolSnapshot, subscribeSchool, updateSchool, resetSchool, hydrateSchool, clearSchoolSnapshot, configureSchoolStore, configureSchoolDataSource, SCHOOL_STORAGE_KEY, type SchoolDataSource } from "./store";
 export { createId, recordActivity } from "./repositories";
 export { createLocalStorageAdapter, createMemoryAdapter, type StorageAdapter } from "./adapter";
 export { SEED_IDS } from "./seed";
