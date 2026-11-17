@@ -325,15 +325,16 @@ is a shippable slice; the joint items are the cutover gates.
 
 **Execution order (decided November 16, 2026):** Step A = item 11 (align accounts
 and seeds) runs **before** Step B = item 2 (data adapter). Step A is done; the
-detailed, file-level plan for Step B is in "Cutover execution plan" below. Reason
-for the order: API-mode login used to land on "Account not found in the school"
-because the browser seed used `.school` and the API seed used `.test`; aligning
-identities first gives every later slice one login and one dataset to test.
+detailed, file-level plan for Step B is in `CUTOVER_PLAN.md`, with live status in
+`CUTOVER_PROGRESS.md`. Reason for the order: API-mode login used to land on
+"Account not found in the school" because the browser seed used `.school` and the
+API seed used `.test`; aligning identities first gives every later slice one login
+and one dataset to test.
 
 ### Frontend track
 
 1. **API client and auth UI.** ✅ (auth slice) Add a typed fetch client (`app/lib/api/`), wire login/logout/refresh to `/auth/*`, keep the access token in memory, and rely on the httpOnly refresh cookie. Replace the browser account switcher; keep the local demo login behind `NEXT_PUBLIC_DEMO_MODE` until parity is proven. **Landed:** `client.ts` (single-flight refresh + 401 retry, typed `ApiError`), `auth.ts`, `auth/session.ts`, `useAuth`, API/demo branching in `LoginScreen`, session restore and API logout in `LuminaApp`. Demo stays the default; accounts and seeds are now aligned (item 11), so API mode finds the user record.
-2. **School adapter cutover.** (**Step B** - see "Cutover execution plan".) Implement `app/lib/school/adapter.ts` against the REST endpoints (users, students, teachers, courses, enrollments, lessons, bookings, requests, assignments, credits, settings) and route the existing services through it. Keep `localStorage` only as a demo/offline fallback, then remove it from the production path.
+2. **School adapter cutover.** (**Step B** - see `CUTOVER_PLAN.md` and `CUTOVER_PROGRESS.md`.) Implement `app/lib/school/adapter.ts` against the REST endpoints (users, students, teachers, courses, enrollments, lessons, bookings, requests, assignments, credits, settings) and route the existing services through it. Keep `localStorage` only as a demo/offline fallback, then remove it from the production path.
 3. **Uploads UI.** Replace IndexedDB/localStorage file storage (`files.ts`, `services/uploads.ts`) with `POST /uploads` plus the download endpoint; keep attachment IDs in lesson plans and cancellation evidence.
 4. **Notifications UI.** Feed `useNotifications` from `GET /notifications`, consume server-side read/mute state once it exists, and keep the per-role derivation until the activity log covers every event.
 5. **Carried-over UI work.** Extract the role modal, shared summary cards, and a shared tab bar (the 390px sweep still shows tab rows overflowing on Curriculum, Lessons, and teacher Lessons); decide whether ended "upcoming" lessons still show Reschedule/Cancel; decide whether email/password self-service becomes a real flow.
@@ -357,143 +358,21 @@ identities first gives every later slice one login and one dataset to test.
 14. **On-the-spot window.** Still 2 hours (`ON_THE_SPOT_CANCELLATION_HOURS`); confirm whether it should be 24.
 15. **Notification multi-device state.** Decide how read/mute state is stored per user, then implement it on the backend.
 
-## Cutover execution plan
+## Cutover plan and progress (moved)
 
-Written November 16, 2026. This is the working plan behind "Next plan" items 11
-and 2. Check items off as slices land; keep this section and the status table in
-sync.
+The detailed, file-level frontend/backend cutover plan now lives in
+`CUTOVER_PLAN.md`; its live status board, rule-gap checklist, verification log,
+and open decisions live in `CUTOVER_PROGRESS.md`.
 
-```text
-Step A  Align accounts and seeds        (item 11, small, destructive DB reseed)
-Step B  Data adapter cutover            (item 2, the main integration)
-Step C  Uploads + notifications         (items 3, 4)
-Step D  Parity suite + remove fallback  (items 12, 13)
-```
+- **Step A - Align accounts and seeds:** done November 16, 2026. One `.school`
+  account set exists in the API seed and the browser seed; `npm run db:reset` is
+  the guarded local reset.
+- **Step B - Data adapter cutover:** in progress. See `CUTOVER_PROGRESS.md`.
+- **Steps C and D:** uploads/notifications, then the parity suite and removal of
+  the browser-store fallback.
 
-Why this order: API-mode sign-in works, but the workspace looks the account up by
-email in the browser seed. The legacy `.test` set was not there, so pages showed
-"Account not found in the school". Step A aligned identities first so every later
-slice has one login and one dataset to test against.
-
-### Decisions and open choices
-
-| Topic | Decision |
-| --- | --- |
-| **Canonical demo identities** | **Confirmed November 16, 2026:** keep the browser seed (`.school`) and change the API seed to match. The browser seed is the richer, user-facing demo; changing it would touch 27 references and every documented login, while the API seed is five `upsertUser` calls. |
-| Password | API seeded accounts keep `Password123!`. Demo browser sign-in keeps "any non-empty password". |
-| API seed scope in Step A | Identities and profile links only: admin, 2 managers, 1 teacher, 1 student. Full roster, courses, lessons and history arrive with Step B / item 13. |
-| Data source flag | Add `NEXT_PUBLIC_DATA_SOURCE=local` (default) or `api`, separate from `NEXT_PUBLIC_DEMO_MODE`, so auth and data can be verified independently. |
-| Local database reset | Added in Step A: guarded `npm run db:reset` (refuses when `NODE_ENV=production`) truncates, migrates, and seeds. Never run it automatically. |
-| Read path | One role-scoped `GET /api/v1/school/bootstrap` returning the existing `SchoolData` shape (settings + collections), so selectors and screens stay unchanged. Per-screen fetching would rewrite the whole UI for no benefit. |
-| Write path | Services call REST commands, then refresh the cache. Start with a bootstrap after each successful write (correct, slower); optimise to patch the cache from the response later. |
-| Sync to async | Services become `Promise<ServiceResult>` because REST is async. Call sites add `await`; screens keep the same toast/error handling. Do this per domain slice, not as one big-bang. |
-| Authoritative write | The API response wins. A failed call changes nothing; the cache is never the only copy of a write. |
-
-### Step A - Align accounts and seeds (item 11) ✅
-
-Done November 16, 2026. Files: `backend/src/db/seed.ts`, `backend/src/db/reset.ts`,
-`backend/package.json`, `package.json`, `README.md`, `frontend/PROGRESS.md`,
-`frontend/app/components/LoginScreen.tsx`.
-
-- [x] **A1. Replace the API seed identities** with the browser ones:
-
-  | Role | Name | Email | Source of truth |
-  | --- | --- | --- | --- |
-  | admin | Jamie Smith | `admin@lumina.school` | `school/seed.ts` |
-  | manager | Priya Raman | `manager@lumina.school` | `school/seed.ts` |
-  | manager | Marco Bianchi | `manager2@lumina.school` | `school/seed.ts` |
-  | teacher | Alex Johnson | `teacher@lumina.school` | `school/seed.ts` |
-  | student | Mia Chen | `student@lumina.school` | `data.ts` + `school/seed.ts` |
-
-- [x] **A2. Link the profiles the same way:** Alex reports to Priya; Mia's student profile reports to Priya with the same level, target, goal and guardian as the browser seed; Marco exists with no team yet (his team arrives with the data import). Verified: Alex's `managerId` equals Priya's user id; Mia is `B1 Intermediate` -> `B2 Upper intermediate`, guardian Wei Chen; Marco has no teachers.
-- [x] **A3. Add `db:reset`** (root and backend scripts) that truncates the 18 tables, then runs migrate + seed. `backend/src/db/reset.ts` prints the redacted database and table list, then truncates with `RESTART IDENTITY CASCADE`; `db:reset` chains `drizzle-kit migrate` and the seed. Documented as destructive and local-only; refuses `NODE_ENV=production`.
-- [x] **A4. Update every login list:** README demo accounts, the PROGRESS quick-start table, the `LoginScreen` note, and the seed console output now show the five `.school` accounts. No `.test` login remains in the repo.
-- [x] **A5. Reseed and verify:** `npm run db:reset` succeeded; API login as `admin@lumina.school` and `GET /auth/me` return Jamie Smith. A real Chromium check with `NEXT_PUBLIC_DEMO_MODE=false` rendered the admin shell (Jamie Smith in the sidebar) with no "Account not found"; demo mode signed in as `student@lumina.school` with an arbitrary password. `typecheck`, `lint`, and backend tests (7/7) pass.
-- [x] **A6. Record the result here** and commit the slice.
-
-Exit criteria: one account set works in both modes; no `.test` login is required;
-root `typecheck`, `lint`, backend tests and the auth checks pass.
-
-### Step B - Data adapter cutover (item 2)
-
-#### B0. Backend prerequisites
-
-- [ ] **B0.1 Bootstrap endpoint.** Add `GET /school/bootstrap` (authenticated, role-scoped) returning `{ settings, collections }` in `frontend/app/lib/school/types.ts` shapes. Scope: admin everything; manager own team + school-wide published courses; teacher own lessons/slots/roster; student own lessons/enrollments/assignments/credits.
-- [ ] **B0.2 Close the rule gaps in item 7 before switching writes:** advance `nextPlanIndex` on completion, one rating per source per lesson, block archiving enrolled courses, block deleting plans attached to lessons, record absences, late-cancellation refund window from settings, manager read scoping.
-- [ ] **B0.3 Stabilise response shapes:** ISO `YYYY-MM-DD` / `HH:MM` for dates and slots, string ids, arrays for focus/objectives/languages, `attachmentIds` on plans, no Drizzle-only field names in the UI payload.
-- [ ] **B0.4 Add contract tests** for the bootstrap shape and each command the adapter uses.
-
-#### B1. Read path
-
-- [ ] **B1.1** Add `app/lib/school/api/bootstrap.ts` that fetches and validates `/school/bootstrap` as `SchoolData`.
-- [ ] **B1.2** Hydrate the existing store from it on load when `NEXT_PUBLIC_DATA_SOURCE=api`; keep `lumina-school:v1` only as offline cache/demo fallback.
-- [ ] **B1.3** Refresh after mutations and on window focus. Keep cross-tab sync for local mode only.
-
-#### B2. Write path and async services
-
-- [ ] **B2.1** Add `app/lib/school/api/school.ts` with one typed function per command, named after the service action.
-- [ ] **B2.2** Switch inside services: `local` keeps `updateSchool`; `api` calls REST, then refreshes the cache.
-- [ ] **B2.3** Convert service return types to `Promise<ServiceResult>` and update call sites to `await`; keep the local branch internally synchronous.
-- [ ] **B2.4** Surface `ApiError.message` through the existing toast path and keep the "failed service changes nothing" guarantee.
-
-#### B3. Domain slices (each one shippable and verified)
-
-Do reads first, then writes in this order: settings/users, curriculum,
-enrollments/progress, bookings/slots, lessons/teaching, requests/approvals,
-credits, homework, quality/absence, profile/notifications.
-
-| Domain | Local code | API (prefix `/api/v1`) | Notes / gaps |
-| --- | --- | --- | --- |
-| School snapshot | `store.ts`, `selectors.ts` | `GET /school/bootstrap` (new) | Role-scoped; no whole-store PUT. |
-| Settings | `quality.updateSchoolSettings` | `GET/PATCH /settings` | Admin-only write; already guarded. |
-| People | `people.ts` | `GET/POST /users`, `PATCH /users/:id`, `GET/PATCH /teachers/:id`, `GET/PATCH /students/:id` | Manager team scoping missing; `PATCH /users/:id` is any authenticated user and must be narrowed. |
-| Profile name | `profile.updateMyName` | `PATCH /users/:id` | Verify self-only, or add `PATCH /users/me`. |
-| Curriculum | `curriculum.ts` | `/courses` CRUD, `/courses/:id/units`, `/courses/:id/units/:unitId/plans` | Archive/delete rules from item 7 missing. |
-| Enrollments | `people.enrollStudent` | `GET/POST /enrollments`, `PATCH /enrollments/:id` | Progress advance on completion missing. |
-| Bookings / slots | `bookings.ts`, `teaching.openSlot` | `GET/POST/DELETE /bookings/slots`, `POST /bookings` | Need rebook/reschedule mapping; slot close is a request, not a delete. |
-| Lessons / teaching | `teaching.ts` | `GET/PATCH /lessons/:id`, `POST /lessons/:id/complete` | Absence route missing (item 7). |
-| Requests / approvals | `approvals.ts` | `GET/POST /requests`, `POST /requests/:id/review` | Confirm refund + performance side effects match the store. |
-| Credits | `credits.ts`, `common.changeCredits` | `GET /credits`, `GET /credits/balance/:studentId`, `POST /credits` | Balance/ledger shape must match selectors. |
-| Homework | `homework.ts` | `GET/POST /assignments`, `POST /assignments/:id/submit`, `POST /assignments/:id/review` | Scope checks already server-side. |
-| Quality | `quality.rateLesson` | `POST /lessons/:id/ratings` | Enforce one per source per lesson (item 7). |
-| Uploads | `files.ts`, `uploads.ts` | `POST /uploads`, `GET /uploads/:id/download` | Step C; keep attachment ids, not bytes, in the store. |
-| Notifications | `notifications.ts` | `GET /notifications` | Step C; read/mute state still client-side (item 15). |
-| Activity | `repositories.recordActivity` | `GET /activity` (new) | Needed for the admin log and notification parity. |
-
-#### B4. Verification per slice
-
-For every slice: `npm run typecheck`, `npm run lint`, backend `npm test`, the live
-smoke flow, and a browser pass at 1440px and 390px as admin, manager, teacher,
-and student. Add a Playwright case for the user-visible flow before moving on.
-
-#### B5. Exit criteria
-
-- `NEXT_PUBLIC_DATA_SOURCE=api` and `NEXT_PUBLIC_DEMO_MODE=false` runs every role from PostgreSQL only.
-- Writes round-trip: booking, cancellation/refund, homework, rating, settings, people.
-- No screen reads or writes `lumina-school:v1` in API mode.
-- Bootstrap + the domain slices pass contract tests and the parity suite.
-
-### Step C - Uploads and notifications (items 3, 4)
-
-- [ ] Replace IndexedDB/localStorage bytes with `POST /uploads` and `GET /uploads/:id/download`; keep attachment ids on plans and cancellation evidence.
-- [ ] Feed `useNotifications` from `GET /notifications`; keep the per-role derivation until the activity log covers every event.
-- [ ] Decide notification read/mute storage per user (item 15) and implement it on the backend.
-
-### Step D - Parity suite, migration, removal (items 12, 13)
-
-- [ ] Run the existing Playwright audit flow against the API-backed build; add login, booking, cancellation/refund, homework, upload and notification cases to CI.
-- [ ] Provide a one-time import from `lumina-school:v1` and IndexedDB into PostgreSQL.
-- [ ] Delete duplicated seed data and the browser-store fallback from the production path; keep a documented rollback flag (`NEXT_PUBLIC_DATA_SOURCE=local`) for one release.
-
-### Risks and mitigations
-
-- **Rules drift between store and API.** Port the rules first (B0.2) and cover each with a contract test; do not cut over a domain whose rules differ.
-- **Async conversion churn.** Do it per domain slice; keep the local branch synchronous and the UI toast contract unchanged.
-- **Read-model gaps.** Bootstrap solves selectors first; dashboards that need aggregates get dedicated endpoints in item 8.
-- **Data volume.** Bootstrap is acceptable for the demo; before production, add pagination/read models and stop shipping the whole school to every role.
-- **ID and timestamp mismatch.** Normalise ids to strings and dates to `YYYY-MM-DD` / `HH:MM` in the response mappers; test with real seeded rows.
-- **Destructive reset.** `db:reset` is manual, prints what it will truncate, and refuses in production.
-- **Lost writes.** API is authoritative; cache is a view. Never queue writes silently.
+Keep this summary and the two files in sync when a step lands; do not re-grow the
+detail here.
 
 ## Definition of done
 

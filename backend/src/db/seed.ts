@@ -1,15 +1,19 @@
 import "dotenv/config";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { loadEnv } from "../config/env";
 import { hashPassword } from "../lib/password";
+import { addMinutes, LESSON_MINUTES } from "../lib/time";
 import {
   assignments,
   courseUnits,
   courses,
   creditEntries,
+  enrollments,
   lessonPlans,
+  lessons,
+  ratings,
   settings,
   slotOpenings,
   studentProfiles,
@@ -119,7 +123,16 @@ async function main() {
 
   await db
     .insert(settings)
-    .values({ id: 1 })
+    .values({
+      id: 1,
+      schoolName: "Lumina ESL",
+      onTheSpotCancellationHours: 2,
+      performanceWindowDays: 30,
+      bookingDayStart: "08:00",
+      bookingDayEnd: "23:30",
+      studentLateCancellationHours: 24,
+      refundTeacherCancellations: true,
+    })
     .onConflictDoNothing({ target: settings.id });
 
   const [existingCourse] = await db
@@ -234,6 +247,106 @@ async function main() {
       instructions: "Upload an audio note and include one question.",
       dueLabel: "Before next lesson",
     });
+  }
+
+  const [demoUnit] = await db
+    .select()
+    .from(courseUnits)
+    .where(eq(courseUnits.courseId, courseId))
+    .orderBy(courseUnits.order)
+    .limit(1);
+  const [demoPlan] = demoUnit
+    ? await db
+        .select()
+        .from(lessonPlans)
+        .where(eq(lessonPlans.unitId, demoUnit.id))
+        .orderBy(lessonPlans.order)
+        .limit(1)
+    : [];
+
+  const [existingEnrollment] = await db
+    .select()
+    .from(enrollments)
+    .where(
+      and(
+        eq(enrollments.studentId, student.id),
+        eq(enrollments.teacherId, teacher.id),
+        eq(enrollments.courseId, courseId),
+      ),
+    )
+    .limit(1);
+  const enrollment =
+    existingEnrollment ??
+    (
+      await db
+        .insert(enrollments)
+        .values({
+          studentId: student.id,
+          teacherId: teacher.id,
+          courseId,
+          nextPlanIndex: demoPlan ? 1 : 0,
+        })
+        .returning()
+    )[0];
+  if (!enrollment) throw new Error("Failed to seed enrollment");
+
+  const [existingLesson] = await db
+    .select({ id: lessons.id })
+    .from(lessons)
+    .where(eq(lessons.studentId, student.id))
+    .limit(1);
+  if (!existingLesson) {
+    const [completedLesson] = await db
+      .insert(lessons)
+      .values({
+        enrollmentId: enrollment.id,
+        teacherId: teacher.id,
+        studentId: student.id,
+        date: isoDate(-1),
+        time: "09:00",
+        endTime: addMinutes("09:00", LESSON_MINUTES),
+        title: demoPlan?.title ?? "Everyday Business English",
+        focus: demoPlan?.focus ?? [],
+        status: "completed",
+        lessonPlanId: demoPlan?.id ?? null,
+        planAttachedBy: teacher.id,
+        planAttachedAt: new Date(),
+        attendance: "attended",
+        feedback: "Clear progress on signposting; keep practising short summaries.",
+        createdBy: teacher.id,
+      })
+      .returning();
+
+    await db
+      .insert(lessons)
+      .values({
+        enrollmentId: enrollment.id,
+        teacherId: teacher.id,
+        studentId: student.id,
+        date: isoDate(3),
+        time: "11:00",
+        endTime: addMinutes("11:00", LESSON_MINUTES),
+        title: "Clarifying action items",
+        focus: ["questions", "modal verbs"],
+        status: "scheduled",
+        lessonPlanId: demoPlan?.id ?? null,
+        planAttachedBy: teacher.id,
+        planAttachedAt: new Date(),
+        createdBy: teacher.id,
+      });
+
+    if (completedLesson) {
+      await db.insert(ratings).values({
+        lessonId: completedLesson.id,
+        teacherId: teacher.id,
+        studentId: student.id,
+        from: "student",
+        authorId: student.id,
+        authorName: student.name,
+        score: 5,
+        comment: "Alex made the role play feel like a real client call.",
+      });
+    }
   }
 
   console.log("Seed complete.");

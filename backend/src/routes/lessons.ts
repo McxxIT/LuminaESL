@@ -1,12 +1,33 @@
 import type { FastifyPluginAsync } from "fastify";
 import { alias } from "drizzle-orm/pg-core";
-import { and, asc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { lessons, ratings, users } from "../db/schema";
+import {
+  absences,
+  creditEntries,
+  enrollments,
+  lessons,
+  ratings,
+  settings,
+  studentProfiles,
+  users,
+} from "../db/schema";
 import { logActivity } from "../lib/activity";
-import { badRequest, forbidden, notFound } from "../lib/errors";
+import {
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+} from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
-import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time";
+import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
+import {
+  addMinutes,
+  hoursUntil,
+  isValidClockTime,
+  LESSON_MINUTES,
+  slotStartDate,
+} from "../lib/time";
 
 const idParams = z.object({ id: z.string().uuid() });
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -81,6 +102,14 @@ const rateSchema = z.object({
   from: z.enum(["student", "parent"]).optional(),
 });
 
+const cancelSchema = z.object({
+  reason: z.string().trim().max(1000).optional(),
+});
+
+const absenceSchema = z.object({
+  note: z.string().trim().min(5).max(2000),
+});
+
 const teacherUser = alias(users, "teacher_user");
 const studentUser = alias(users, "student_user");
 
@@ -97,6 +126,8 @@ const lessonColumns = {
   status: lessons.status,
   roomCode: lessons.roomCode,
   lessonPlanId: lessons.lessonPlanId,
+  planAttachedBy: lessons.planAttachedBy,
+  planAttachedAt: lessons.planAttachedAt,
   notes: lessons.notes,
   homework: lessons.homework,
   attendance: lessons.attendance,
@@ -137,6 +168,13 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         conditions.push(eq(lessons.studentId, request.user.sub));
       } else if (request.user.role === "teacher") {
         conditions.push(eq(lessons.teacherId, request.user.sub));
+      } else if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        conditions.push(
+          team.teacherIds.length
+            ? inArray(lessons.teacherId, team.teacherIds)
+            : sql`false`,
+        );
       }
 
       const where = conditions.length ? and(...conditions) : undefined;
@@ -192,6 +230,12 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       ) {
         throw forbidden();
       }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, lesson.teacherId))
+      ) {
+        throw forbidden();
+      }
 
       const lessonRatings = await app.db
         .select()
@@ -213,6 +257,12 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
           ? request.user.sub
           : body.teacherId;
       if (!teacherId) throw badRequest("teacherId is required");
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, teacherId))
+      ) {
+        throw forbidden("This teacher is not on your team");
+      }
 
       const [teacher] = await app.db
         .select({ id: users.id, role: users.role })
@@ -230,6 +280,12 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       if (!student || student.role !== "student") {
         throw badRequest("studentId must belong to a student");
+      }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsStudent(app.db, request.user.sub, body.studentId))
+      ) {
+        throw forbidden("This student is not on your team");
       }
 
       const [lesson] = await app.db
@@ -285,6 +341,12 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       ) {
         throw forbidden();
       }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))
+      ) {
+        throw forbidden();
+      }
 
       const [updated] = await app.db
         .update(lessons)
@@ -311,11 +373,18 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
           ...(body.cancelReason !== undefined && {
             cancelReason: body.cancelReason,
           }),
-          ...(body.lessonPlanId !== undefined && {
-            lessonPlanId: body.lessonPlanId,
-            planAttachedBy: request.user.sub,
-            planAttachedAt: new Date(),
-          }),
+          ...(body.lessonPlanId !== undefined &&
+            (body.lessonPlanId
+              ? {
+                  lessonPlanId: body.lessonPlanId,
+                  planAttachedBy: request.user.sub,
+                  planAttachedAt: new Date(),
+                }
+              : {
+                  lessonPlanId: null,
+                  planAttachedBy: null,
+                  planAttachedAt: null,
+                })),
           updatedAt: new Date(),
         })
         .where(eq(lessons.id, id))
@@ -334,7 +403,13 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       const body = completeLessonSchema.parse(request.body);
 
       const [existing] = await app.db
-        .select({ teacherId: lessons.teacherId, title: lessons.title })
+        .select({
+          teacherId: lessons.teacherId,
+          title: lessons.title,
+          status: lessons.status,
+          enrollmentId: lessons.enrollmentId,
+          lessonPlanId: lessons.lessonPlanId,
+        })
         .from(lessons)
         .where(eq(lessons.id, id))
         .limit(1);
@@ -345,24 +420,53 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       ) {
         throw forbidden();
       }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))
+      ) {
+        throw forbidden();
+      }
 
-      const [updated] = await app.db
-        .update(lessons)
-        .set({
-          status: "completed",
-          attendance: body.attendance,
-          ...(body.notes !== undefined && { notes: body.notes }),
-          ...(body.homework !== undefined && { homework: body.homework }),
-          ...(body.feedback !== undefined && { feedback: body.feedback }),
-          ...(body.scores !== undefined && { scores: body.scores }),
-          ...(body.corrections !== undefined && {
-            corrections: body.corrections,
-          }),
-          updatedAt: new Date(),
-        })
-        .where(eq(lessons.id, id))
-        .returning();
-      if (!updated) throw notFound("Lesson not found");
+      const updated = await app.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(lessons)
+          .set({
+            status: "completed",
+            attendance: body.attendance,
+            ...(body.notes !== undefined && { notes: body.notes }),
+            ...(body.homework !== undefined && { homework: body.homework }),
+            ...(body.feedback !== undefined && { feedback: body.feedback }),
+            ...(body.scores !== undefined && { scores: body.scores }),
+            ...(body.corrections !== undefined && {
+              corrections: body.corrections,
+            }),
+            updatedAt: new Date(),
+          })
+          .where(eq(lessons.id, id))
+          .returning();
+        if (!row) throw notFound("Lesson not found");
+
+        // Completing a planned lesson advances the enrollment once (re-completion does not).
+        if (
+          existing.status !== "completed" &&
+          existing.enrollmentId &&
+          existing.lessonPlanId
+        ) {
+          const [enrollment] = await tx
+            .select({ nextPlanIndex: enrollments.nextPlanIndex })
+            .from(enrollments)
+            .where(eq(enrollments.id, existing.enrollmentId))
+            .limit(1);
+          if (enrollment) {
+            await tx
+              .update(enrollments)
+              .set({ nextPlanIndex: enrollment.nextPlanIndex + 1 })
+              .where(eq(enrollments.id, existing.enrollmentId));
+          }
+        }
+
+        return row;
+      });
 
       await logActivity(app.db, {
         actorId: request.user.sub,
@@ -387,16 +491,36 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .select({
           teacherId: lessons.teacherId,
           studentId: lessons.studentId,
+          status: lessons.status,
+          attendance: lessons.attendance,
         })
         .from(lessons)
         .where(eq(lessons.id, id))
         .limit(1);
       if (!lesson) throw notFound("Lesson not found");
 
-      const isStaff =
-        request.user.role === "admin" || request.user.role === "manager";
-      if (!isStaff && request.user.sub !== lesson.studentId) {
+      if (request.user.sub !== lesson.studentId) {
         throw forbidden("Only the enrolled student can rate this lesson");
+      }
+      if (lesson.status !== "completed") {
+        throw badRequest("You can rate a lesson once it is completed");
+      }
+      if (lesson.attendance === "no-show") {
+        throw badRequest("Lessons you missed cannot be rated");
+      }
+
+      const from = body.from ?? "student";
+      const [alreadyRated] = await app.db
+        .select({ id: ratings.id })
+        .from(ratings)
+        .where(and(eq(ratings.lessonId, id), eq(ratings.from, from)))
+        .limit(1);
+      if (alreadyRated) {
+        throw conflict(
+          from === "parent"
+            ? "A parent rating already exists for this lesson"
+            : "You already rated this lesson",
+        );
       }
 
       const [author] = await app.db
@@ -404,6 +528,16 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .from(users)
         .where(eq(users.id, request.user.sub))
         .limit(1);
+      const [profile] = await app.db
+        .select({ guardianName: studentProfiles.guardianName })
+        .from(studentProfiles)
+        .where(eq(studentProfiles.userId, request.user.sub))
+        .limit(1);
+      const authorName =
+        from === "parent"
+          ? (profile?.guardianName ??
+            `Parent of ${author?.name.split(" ")[0] ?? "student"}`)
+          : (author?.name ?? "Student");
 
       const [rating] = await app.db
         .insert(ratings)
@@ -411,17 +545,194 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
           lessonId: id,
           teacherId: lesson.teacherId,
           studentId: lesson.studentId,
-          from: body.from ?? "student",
-          authorId: request.user.sub,
-          authorName: author?.name ?? "Student",
+          from,
+          authorId: from === "student" ? request.user.sub : null,
+          authorName,
           score: body.score,
           comment: body.comment ?? null,
         })
         .returning();
       if (!rating) throw new Error("Failed to create rating");
 
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "lesson.rated",
+        targetType: "lesson",
+        targetId: id,
+        summary: `${body.score}★ (${from})`,
+      });
+
       reply.status(201);
       return rating;
+    },
+  );
+
+  app.post(
+    "/:id/cancel",
+    { preHandler: app.requireRole("student") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      const body = cancelSchema.parse(request.body ?? {});
+
+      const [lesson] = await app.db
+        .select({
+          studentId: lessons.studentId,
+          teacherId: lessons.teacherId,
+          date: lessons.date,
+          time: lessons.time,
+          status: lessons.status,
+          title: lessons.title,
+        })
+        .from(lessons)
+        .where(eq(lessons.id, id))
+        .limit(1);
+      if (!lesson) throw notFound("Lesson not found");
+      if (lesson.studentId !== request.user.sub) throw forbidden();
+      if (lesson.status !== "scheduled") {
+        throw badRequest("Only upcoming lessons can be cancelled");
+      }
+
+      const [prefs] = await app.db
+        .select({
+          lateHours: settings.studentLateCancellationHours,
+        })
+        .from(settings)
+        .where(eq(settings.id, 1))
+        .limit(1);
+      const lateHours = prefs?.lateHours ?? 24;
+      const refunded = hoursUntil(lesson.date, lesson.time) >= lateHours;
+
+      const updated = await app.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(lessons)
+          .set({
+            status: "cancelled",
+            cancelReason: body.reason?.trim() || "Cancelled by student",
+            updatedAt: new Date(),
+          })
+          .where(eq(lessons.id, id))
+          .returning();
+        if (!row) throw notFound("Lesson not found");
+        if (refunded) {
+          await tx.insert(creditEntries).values({
+            studentId: lesson.studentId,
+            hours: 1,
+            reason: "refund",
+            description: "Cancelled lesson credit return",
+            lessonId: id,
+            actorId: request.user.sub,
+          });
+        }
+        return row;
+      });
+
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "lesson.cancelledByStudent",
+        targetType: "lesson",
+        targetId: id,
+        summary: refunded ? "Cancelled with refund" : "Late cancellation, no refund",
+      });
+
+      return { ...updated, refunded };
+    },
+  );
+
+  app.post(
+    "/:id/absence",
+    { preHandler: app.requireRole(["admin", "manager"]) },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const body = absenceSchema.parse(request.body);
+
+      const [lesson] = await app.db
+        .select({
+          teacherId: lessons.teacherId,
+          studentId: lessons.studentId,
+          date: lessons.date,
+          time: lessons.time,
+          status: lessons.status,
+        })
+        .from(lessons)
+        .where(eq(lessons.id, id))
+        .limit(1);
+      if (!lesson) throw notFound("Lesson not found");
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, lesson.teacherId))
+      ) {
+        throw forbidden();
+      }
+      if (slotStartDate(lesson.date, lesson.time).getTime() > Date.now()) {
+        throw badRequest("You can only record an absence once the lesson has started");
+      }
+
+      const [existingAbsence] = await app.db
+        .select({ id: absences.id })
+        .from(absences)
+        .where(eq(absences.lessonId, id))
+        .limit(1);
+      if (existingAbsence) {
+        throw conflict("An absence is already recorded for this lesson");
+      }
+
+      const note = body.note.trim();
+      if (note.length < 5) {
+        throw badRequest("Describe what happened (at least 5 characters)");
+      }
+
+      const [prefs] = await app.db
+        .select({ refund: settings.refundTeacherCancellations })
+        .from(settings)
+        .where(eq(settings.id, 1))
+        .limit(1);
+      const shouldRefund = (prefs?.refund ?? true) && lesson.status !== "cancelled";
+
+      const created = await app.db.transaction(async (tx) => {
+        const [absence] = await tx
+          .insert(absences)
+          .values({
+            lessonId: id,
+            teacherId: lesson.teacherId,
+            note,
+            reportedBy: request.user.sub,
+          })
+          .returning();
+        if (!absence) throw new Error("Failed to record absence");
+
+        await tx
+          .update(lessons)
+          .set({
+            status: "cancelled",
+            cancelReason: "Teacher absent; the student was present.",
+            updatedAt: new Date(),
+          })
+          .where(eq(lessons.id, id));
+
+        if (shouldRefund) {
+          await tx.insert(creditEntries).values({
+            studentId: lesson.studentId,
+            hours: 1,
+            reason: "refund",
+            description: "Teacher absence refund",
+            lessonId: id,
+            actorId: request.user.sub,
+          });
+        }
+
+        return absence;
+      });
+
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "absence.recorded",
+        targetType: "lesson",
+        targetId: id,
+        summary: note,
+      });
+
+      reply.status(201);
+      return created;
     },
   );
 };

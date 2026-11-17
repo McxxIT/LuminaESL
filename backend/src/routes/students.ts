@@ -1,9 +1,14 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { studentProfiles, users } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import {
+  assertCanViewUser,
+  managerOwnsStudent,
+  managerTeam,
+} from "../lib/scope";
 
 const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
@@ -111,7 +116,16 @@ export const studentRoutes: FastifyPluginAsync = async (app) => {
       if (request.user.role === "student") {
         conditions.push(eq(studentProfiles.userId, request.user.sub));
       } else if (request.user.role === "manager") {
-        conditions.push(eq(studentProfiles.managerId, request.user.sub));
+        const team = await managerTeam(app.db, request.user.sub);
+        const visibleIds = [
+          ...new Set([request.user.sub, ...team.studentIds]),
+        ];
+        conditions.push(
+          or(
+            eq(studentProfiles.managerId, request.user.sub),
+            inArray(studentProfiles.userId, visibleIds),
+          )!,
+        );
       }
 
       const where = conditions.length ? and(...conditions) : undefined;
@@ -145,9 +159,7 @@ export const studentRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.authenticate },
     async (request) => {
       const { id } = userIdParams.parse(request.params);
-      const isSelf = request.user.sub === id;
-      const isStaff = request.user.role !== "student";
-      if (!isSelf && !isStaff) throw forbidden();
+      await assertCanViewUser(app.db, request.user, id);
 
       const [row] = await app.db
         .select(studentColumns)
@@ -169,6 +181,16 @@ export const studentRoutes: FastifyPluginAsync = async (app) => {
       const body = updateStudentSchema.parse(request.body);
       if (Object.keys(body).length === 0) {
         throw badRequest("No fields to update");
+      }
+
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsStudent(app.db, request.user.sub, id))
+      ) {
+        throw forbidden("This student is not on your team");
+      }
+      if (body.managerId !== undefined && request.user.role !== "admin") {
+        throw forbidden("Only admins can reassign a manager");
       }
 
       const updates: Partial<typeof studentProfiles.$inferInsert> = {};

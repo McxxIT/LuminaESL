@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   studentProfiles,
@@ -10,6 +10,7 @@ import {
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { hashPassword } from "../lib/password";
+import { assertCanViewUser, managerTeam } from "../lib/scope";
 
 const userColumns = {
   id: users.id,
@@ -88,6 +89,12 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
       if (query.role) conditions.push(eq(users.role, query.role));
       if (query.status) conditions.push(eq(users.status, query.status));
 
+      if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        const visibleIds = [...new Set([request.user.sub, ...team.userIds])];
+        conditions.push(inArray(users.id, visibleIds));
+      }
+
       const where = conditions.length ? and(...conditions) : undefined;
 
       const items = await app.db
@@ -112,10 +119,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.authenticate },
     async (request) => {
       const { id } = idParams.parse(request.params);
-      const isSelf = request.user.sub === id;
-      const isStaff =
-        request.user.role === "admin" || request.user.role === "manager";
-      if (!isSelf && !isStaff) throw forbidden();
+      await assertCanViewUser(app.db, request.user, id);
 
       const [user] = await app.db
         .select()

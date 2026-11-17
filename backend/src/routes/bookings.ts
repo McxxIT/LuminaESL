@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, asc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   activity,
@@ -15,6 +15,7 @@ import {
   notFound,
   unprocessable,
 } from "../lib/errors";
+import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
 import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time";
 
 const idParams = z.object({ id: z.string().uuid() });
@@ -53,6 +54,15 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
       if (query.from) conditions.push(gte(slotOpenings.date, query.from));
       if (query.to) conditions.push(lte(slotOpenings.date, query.to));
 
+      if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        conditions.push(
+          team.teacherIds.length
+            ? inArray(slotOpenings.teacherId, team.teacherIds)
+            : sql`false`,
+        );
+      }
+
       const where = conditions.length ? and(...conditions) : undefined;
 
       return app.db
@@ -73,6 +83,12 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
           ? request.user.sub
           : body.teacherId;
       if (!teacherId) throw badRequest("teacherId is required");
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, teacherId))
+      ) {
+        throw forbidden("This teacher is not on your team");
+      }
 
       const [existing] = await app.db
         .select({ id: slotOpenings.id })
@@ -120,7 +136,8 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
 
       const canClose =
         request.user.role === "admin" ||
-        request.user.role === "manager" ||
+        (request.user.role === "manager" &&
+          (await managerOwnsTeacher(app.db, request.user.sub, slot.teacherId))) ||
         slot.teacherId === request.user.sub;
       if (!canClose) throw forbidden();
 
@@ -147,6 +164,12 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       if (!student || student.role !== "student") {
         throw badRequest("studentId must belong to a student");
+      }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsStudent(app.db, request.user.sub, studentId))
+      ) {
+        throw forbidden("This student is not on your team");
       }
 
       const result = await app.db.transaction(async (tx) => {

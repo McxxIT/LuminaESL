@@ -8,6 +8,7 @@ import { enrollmentRoutes } from "./enrollments";
 import { lessonRoutes } from "./lessons";
 import { notificationRoutes } from "./notifications";
 import { requestRoutes } from "./requests";
+import { schoolRoutes } from "./school";
 import { settingsRoutes } from "./settings";
 import { studentRoutes } from "./students";
 import { teacherRoutes } from "./teachers";
@@ -29,4 +30,5 @@ export const apiRoutes: FastifyPluginAsync = async (app) => {
   await app.register(notificationRoutes, { prefix: "/notifications" });
   await app.register(uploadRoutes, { prefix: "/uploads" });
   await app.register(settingsRoutes, { prefix: "/settings" });
+  await app.register(schoolRoutes, { prefix: "/school" });
 };

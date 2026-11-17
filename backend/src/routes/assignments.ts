@@ -1,9 +1,14 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { activity, assignments, users } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import {
+  managerOwnsStudent,
+  managerOwnsTeacher,
+  managerTeam,
+} from "../lib/scope";
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -55,6 +60,18 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
         conditions.push(eq(assignments.studentId, request.user.sub));
       } else if (request.user.role === "teacher") {
         conditions.push(eq(assignments.teacherId, request.user.sub));
+      } else if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        const visibility: SQL[] = [];
+        if (team.teacherIds.length) {
+          visibility.push(inArray(assignments.teacherId, team.teacherIds));
+        }
+        if (team.studentIds.length) {
+          visibility.push(inArray(assignments.studentId, team.studentIds));
+        }
+        conditions.push(
+          visibility.length ? (or(...visibility) ?? sql`false`) : sql`false`,
+        );
       }
 
       const where = conditions.length ? and(...conditions) : undefined;
@@ -92,6 +109,15 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
           ? request.user.sub
           : body.teacherId;
       if (!teacherId) throw badRequest("teacherId is required");
+      if (
+        request.user.role === "manager" &&
+        !(
+          (await managerOwnsTeacher(app.db, request.user.sub, teacherId)) &&
+          (await managerOwnsStudent(app.db, request.user.sub, body.studentId))
+        )
+      ) {
+        throw forbidden("You can only assign work within your team");
+      }
 
       const [student] = await app.db
         .select({ id: users.id, role: users.role })
@@ -183,6 +209,12 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
       if (
         request.user.role === "teacher" &&
         existing.teacherId !== request.user.sub
+      ) {
+        throw forbidden();
+      }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))
       ) {
         throw forbidden();
       }

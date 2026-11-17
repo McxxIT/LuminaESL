@@ -1,7 +1,7 @@
 # Lumina ESL - Admin & Manager Plan
 
 Status: **All phases (0-7) done** (November 16, 2026; phase 2 was done before phase 1). Remaining ideas are listed under "After the plan" at the end.
-Backend: the standalone API now lives in `backend/` (Fastify + PostgreSQL; see the root `README.md` and `PROGRESS.md`). This document stays the admin/manager product plan; the combined frontend + backend integration roadmap is `PROGRESS.md` -> "Next plan", with the file-level execution order in `PROGRESS.md` -> "Cutover execution plan" (Step A accounts/seeds done; Step B data adapter next).
+Backend: the standalone API now lives in `backend/` (Fastify + PostgreSQL; see the root `README.md` and `PROGRESS.md`). This document stays the admin/manager product plan; the combined frontend + backend integration roadmap is `PROGRESS.md` -> "Next plan", with the file-level execution order in `CUTOVER_PLAN.md` and live status in `CUTOVER_PROGRESS.md` (Step A accounts/seeds done; Step B data adapter in progress).
 Companion to `PROGRESS.md` (current state). Update both as phases land.
 
 ## 1. Decisions

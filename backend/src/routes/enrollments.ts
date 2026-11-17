@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   courses,
@@ -8,6 +8,11 @@ import {
 } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import {
+  managerOwnsStudent,
+  managerOwnsTeacher,
+  managerTeam,
+} from "../lib/scope";
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -68,6 +73,18 @@ export const enrollmentRoutes: FastifyPluginAsync = async (app) => {
         conditions.push(eq(enrollments.studentId, request.user.sub));
       } else if (request.user.role === "teacher") {
         conditions.push(eq(enrollments.teacherId, request.user.sub));
+      } else if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        const visibility: SQL[] = [];
+        if (team.teacherIds.length) {
+          visibility.push(inArray(enrollments.teacherId, team.teacherIds));
+        }
+        if (team.studentIds.length) {
+          visibility.push(inArray(enrollments.studentId, team.studentIds));
+        }
+        conditions.push(
+          visibility.length ? (or(...visibility) ?? sql`false`) : sql`false`,
+        );
       }
 
       const where = conditions.length ? and(...conditions) : undefined;
@@ -101,6 +118,18 @@ export const enrollmentRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request, reply) => {
       const body = createEnrollmentSchema.parse(request.body);
+
+      if (request.user.role === "manager") {
+        const [ownsTeacher, ownsStudent] = await Promise.all([
+          managerOwnsTeacher(app.db, request.user.sub, body.teacherId),
+          managerOwnsStudent(app.db, request.user.sub, body.studentId),
+        ]);
+        if (!ownsTeacher || !ownsStudent) {
+          throw forbidden(
+            "You can only enroll students who are on your team",
+          );
+        }
+      }
 
       const [course] = await app.db
         .select({ id: courses.id })
@@ -147,6 +176,13 @@ export const enrollmentRoutes: FastifyPluginAsync = async (app) => {
         existing.teacherId !== request.user.sub
       ) {
         throw forbidden();
+      }
+      if (request.user.role === "manager") {
+        const [ownsTeacher, ownsStudent] = await Promise.all([
+          managerOwnsTeacher(app.db, request.user.sub, existing.teacherId),
+          managerOwnsStudent(app.db, request.user.sub, existing.studentId),
+        ]);
+        if (!ownsTeacher && !ownsStudent) throw forbidden();
       }
 
       const [updated] = await app.db

@@ -16,3 +16,13 @@ export function addMinutes(time: string, minutes: number): string {
 }
 
 export const LESSON_MINUTES = 25;
+
+/** Local start of a dated clock slot, e.g. `2026-11-18` + `09:30`. */
+export function slotStartDate(date: string, time: string): Date {
+  return new Date(`${date}T${time}:00`);
+}
+
+/** Hours from `now` until the slot starts (negative once it has started). */
+export function hoursUntil(date: string, time: string, now = new Date()): number {
+  return (slotStartDate(date, time).getTime() - now.getTime()) / 3_600_000;
+}

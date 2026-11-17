@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   activity,
@@ -9,8 +9,9 @@ import {
   settings,
   slotOpenings,
 } from "../db/schema";
-import { badRequest, notFound } from "../lib/errors";
+import { badRequest, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import { managerOwnsTeacher, managerTeam } from "../lib/scope";
 import { isValidClockTime } from "../lib/time";
 
 const idParams = z.object({ id: z.string().uuid() });
@@ -69,6 +70,13 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
 
       if (request.user.role === "teacher") {
         conditions.push(eq(requests.teacherId, request.user.sub));
+      } else if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        conditions.push(
+          team.teacherIds.length
+            ? inArray(requests.teacherId, team.teacherIds)
+            : sql`false`,
+        );
       }
 
       const where = conditions.length ? and(...conditions) : undefined;
@@ -105,6 +113,12 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
           ? request.user.sub
           : body.teacherId;
       if (!teacherId) throw badRequest("teacherId is required");
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, teacherId))
+      ) {
+        throw forbidden("This teacher is not on your team");
+      }
 
       const [created] = await app.db
         .insert(requests)
@@ -140,6 +154,12 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(requests.id, id))
         .limit(1);
       if (!existing) throw notFound("Request not found");
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))
+      ) {
+        throw forbidden();
+      }
       if (existing.status !== "pending") {
         throw badRequest("This request has already been reviewed");
       }

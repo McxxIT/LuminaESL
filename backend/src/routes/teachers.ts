@@ -4,6 +4,7 @@ import { z } from "zod";
 import { teacherProfiles, users } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import { assertCanViewUser, managerOwnsTeacher } from "../lib/scope";
 
 const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
@@ -130,9 +131,7 @@ export const teacherRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.authenticate },
     async (request) => {
       const { id } = userIdParams.parse(request.params);
-      if (request.user.role === "student" && request.user.sub !== id) {
-        throw forbidden();
-      }
+      await assertCanViewUser(app.db, request.user, id);
 
       const [row] = await app.db
         .select(teacherColumns)
@@ -160,6 +159,13 @@ export const teacherRoutes: FastifyPluginAsync = async (app) => {
       const isAdmin = request.user.role === "admin";
       const isManager = request.user.role === "manager";
       if (!isSelf && !isAdmin && !isManager) throw forbidden();
+      if (
+        isManager &&
+        !isSelf &&
+        !(await managerOwnsTeacher(app.db, request.user.sub, id))
+      ) {
+        throw forbidden("This teacher is not on your team");
+      }
 
       if (body.managerId !== undefined && !isAdmin) {
         throw forbidden("Only admins can reassign a manager");

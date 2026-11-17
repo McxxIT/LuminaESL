@@ -5,6 +5,7 @@ import {
   eq,
   ilike,
   inArray,
+  or,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -12,10 +13,12 @@ import { z } from "zod";
 import {
   courseUnits,
   courses,
+  enrollments,
   lessonPlans,
+  lessons,
   type LessonPlanSection,
 } from "../db/schema";
-import { badRequest, notFound } from "../lib/errors";
+import { badRequest, conflict, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 
 const idParams = z.object({ id: z.string().uuid() });
@@ -80,6 +83,44 @@ async function ensureCourse(app: FastifyInstance, id: string) {
   if (!course) throw notFound("Course not found");
 }
 
+/** `plansForCourse` in the browser store: every plan under the course's units. */
+async function countCoursePlans(app: FastifyInstance, courseId: string) {
+  const [row] = await app.db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(lessonPlans)
+    .innerJoin(courseUnits, eq(courseUnits.id, lessonPlans.unitId))
+    .where(eq(courseUnits.courseId, courseId));
+  return row?.value ?? 0;
+}
+
+async function countActiveEnrollments(app: FastifyInstance, courseId: string) {
+  const [row] = await app.db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(enrollments)
+    .where(
+      and(eq(enrollments.courseId, courseId), eq(enrollments.status, "active")),
+    );
+  return row?.value ?? 0;
+}
+
+/** Archiving is refused while students are still enrolled, like the browser store. */
+async function assertCourseArchivable(app: FastifyInstance, courseId: string) {
+  const enrolled = await countActiveEnrollments(app, courseId);
+  if (enrolled > 0) {
+    throw conflict(
+      `${enrolled} student${enrolled === 1 ? " is" : "s are"} enrolled in this course. Move them to another course first.`,
+    );
+  }
+}
+
+/** Publishing needs at least one plan so students and teachers have something to open. */
+async function assertCoursePublishable(app: FastifyInstance, courseId: string) {
+  const plans = await countCoursePlans(app, courseId);
+  if (plans === 0) {
+    throw badRequest("Add at least one lesson plan before publishing.");
+  }
+}
+
 function withPlans(
   units: (typeof courseUnits.$inferSelect)[],
   plans: (typeof lessonPlans.$inferSelect)[],
@@ -103,6 +144,17 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
       if (query.status) conditions.push(eq(courses.status, query.status));
       if (query.level) conditions.push(eq(courses.level, query.level));
       if (query.ownerId) conditions.push(eq(courses.ownerId, query.ownerId));
+
+      if (request.user.role === "manager") {
+        conditions.push(
+          or(
+            eq(courses.status, "published"),
+            eq(courses.ownerId, request.user.sub),
+          )!,
+        );
+      } else if (request.user.role !== "admin") {
+        conditions.push(eq(courses.status, "published"));
+      }
 
       const where = conditions.length ? and(...conditions) : undefined;
 
@@ -165,17 +217,28 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request, reply) => {
       const body = createCourseSchema.parse(request.body);
-      const [course] = await app.db
-        .insert(courses)
-        .values({
-          title: body.title,
-          level: body.level,
-          summary: body.summary ?? "",
-          objectives: body.objectives ?? [],
-          status: body.status ?? "draft",
-          ownerId: request.user.sub,
-        })
-        .returning();
+      const course = await app.db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(courses)
+          .values({
+            title: body.title,
+            level: body.level,
+            summary: body.summary ?? "",
+            objectives: body.objectives ?? [],
+            status: body.status ?? "draft",
+            ownerId: request.user.sub,
+          })
+          .returning();
+        if (!created) throw new Error("Failed to create course");
+
+        // The browser store starts every course with one unit, like the admin UI expects.
+        await tx.insert(courseUnits).values({
+          courseId: created.id,
+          order: 1,
+          title: "Unit 1",
+        });
+        return created;
+      });
       if (!course) throw new Error("Failed to create course");
 
       reply.status(201);
@@ -191,6 +254,14 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
       const body = updateCourseSchema.parse(request.body);
       if (Object.keys(body).length === 0) {
         throw badRequest("No fields to update");
+      }
+
+      await ensureCourse(app, id);
+      if (body.status === "published") {
+        await assertCoursePublishable(app, id);
+      }
+      if (body.status === "archived") {
+        await assertCourseArchivable(app, id);
       }
 
       const [updated] = await app.db
@@ -218,6 +289,8 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
       const { id } = idParams.parse(request.params);
+      await ensureCourse(app, id);
+      await assertCourseArchivable(app, id);
       const [archived] = await app.db
         .update(courses)
         .set({ status: "archived", updatedAt: new Date() })
@@ -286,7 +359,31 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     "/:id/units/:unitId",
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
-      const { unitId } = unitParams.parse(request.params);
+      const { id, unitId } = unitParams.parse(request.params);
+
+      const [unit] = await app.db
+        .select({ id: courseUnits.id, courseId: courseUnits.courseId })
+        .from(courseUnits)
+        .where(eq(courseUnits.id, unitId))
+        .limit(1);
+      if (!unit || unit.courseId !== id) throw notFound("Unit not found");
+
+      const [planRow] = await app.db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(lessonPlans)
+        .where(eq(lessonPlans.unitId, unitId));
+      if ((planRow?.value ?? 0) > 0) {
+        throw conflict("Move or delete this unit's lesson plans first.");
+      }
+
+      const [unitRow] = await app.db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(courseUnits)
+        .where(eq(courseUnits.courseId, id));
+      if ((unitRow?.value ?? 0) <= 1) {
+        throw conflict("A course needs at least one unit.");
+      }
+
       const [deleted] = await app.db
         .delete(courseUnits)
         .where(eq(courseUnits.id, unitId))
@@ -373,7 +470,28 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
     "/:id/units/:unitId/plans/:planId",
     { preHandler: app.requireRole(["admin", "manager"]) },
     async (request) => {
-      const { planId } = planParams.parse(request.params);
+      const { unitId, planId } = planParams.parse(request.params);
+
+      const [plan] = await app.db
+        .select({ id: lessonPlans.id, unitId: lessonPlans.unitId })
+        .from(lessonPlans)
+        .where(eq(lessonPlans.id, planId))
+        .limit(1);
+      if (!plan || plan.unitId !== unitId) {
+        throw notFound("Lesson plan not found");
+      }
+
+      const [usedRow] = await app.db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(lessons)
+        .where(eq(lessons.lessonPlanId, planId));
+      const used = usedRow?.value ?? 0;
+      if (used > 0) {
+        throw conflict(
+          `This plan is attached to ${used} lesson${used === 1 ? "" : "s"}. Archive the course instead of deleting it.`,
+        );
+      }
+
       const [deleted] = await app.db
         .delete(lessonPlans)
         .where(eq(lessonPlans.id, planId))

@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
-import { and, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { activity, creditEntries, users } from "../db/schema";
 import { badRequest, forbidden } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
+import { managerOwnsStudent, managerTeam, teacherStudentIds } from "../lib/scope";
 
 const listQuerySchema = z.object({
   studentId: z.string().uuid().optional(),
@@ -38,6 +39,20 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
 
       if (request.user.role === "student") {
         conditions.push(eq(creditEntries.studentId, request.user.sub));
+      } else if (request.user.role === "manager") {
+        const team = await managerTeam(app.db, request.user.sub);
+        conditions.push(
+          team.studentIds.length
+            ? inArray(creditEntries.studentId, team.studentIds)
+            : sql`false`,
+        );
+      } else if (request.user.role === "teacher") {
+        const students = await teacherStudentIds(app.db, request.user.sub);
+        conditions.push(
+          students.length
+            ? inArray(creditEntries.studentId, students)
+            : sql`false`,
+        );
       }
 
       const where = conditions.length ? and(...conditions) : undefined;
@@ -78,6 +93,20 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
       ) {
         throw forbidden();
       }
+      if (
+        request.user.role === "teacher" &&
+        !(await teacherStudentIds(app.db, request.user.sub)).includes(
+          params.studentId,
+        )
+      ) {
+        throw forbidden();
+      }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsStudent(app.db, request.user.sub, params.studentId))
+      ) {
+        throw forbidden();
+      }
 
       const [row] = await app.db
         .select({
@@ -103,6 +132,12 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       if (!student || student.role !== "student") {
         throw badRequest("studentId must belong to a student");
+      }
+      if (
+        request.user.role === "manager" &&
+        !(await managerOwnsStudent(app.db, request.user.sub, body.studentId))
+      ) {
+        throw forbidden("This student is not on your team");
       }
 
       const [entry] = await app.db
