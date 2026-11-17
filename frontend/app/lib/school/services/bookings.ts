@@ -45,7 +45,7 @@ export function scheduleLessonForStudent(actorId: string, input: BookLessonInput
 }
 
 export function rescheduleLesson(actorId: string, lessonId: string, date: string, time: string): ServiceCall<Lesson> {
-  if (isApiDataMode()) return runAsync(async () => await rebookLessonApi(lessonId, date, time) as Lesson);
+  if (isApiDataMode()) return runAsync(async () => await updateLesson(lessonId, { date, time }) as Lesson);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);
@@ -75,7 +75,7 @@ export function cancelLessonByStudent(actorId: string, lessonId: string, reason:
 
 /** Book the same lesson again with the same teacher at a new time. */
 export function rebookLesson(actorId: string, lessonId: string, date: string, time: string): ServiceCall<Lesson> {
-  if (isApiDataMode()) return runAsync(async () => await updateLesson(lessonId, { date, time }) as Lesson);
+  if (isApiDataMode()) return runAsync(async () => await rebookLessonApi(lessonId, date, time) as Lesson);
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const original = requireLesson(draft, lessonId);

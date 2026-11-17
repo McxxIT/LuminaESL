@@ -182,7 +182,7 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
 
         const [balanceRow] = await tx
           .select({
-            value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)::int`,
+            value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)::numeric`,
           })
           .from(creditEntries)
           .where(eq(creditEntries.studentId, studentId));

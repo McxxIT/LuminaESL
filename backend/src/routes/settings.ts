@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { settings } from "../db/schema";
+import { logActivity } from "../lib/activity";
 import { badRequest } from "../lib/errors";
 import { isValidClockTime } from "../lib/time";
 
@@ -42,11 +43,31 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         throw badRequest("No fields to update");
       }
 
+      const [before] = await app.db
+        .select()
+        .from(settings)
+        .where(eq(settings.id, 1))
+        .limit(1);
+
       const [row] = await app.db
         .insert(settings)
         .values({ id: 1, ...body })
         .onConflictDoUpdate({ target: settings.id, set: body })
         .returning();
+      if (!row) throw new Error("Failed to save settings");
+
+      const changes = (Object.keys(body) as (keyof typeof body)[])
+        .filter((key) => before?.[key] !== row[key])
+        .map((key) => `${key}: ${String(before?.[key])} → ${String(row[key])}`);
+      if (changes.length) {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "settings.updated",
+          targetType: "school",
+          targetId: "settings",
+          summary: changes.join("; "),
+        });
+      }
 
       return row;
     },

@@ -3,6 +3,7 @@ import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { teacherProfiles, users } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
+import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
 import { assertCanViewUser, managerOwnsTeacher } from "../lib/scope";
 
@@ -196,6 +197,33 @@ export const teacherRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(teacherProfiles.userId, id))
         .limit(1);
       if (!row) throw notFound("Teacher not found");
+
+      if (body.managerId !== undefined) {
+        const managerName = body.managerId
+          ? (
+              await app.db
+                .select({ name: users.name })
+                .from(users)
+                .where(eq(users.id, body.managerId))
+                .limit(1)
+            )[0]?.name
+          : undefined;
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "teacher.reassigned",
+          targetType: "user",
+          targetId: id,
+          summary: `Moved to ${managerName ?? "no manager"}`,
+        });
+      } else {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "teacher.updated",
+          targetType: "user",
+          targetId: id,
+          summary: row.name,
+        });
+      }
 
       return toTeacher(row);
     },

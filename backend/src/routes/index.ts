@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
+import { activityRoutes } from "./activity";
 import { assignmentRoutes } from "./assignments";
 import { authRoutes } from "./auth";
 import { bookingRoutes } from "./bookings";
@@ -27,6 +28,7 @@ export const apiRoutes: FastifyPluginAsync = async (app) => {
   await app.register(requestRoutes, { prefix: "/requests" });
   await app.register(assignmentRoutes, { prefix: "/assignments" });
   await app.register(creditRoutes, { prefix: "/credits" });
+  await app.register(activityRoutes, { prefix: "/activity" });
   await app.register(notificationRoutes, { prefix: "/notifications" });
   await app.register(uploadRoutes, { prefix: "/uploads" });
   await app.register(settingsRoutes, { prefix: "/settings" });

@@ -20,6 +20,7 @@ import {
   type LessonPlanSection,
 } from "../db/schema";
 import { badRequest, conflict, notFound } from "../lib/errors";
+import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
 import { assertCourseEditable } from "../lib/scope";
 import type { TokenPayload } from "../types/fastify";
@@ -265,6 +266,14 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
       });
       if (!course) throw new Error("Failed to create course");
 
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "course.created",
+        targetType: "course",
+        targetId: course.id,
+        summary: course.title,
+      });
+
       reply.status(201);
       return course;
     },
@@ -288,6 +297,12 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         await assertCourseArchivable(app, id);
       }
 
+      const [before] = await app.db
+        .select({ status: courses.status })
+        .from(courses)
+        .where(eq(courses.id, id))
+        .limit(1);
+
       const [updated] = await app.db
         .update(courses)
         .set({
@@ -304,6 +319,16 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!updated) throw notFound("Course not found");
 
+      const statusChanged =
+        body.status !== undefined && before?.status !== body.status;
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: statusChanged ? `course.${body.status}` : "course.updated",
+        targetType: "course",
+        targetId: updated.id,
+        summary: updated.title,
+      });
+
       return updated;
     },
   );
@@ -319,9 +344,18 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         .update(courses)
         .set({ status: "archived", updatedAt: new Date() })
         .where(eq(courses.id, id))
-        .returning({ id: courses.id, status: courses.status });
+        .returning({ id: courses.id, status: courses.status, title: courses.title });
       if (!archived) throw notFound("Course not found");
-      return archived;
+
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "course.archived",
+        targetType: "course",
+        targetId: archived.id,
+        summary: archived.title,
+      });
+
+      return { id: archived.id, status: archived.status };
     },
   );
 
@@ -352,6 +386,16 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         }
         return created;
       });
+      if (!copy) throw new Error("Failed to duplicate course");
+
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "course.duplicated",
+        targetType: "course",
+        targetId: copy.id,
+        summary: `From ${source.title}`,
+      });
+
       reply.status(201);
       return copy;
     },

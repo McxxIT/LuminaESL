@@ -144,7 +144,7 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
 
       await app.db.insert(activity).values({
         actorId: request.user.sub,
-        action: "assignment.created",
+        action: "homework.assigned",
         targetType: "assignment",
         targetId: created.id,
         summary: `Assigned "${created.title}"`,
@@ -189,6 +189,14 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!updated) throw notFound("Assignment not found");
 
+      await app.db.insert(activity).values({
+        actorId: request.user.sub,
+        action: "homework.submitted",
+        targetType: "assignment",
+        targetId: id,
+        summary: existing.title,
+      });
+
       return updated;
     },
   );
@@ -230,6 +238,14 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(assignments.id, id))
         .returning();
       if (!updated) throw notFound("Assignment not found");
+
+      await app.db.insert(activity).values({
+        actorId: request.user.sub,
+        action: "homework.reviewed",
+        targetType: "assignment",
+        targetId: id,
+        summary: existing.title,
+      });
 
       return updated;
     },

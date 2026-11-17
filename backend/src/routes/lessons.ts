@@ -323,7 +323,7 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch(
     "/:id",
-    { preHandler: app.requireRole(["admin", "manager", "teacher"]) },
+    { preHandler: app.requireRole(["admin", "manager", "teacher", "student"]) },
     async (request) => {
       const { id } = idParams.parse(request.params);
       const body = updateLessonSchema.parse(request.body);
@@ -332,7 +332,13 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const [existing] = await app.db
-        .select({ teacherId: lessons.teacherId })
+        .select({
+          teacherId: lessons.teacherId,
+          studentId: lessons.studentId,
+          status: lessons.status,
+          date: lessons.date,
+          time: lessons.time,
+        })
         .from(lessons)
         .where(eq(lessons.id, id))
         .limit(1);
@@ -348,6 +354,34 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))
       ) {
         throw forbidden();
+      }
+      if (request.user.role === "student") {
+        if (existing.studentId !== request.user.sub) throw forbidden();
+        const rescheduleOnly =
+          Object.keys(body).every((key) => key === "date" || key === "time");
+        if (!rescheduleOnly) {
+          throw forbidden("Students can only reschedule their lessons");
+        }
+        if (existing.status !== "scheduled") {
+          throw badRequest("Only upcoming lessons can be rescheduled");
+        }
+        const nextDate = body.date ?? existing.date;
+        const nextTime = body.time ?? existing.time;
+        const moved = nextDate !== existing.date || nextTime !== existing.time;
+        if (moved) {
+          const [slot] = await app.db
+            .select({ id: slotOpenings.id })
+            .from(slotOpenings)
+            .where(
+              and(
+                eq(slotOpenings.teacherId, existing.teacherId),
+                eq(slotOpenings.date, nextDate),
+                eq(slotOpenings.time, nextTime),
+              ),
+            )
+            .limit(1);
+          if (!slot) throw badRequest("That time is not open for booking");
+        }
       }
 
       const [updated] = await app.db

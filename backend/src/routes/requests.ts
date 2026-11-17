@@ -222,15 +222,15 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
               });
             }
           }
-
-          await tx.insert(activity).values({
-            actorId: request.user.sub,
-            action: "request.approved",
-            targetType: "request",
-            targetId: id,
-            summary: `Approved ${updated.type} request`,
-          });
         }
+
+        await tx.insert(activity).values({
+          actorId: request.user.sub,
+          action: `request.${body.status}`,
+          targetType: "request",
+          targetId: id,
+          summary: `${body.status === "approved" ? "Approved" : "Declined"} ${updated.type} request`,
+        });
 
         return updated;
       });

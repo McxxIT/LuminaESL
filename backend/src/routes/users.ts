@@ -8,6 +8,7 @@ import {
   type User,
 } from "../db/schema";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
+import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
 import { hashPassword } from "../lib/password";
 import {
@@ -194,6 +195,14 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: body.role === "admin" ? "user.created" : `${body.role}.created`,
+        targetType: "user",
+        targetId: user.id,
+        summary: user.name,
+      });
+
       reply.status(201);
       return publicUser(user);
     },
@@ -230,6 +239,13 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
         throw badRequest("No fields to update");
       }
 
+      const [before] = await app.db
+        .select({ name: users.name, status: users.status })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      if (!before) throw notFound("User not found");
+
       const updates: Partial<typeof users.$inferInsert> = {
         updatedAt: new Date(),
       };
@@ -255,6 +271,38 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!updated) throw notFound("User not found");
 
+      const statusChanged =
+        body.status !== undefined && before.status !== updated.status;
+      if (statusChanged) {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: `user.${updated.status}`,
+          targetType: "user",
+          targetId: updated.id,
+          summary: updated.name,
+        });
+      }
+      if (body.name !== undefined && before.name !== updated.name) {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "user.renamed",
+          targetType: "user",
+          targetId: updated.id,
+          summary: `${before.name} → ${updated.name}`,
+        });
+      } else if (
+        !statusChanged &&
+        (body.email !== undefined || body.avatarColor !== undefined)
+      ) {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "user.updated",
+          targetType: "user",
+          targetId: updated.id,
+          summary: `${updated.name} (${Object.keys(body).join(", ")})`,
+        });
+      }
+
       return publicUser(updated);
     },
   );
@@ -268,9 +316,18 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
         .update(users)
         .set({ status: "archived", updatedAt: new Date() })
         .where(eq(users.id, id))
-        .returning({ id: users.id, status: users.status });
+        .returning({ id: users.id, status: users.status, name: users.name });
       if (!archived) throw notFound("User not found");
-      return archived;
+
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "user.archived",
+        targetType: "user",
+        targetId: archived.id,
+        summary: archived.name,
+      });
+
+      return { id: archived.id, status: archived.status };
     },
   );
 };

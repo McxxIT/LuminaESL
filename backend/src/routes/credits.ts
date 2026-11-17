@@ -158,7 +158,10 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
 
       await app.db.insert(activity).values({
         actorId: request.user.sub,
-        action: "credit.recorded",
+        action:
+          body.reason === "adjustment"
+            ? "credits.adjusted"
+            : `credits.${body.reason === "purchase" ? "purchased" : "refunded"}`,
         targetType: "credit",
         targetId: entry.id,
         summary: `${body.hours > 0 ? "Added" : "Removed"} ${Math.abs(body.hours)} lesson credit(s)`,

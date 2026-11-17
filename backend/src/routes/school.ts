@@ -303,9 +303,9 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
       });
       visibleCredits.forEach((row) => referencedUserIds.add(row.actorId));
 
-      const visibleUsers = userRows.filter((row) =>
-        referencedUserIds.has(row.id),
-      );
+      const visibleUsers = isAdmin
+        ? userRows
+        : userRows.filter((row) => referencedUserIds.has(row.id));
       const visibleTeacherProfiles = teacherProfileRows.filter((row) =>
         teacherIds.has(row.userId),
       );

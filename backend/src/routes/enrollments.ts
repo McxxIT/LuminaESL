@@ -7,6 +7,7 @@ import {
   users,
 } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
+import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
 import {
   managerOwnsStudent,
@@ -149,6 +150,19 @@ export const enrollmentRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!enrollment) throw new Error("Failed to create enrollment");
 
+      const [teacher] = await app.db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, body.teacherId))
+        .limit(1);
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "enrollment.created",
+        targetType: "user",
+        targetId: enrollment.studentId,
+        summary: `With ${teacher?.name ?? "a teacher"}`,
+      });
+
       reply.status(201);
       return enrollment;
     },
@@ -196,6 +210,16 @@ export const enrollmentRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(enrollments.id, id))
         .returning();
       if (!updated) throw notFound("Enrollment not found");
+
+      if (body.status !== undefined && body.status !== existing.status) {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "enrollment.updated",
+          targetType: "user",
+          targetId: updated.studentId,
+          summary: `${existing.status} → ${updated.status}`,
+        });
+      }
 
       return updated;
     },

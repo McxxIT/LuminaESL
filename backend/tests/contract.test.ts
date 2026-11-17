@@ -103,12 +103,23 @@ describe("school contract", () => {
     expect(
       app.hasRoute({ method: "POST", url: "/api/v1/requests/:id/review" }),
     ).toBe(true);
+    expect(
+      app.hasRoute({ method: "GET", url: "/api/v1/activity" }),
+    ).toBe(true);
   });
 
   it("exposes the bootstrap endpoint behind authentication", async () => {
     const response = await app.inject({
       method: "GET",
       url: "/api/v1/school/bootstrap",
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("keeps the activity log admin-only", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/activity",
     });
     expect(response.statusCode).toBe(401);
   });
