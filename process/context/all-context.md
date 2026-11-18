@@ -100,7 +100,7 @@ For most substantial tasks:
 | `auth/` | `process/context/auth/all-auth.md` | JWT + refresh-cookie auth, role scoping, and demo-vs-API mode — the auth group entrypoint/router |
 | `database/` | `process/context/database/all-database.md` | Drizzle/PostgreSQL schema, migrations, seed/reset, and booking/credit integrity — the database group entrypoint/router |
 | `planning/` | `process/context/planning/all-planning.md` | Plan formats, task folders, and the existing cutover and feature plans |
-| `tests/` | `process/context/tests/all-tests.md` | Test and verification guide: backend vitest, per-domain API smoke, gates, and known gaps |
+| `tests/` | `process/context/tests/all-tests.md` | Test and verification guide: backend vitest, browser parity suite (`npm run e2e`), per-domain API smoke, gates, and known gaps |
 | `uxui/` | `process/context/uxui/all-uxui.md` | Next.js 16 / React 19 / Tailwind 4 frontend: app shell, role components, school data layer, styling — the uxui group entrypoint/router |
 <!-- /GENERATED:routing -->
 
@@ -217,7 +217,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend only); frontend has no tests |
+| Tests | vitest 3 (backend, `backend/tests`, 17 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`, 10 tests in both data modes) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -291,7 +291,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 Demo accounts (`@lumina.school`): admin@, manager@, manager2@, teacher@, student@. API-mode password is documented in the seed/progress docs, not here.
 
-**Dev commands:** `npm run dev` (web + api), `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run db:migrate|generate|push|seed|reset|studio`, `npm run smoke` (per-domain API smoke; see `tests/all-tests.md`).
+**Dev commands:** `npm run dev` (web + api), `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run e2e` (browser parity suite, API + demo modes), `npm run db:migrate|generate|push|seed|reset|studio`, `npm run smoke` (per-domain API smoke; see `tests/all-tests.md`).
 
 ## Existing Planning Docs
 
@@ -308,7 +308,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 343 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), browser check in demo and API mode.
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 343 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: API suite on :3000 + backend :4000, then demo regression on :3100; ~50 s; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 

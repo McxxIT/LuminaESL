@@ -1,7 +1,7 @@
 # Lumina ESL - Progress and Next Plan
 
 Last updated: November 16, 2026
-Last verified: Step A (aligned demo accounts) done. `npm run db:reset` truncated, migrated, and reseeded the local PostgreSQL database. API login and `/auth/me` verified for `admin@lumina.school` (Jamie Smith), `manager2@lumina.school` (Marco Bianchi), `teacher@lumina.school` (Alex Johnson), and `student@lumina.school` (Mia Chen); Alex's profile reports to Priya (matching manager id), and Mia's profile has the browser seed's level, target, and guardian. A real browser check confirmed `NEXT_PUBLIC_DEMO_MODE=false` signs in and renders the admin shell with no "Account not found", and demo mode still signs in with any password. `npm run typecheck`, `npm run lint`, and backend tests (7/7) pass.
+Last verified: Step D1 (parity suite) done Nov 18, 2026. `npm run e2e` runs the Playwright API-mode suite (9 specs) and the demo-mode regression (1 spec), green twice back to back with no leftover processes; `npm run typecheck`, `npm run lint`, and backend tests (17/17) pass. Steps A–C and B0–B3 are closed with their evidence in `CUTOVER_PROGRESS.md`; D2 (one-time import) and D3 (fallback removal) are not started.
 
 ## Status at a glance
 
@@ -64,7 +64,18 @@ npm run typecheck
 npm run lint
 npm run test
 npm run build
+
+# Parity suite (needs local Postgres, backend/.env, a seeded DB, ports 3000/3100/4000 free)
+npm run e2e              # API suite on :3000 (reuses or starts the backend on :4000), then demo on :3100
+npm run e2e:api --workspace @lumina/frontend   # API suite only
+npm run e2e:demo --workspace @lumina/frontend  # demo regression only
 ```
+
+`npm run e2e` is the browser gate for both data modes. The API suite asserts server state
+(credit deltas, lesson/request status, notification read/mute) and the demo suite fails if any
+request reaches `/api/v1/`. Reports land in `frontend/playwright-report/`, traces and videos in
+`frontend/test-results/` (both gitignored). Do not run `npm run build` while an e2e run is
+starting its dev server.
 
 ## Monorepo and backend API (new)
 

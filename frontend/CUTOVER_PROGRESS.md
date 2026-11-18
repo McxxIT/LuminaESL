@@ -19,7 +19,7 @@ Live status for the frontend/backend integration. The plan is in
 | B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
 | B3 - Domain slices | ✅ Done | Course ownership, activity log, `npm run smoke` (11 domains, 306 checks), parity fixes, numeric credits, 1 credit per lesson. Independent EVL rerun green (Nov 18). Plan archived to `process/features/backend-cutover/completed/b3-domain-smoke_18-11-26/`. |
 | Step C - Uploads + notifications | ✅ Done | API uploads/downloads (5 MB + MIME allowlist), activity-backed bell merged with the role derivation, `notification_state` read/mute per user. Browser + smoke evidence Nov 18. |
-| Step D - Parity + removal | ⬜ Not started | Depends on C. |
+| Step D - Parity + removal | 🟨 D1 done | D1 parity suite: Playwright, 10 tests (9 API + 1 demo), green twice back to back. D2 one-time import and D3 fallback removal not started. |
 
 ## Rule-gap checklist (B0.2)
 
@@ -119,6 +119,34 @@ Live status for the frontend/backend integration. The plan is in
 - [x] Notification ids stay bounded (the "lessons without a plan" reminder no longer
   embeds every lesson id) so `PATCH /notifications/state` accepts mark-all-read.
 
+## Step D1 checklist (parity suite)
+
+- [x] Runner: `@playwright/test` pinned to `1.65.1` in the frontend workspace (cached
+  Chromium reused, no browser download); scripts `e2e:api`, `e2e:demo`, `e2e`, plus a root
+  `npm run e2e` alias.
+- [x] Two configs, not two projects: `playwright.config.ts` (API mode, port 3000, backend on
+  4000) and `playwright.demo.config.ts` (demo mode, port 3100, no backend). `NEXT_PUBLIC_*`
+  is inlined at dev-server start, so one server per mode is the only honest split.
+- [x] `e2e/serve.mjs` injects the mode env and spawns `next dev`; both runs are sequential
+  (`workers: 1`), each on its own port.
+- [x] API specs assert server state, not only pixels: credit deltas from
+  `/credits/balance/:id`, lesson status and request status from `/school/bootstrap`, and
+  notification read/mute state from `/notifications/state`.
+- [x] Fixtures are self-contained: unique `runId` per test (file names, homework titles,
+  cancellation comments), teacher opens a fresh future slot, manager books the refund lesson
+  on behalf of the seeded student, notification state is captured and restored in `finally`.
+  No pre-existing pending request is ever approved.
+- [x] Preconditions (`e2e/support/preconditions.ts`) verify `/health`, the seeded admin
+  login, the four seeded accounts, and a non-empty lesson collection. They fail with the
+  exact command to run and never migrate, seed, or repair.
+- [x] Selectors are role/label/text/class based, taken from the Step C browser evidence;
+  no `data-testid` was added and no `frontend/app/**` file changed.
+- [x] `.gitignore` covers `test-results/`, `playwright-report/`, `blob-report/`; frontend
+  ESLint ignores those folders too (the HTML report ships a bundled trace viewer that made
+  `npm run lint` fail before the ignore was added).
+- [x] Backend `webServer` uses `npm run start` (no `--watch`) so a failed boot cannot leave a
+  detached `tsx watch` child holding port 4000.
+
 ## Verification log
 
 | Date | Slice | What was checked | Result |
@@ -141,6 +169,8 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 18, 2026 | C browser (API mode) | Chromium, `DEMO_MODE=false`, `DATA_SOURCE=api`: admin signs in through `/auth/login` + bootstrap, uploads a PDF (`201`), downloads identical bytes, bell merges the 35-row activity feed (30 shown), mark-all-read persists (32 read ids, 0 unread after reload), mute persists through reload, teacher files a cancellation with a PNG, manager review modal renders the evidence from a blob URL and downloads it; no page errors. 25/25 checks | Pass |
 | Nov 18, 2026 | C browser (demo mode) | Chromium, `.env.local` defaults: IndexedDB upload + byte-identical download, localStorage bell read state survives reload, mute survives reload, teacher cancellation evidence stored as a data URL and rendered inline for the manager; no page errors. 10/10 checks | Pass |
 | Nov 18, 2026 | C smoke | `npm run smoke`: 13/13 domains, 343 checks (`uploads` 16, `notifications` 21), settings restored; deliberate red run (301-item feed cap) failed `notifications` with exit 1, then reverted. Root `typecheck`, `lint`, backend `npm test` (17/17), `git diff --check`, grep gate (no reset/push/truncate) | Pass |
+| Nov 18, 2026 | D1 suite | `npm run e2e` twice back to back on a seeded DB: run 1 API 9/9 (41.0 s) + demo 1/1 (10.0 s), run 2 API 9/9 (40.6 s) + demo 1/1 (10.0 s), both exit 0, no manual cleanup between runs. API specs cover auth (3), uploads byte parity, notification read/mute, student booking (-1 credit), manager book-on-behalf + teacher evidence + manager approve (+1 credit), and teacher→student→teacher homework; the demo spec proves IndexedDB upload/download, localStorage read/mute, and zero `/api/v1/` requests | Pass |
+| Nov 18, 2026 | D1 safety | Deliberate red run (`POST /auth/login` expected 201): exit 1 with `test-failed-1.png`, `video.webm`, `trace.zip`, `error-context.md` under `frontend/test-results/api/`, then reverted to 200. Precondition probe with `E2E_API_URL=http://localhost:4999/api/v1`: beforeAll failed all three auth tests with "backend is not reachable … start it with `npm run dev:api`" and nothing was seeded or repaired. Grep gate over `frontend/e2e/**` clean (only in-memory `.push()` and prose). `git diff --check` exit 0; no `frontend/app/**` change. Root `typecheck`, `lint`, backend `npm test` (17/17) | Pass |
 
 ## Change log
 
@@ -156,6 +186,7 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 18, 2026 | B3 smoke and parity: postgres numeric parser + `getCreditBalance`; `resolveLessonDefaults` for booking and `POST /lessons`; typed `ActivityAction` union and `logActivity(db or tx)`; slot/rebook/reschedule/request logging; complete-cancelled 409; request lesson ownership; approve-cancel guards; homework re-review 400; optional `RATE_LIMIT_MAX` (default 300); frontend 1 credit per lesson, schema v3, API rating and request attachments; `npm run smoke`. | `backend/src/plugins/db.ts`, `backend/src/config/env.ts`, `backend/src/app.ts`, `backend/src/lib/{activity,credits,lesson-defaults,db-handle}.ts`, `backend/src/routes/{bookings,lessons,requests,credits,assignments,courses,school}.ts`, `backend/scripts/smoke.ts`, `backend/tests/*.ts`, `backend/{package,tsconfig}.json`, `package.json`, `frontend/app/lib/school/{services/*,api/teaching,notifications,seed,types}.ts`, `frontend/app/lib/data.ts`, `frontend/app/components/{LuminaApp,manager/PeopleForms,student/StudentBilling,student/StudentOverview}.tsx` |
 | Nov 18, 2026 | B3 activity parity: activity writes on course, people, enrollment, settings, homework, credit, and request routes; new admin-only paginated `GET /activity`; action names aligned with the browser store's `recordActivity` vocabulary. | `backend/src/routes/activity.ts`, `backend/src/routes/index.ts`, `backend/src/routes/{courses,users,teachers,students,enrollments,settings,assignments,credits,requests}.ts`, `backend/tests/contract.test.ts` |
 | Nov 18, 2026 | Step C: API uploads/downloads with 5 MB + MIME validation, activity-backed bell merged with the role derivation, per-user `notification_state` (read ids + muted categories), cancellation evidence by attachment id, bounded notification ids, smoke `uploads`/`notifications` domains. | `backend/src/{db/schema.ts,lib/notifications.ts,routes/notifications.ts,routes/uploads.ts,app.ts}`, `backend/src/db/migrations/0002_notification_state.sql`, `backend/scripts/smoke.ts`, `backend/tests/contract.test.ts`, `frontend/app/lib/{api/client.ts,hooks/useNotifications.ts,school/notifications.ts,school/attachment-download.ts,school/api/{uploads,notifications}.ts,school/services/{uploads,teaching,curriculum}.ts,school/views.ts,types.ts,school/index.ts}`, `frontend/app/components/{manager/ManagerApprovals.tsx,manager/ManagerCurriculum.tsx,manager/ManagerSettings.tsx,teacher/TeacherLessons.tsx}` |
+| Nov 18, 2026 | Step D1: Playwright parity suite for API mode (auth, uploads, notifications, booking, cancellation/refund, homework) and a demo-mode regression, with mode-specific configs, an env-injecting dev-server launcher, API state assertions, restore-on-exit notification state, and loud preconditions. | `frontend/{playwright.config.ts,playwright.demo.config.ts,eslint.config.mjs,package.json}`, `frontend/e2e/**`, `package.json`, `.gitignore` |
 
 ## Open decisions / blockers
 
@@ -202,6 +233,8 @@ Live status for the frontend/backend integration. The plan is in
 
 ## Next action
 
-Commit Step C, then start Step D (parity suite, one-time import, remove the fallback). Step C is closed:
-uploads/downloads, the activity-backed bell, and per-user read/mute state are live in API mode with demo
-mode unchanged.
+Step D continues with D2 (one-time local → Postgres import) and D3 (remove the local
+fallback) as separate approved plans. D1 is closed: `npm run e2e` is the parity gate for
+both modes and leaves no processes behind. CI wiring for the suite is a backlog note
+(`process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`) because the repo
+has no CI.
