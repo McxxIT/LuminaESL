@@ -20,7 +20,7 @@ BLUF: `frontend/app/lib/school/` is the data layer. Every service returns `Servi
 
 ## Services (`services/*`)
 
-approvals, bookings, credits, curriculum, homework, people, profile, quality, teaching, uploads, plus `common.ts` (`changeCredits`, `assertSlotOpen`, `createLesson`, `hoursUntil`, `LESSON_CREDIT_HOURS`) and `result.ts`.
+approvals, bookings, credits, curriculum, homework, people, profile, quality, teaching, uploads, plus `common.ts` (`changeCredits`, `assertSlotOpen`, `createLesson`, `hoursUntil`, `LESSON_CREDIT_HOURS` = 1 credit per lesson) and `result.ts`. `SCHOOL_SCHEMA_VERSION` is 3 (bumped in B3; a stale browser store re-seeds). API mode: `rateLesson` and cancellation-request attachments go through `api/teaching.ts`.
 
 `result.ts`: `ok()/fail()`, `ServiceError`, `run()` (sync) and `runAsync()` (async) convert `ServiceError`, `PermissionError`, `ApiError` into `{ok:false,error}` so screens show a toast instead of catching.
 

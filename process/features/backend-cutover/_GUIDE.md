@@ -38,7 +38,7 @@ Backend:
 
 Status: in-progress
 
-Board (per `frontend/CUTOVER_PROGRESS.md`): Step A, B0.1-B0.4, B1 (read path), B2 (write path) done. B3 domain slices is next. Step C (uploads + notifications) and Step D (parity + removal) not started. Open item: mutation-specific browser/API smoke per migrated domain. Much cutover work is still uncommitted on `developing`.
+Board (per `frontend/CUTOVER_PROGRESS.md`): Step A, B0.1-B0.4, B1 (read path), B2 (write path), B3 (domain slices, `npm run smoke`, parity fixes; archived in `completed/b3-domain-smoke_18-11-26/`) done. Step C (uploads + notifications) is next; Step D (parity + removal) not started. B3 follow-ups are in `backlog/` (booking concurrency, booking rules, credit wording, rebook enrichment, frontend test runner, smoke CI/fixtures). Much cutover work is still uncommitted on `developing` until the B3 commit lands.
 
 Rule: update `frontend/CUTOVER_PROGRESS.md` (board row, checklist, verification log, change log) whenever a slice lands.
 

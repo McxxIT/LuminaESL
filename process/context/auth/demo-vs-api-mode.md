@@ -22,7 +22,7 @@ Other frontend env: `NEXT_PUBLIC_API_URL`. Env names only — see `frontend/.env
 
 ## Where the flags are used
 
-- `frontend/app/components/LuminaApp.tsx`: `booting` state, `effectiveAccount` (demo account vs `accountForUser(authUser)`), demo-only local state. Known wart: `studentCredits` is hardcoded `24.5` in local state (lines ~32, 143, 158).
+- `frontend/app/components/LuminaApp.tsx`: `booting` state, `effectiveAccount` (demo account vs `accountForUser(authUser)`), demo-only local state. Known wart: `studentCredits` is local state seeded at `24` (matches the demo seed); real balance should come from the credits service/ledger. `SCHOOL_SCHEMA_VERSION` 3: stale demo stores re-seed.
 - `frontend/app/lib/school/services/*`: each service branches on `isApiDataMode()`; API branch calls `lib/school/api/*`, local branch calls `updateSchool(draft => ...)`.
 - `frontend/app/lib/school/store.ts`: `dataSource` `"local" | "api"`.
 

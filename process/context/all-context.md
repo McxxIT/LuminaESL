@@ -1,6 +1,6 @@
 # lumina-esl - All Context
 
-Last updated: 2026-11-17
+Last updated: 2026-11-18
 
 **Lumina ESL is a real ESL (English as a second language) school management platform** for institution admins, managers, teachers, and students (parents act through the student account; they are not a login role). Lessons are **1:1 and 25 minutes**; each student is enrolled with one teacher in a curriculum course, and each booked lesson consumes the next lesson plan. No group classes. Billing is **credit-based**. Staff is two-level: admin creates managers and assigns teachers; each manager sees only their own teachers, students, and approvals; admin sees everything. Virtual classrooms use flexible meeting links (ClassIn / Zoom / Google Meet, no paid SDKs) stored in `lessons.roomCode`.
 
@@ -242,10 +242,12 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Observed booking risks (not fixed):**
 
-- `POST /bookings` balance check casts `sum(hours)::int`, truncating fractional credits (ledger is numeric hours since migration 0001).
+- (Resolved in B3: the balance is now the numeric `getCreditBalance`; postgres `numeric` is parsed to a JS number in `plugins/db.ts`.)
+- Backend `POST /lessons` (teacher/manager/admin schedules a lesson) does NOT debit a credit, while the demo add-lesson paths debit 1; an early student cancel of such a lesson then refunds +1, so credits can be minted. Smoke asserts the current no-debit behavior. Backlog: `process/features/backend-cutover/backlog/booking-rules-followups_NOTE_18-11-26.md`.
+- Plan selection (`resolveLessonDefaults`) is not locked; a student can self-purchase up to 100 credits with no payment check.
 - Balance read and debit are not row-locked; concurrent bookings by one student could both pass.
 - No unique constraint on `lessons` (teacher, date, time); only the `slot_openings` row claim (`DELETE ... RETURNING`) prevents double-booking.
-- Refund paths: student cancel refunds only if hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and lesson not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS`.
+- Refund paths: student cancel refunds only if hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and lesson not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
 
 **Other gotchas:**
 
@@ -254,7 +256,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - Meeting links live in `lessons.roomCode` (max 40 chars), NOT `meeting_url`.
 - Parents are not a login role: guardian fields on `student_profiles`; parent ratings go through the student account (`ratingSource: "parent"`).
 - Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist.
-- Demo mode is the DEFAULT (`isDemoMode()` true unless `NEXT_PUBLIC_DEMO_MODE === "false"`). `LuminaApp.tsx` hardcodes `studentCredits` 24.5 in local state.
+- Demo mode is the DEFAULT (`isDemoMode()` true unless `NEXT_PUBLIC_DEMO_MODE === "false"`). `LuminaApp.tsx` seeds `studentCredits` local state at 24 (matches the demo seed).
 - The working tree holds large uncommitted cutover work; check `git status` before assuming a clean base.
 
 ## Environment and Configuration
@@ -263,7 +265,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Env var names (never values):**
 
-- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`
+- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs)
 - Frontend: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE`, `NEXT_PUBLIC_DATA_SOURCE`
 
 **Mode flag semantics (`frontend/app/lib/auth/mode.ts`):**
@@ -276,7 +278,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 Demo accounts (`@lumina.school`): admin@, manager@, manager2@, teacher@, student@. API-mode password is documented in the seed/progress docs, not here.
 
-**Dev commands:** `npm run dev` (web + api), `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run db:migrate|generate|push|seed|reset|studio`.
+**Dev commands:** `npm run dev` (web + api), `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run db:migrate|generate|push|seed|reset|studio`, `npm run smoke` (per-domain API smoke; see `tests/all-tests.md`).
 
 ## Existing Planning Docs
 
@@ -293,7 +295,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, API smoke, browser check in demo and API mode.
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (11 domains, 306 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), browser check in demo and API mode.
 
 ## Validator Registry
 

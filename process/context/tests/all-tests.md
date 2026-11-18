@@ -4,7 +4,7 @@ Last updated: 2026-11-17
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** Only the backend has automated tests (vitest, 11 tests, 3 files, no DB needed). The frontend has none: verify it with typecheck + lint + build + manual browser check. Authenticated business rules (booking, refunds, approvals) are verified manually against seeded local Postgres.
+**BLUF:** Only the backend has automated tests (vitest, 16 tests, 4 files, no DB needed). `npm run smoke` is a separate hybrid per-domain API smoke. The frontend has none: verify it with typecheck + lint + build + manual browser check. Authenticated business rules (booking, refunds, approvals) are verified manually against seeded local Postgres.
 
 Do not load the whole `process/context/tests/` folder by default. Start here, then drill down.
 
@@ -70,17 +70,27 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | Tier | What | Exact commands |
 |---|---|---|
 | Fully-automated | No DB, no `.env`, no browser | `npm run typecheck`; `npm run lint`; `npm run test --workspace @lumina/backend`; `git diff --check`; optional `npm run build` |
-| Hybrid | Needs local Postgres + `backend/.env` | `npm run db:migrate`; `npm run db:seed`; start `npm run dev`; API smoke: login and `GET /api/v1/auth/me` for the 5 demo accounts, `GET /api/v1/school/bootstrap`; browser check in demo mode and API mode |
+| Hybrid | Needs local Postgres + `backend/.env` | `npm run smoke` (see Smoke Gate below); `npm run db:migrate`; `npm run db:seed`; start `npm run dev`; API smoke: login and `GET /api/v1/auth/me` for the 5 demo accounts, `GET /api/v1/school/bootstrap`; browser check in demo mode and API mode |
 | Agent-probe | Agent drives or inspects a running stack | Use `vc-agent-browser` against `npm run dev` (demo mode is default; API mode needs `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`); curl smoke against the seeded API |
 | Known-gap | Not verified automatically | See Known Gaps below |
 
-## Per-Test-File Coverage (backend/tests, 11 tests)
+## Per-Test-File Coverage (backend/tests, 16 tests)
 
 | File | Tests | Covers |
 |---|---|---|
 | `app.test.ts` | 4 | `/health` 200; unknown route 404 `NOT_FOUND`; `/api/v1/lessons` without token 401; bad login body 400 `VALIDATION_ERROR` |
-| `contract.test.ts` | 4 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes; `/school/bootstrap` 401 without token |
+| `contract.test.ts` | 5 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes; `/school/bootstrap` 401 without token |
 | `password.test.ts` | 3 | scrypt hash/verify, salted uniqueness, `addMinutes` midnight wrap |
+| `db-types.test.ts` | 4 | DB-free: postgres `numeric` (OID 1700) parser registration and parsing; `RATE_LIMIT_MAX` env default 300 |
+
+(`app.test.ts` and `contract.test.ts` hardcode an Env that includes `RATE_LIMIT_MAX`. `backend/scripts/` is excluded from `npm test`.)
+
+## Smoke Gate (`npm run smoke`)
+
+- Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 11 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, homework, quality, profile): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation. 306 checks per run; last green: two consecutive runs, 2026-11-18.
+- Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
+- Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
 ## Debugging Quick Reference
 
@@ -98,7 +108,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 - No frontend unit, component, or e2e tests.
 - Authenticated business rules (publish, archive, refund, absence, rating) are only manually smoked.
-- No concurrency test for double-booking; booking balance read and debit are not row-locked, and the balance check casts `sum(hours)::int` (truncates fractional credits). Observed, not fixed.
+- No concurrency test for double-booking; booking balance read and debit are not row-locked, (backlog: `booking-credit-concurrency_NOTE_18-11-26.md`); backend `POST /lessons` does not debit while demo does (smoke asserts current behavior). Observed, not fixed.
 - No unique constraint on lessons (teacher, date, time); the slot-row claim is the only guard.
 - No CI; backend "build" is typecheck only.
 - Open item: mutation-specific browser/API smoke per migrated domain (cutover step B3).
@@ -106,7 +116,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 ## Last Verified Test Run
 
-2026-11-17: `npm run test --workspace @lumina/backend` ran with no DB and no `.env`: 3 files, 11 tests passed (vitest 3.2.7, about 16s).
+2026-11-18: `npm run test --workspace @lumina/backend`: 4 files, 16 tests passed (independent vc-tester rerun). `npm run smoke` x2: 11/11 domains, 306 checks, exit 0.
 
 ---
 

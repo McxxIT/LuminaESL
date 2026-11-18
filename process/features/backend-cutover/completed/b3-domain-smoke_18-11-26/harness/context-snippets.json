@@ -1,0 +1,15 @@
+{
+  "task": "B3 domain smoke, parity fixes, 1-credit-per-lesson unit, numeric-hours crash fix",
+  "snippets": [
+    { "file": "backend/src/plugins/db.ts", "lines": "6-20", "description": "pgTypes: numeric OID 1700 parsed to a JS number; from:[1700] is required for postgres.js to register the parser; bigint untouched." },
+    { "file": "backend/src/lib/credits.ts", "lines": "1-20", "description": "getCreditBalance(db|tx): coalesce(sum(hours),0), no ::int cast, returned as a number. Used by POST /bookings and rebook (inside their txns) and GET /credits/balance." },
+    { "file": "backend/src/routes/bookings.ts", "lines": "POST / handler", "description": "Txn: slot check, getCreditBalance >= 1, DELETE slot RETURNING (claim), resolveLessonDefaults, insert lesson, credit -1, logActivity lesson.booked." },
+    { "file": "backend/src/routes/requests.ts", "lines": "POST /:id/review", "description": "Update guarded by status='pending' (409 on zero rows); lesson read FOR UPDATE; completed -> 409 and rollback (request stays pending, no refund); cancelled -> resolve without refund; scheduled -> cancel + refund +1 once when refundTeacherCancellations." },
+    { "file": "backend/src/routes/requests.ts", "lines": "POST / handler", "description": "Lesson-cancellation request: unknown lesson 404; lesson.teacherId must equal the effective teacherId (actor for teachers, body.teacherId for admin/manager), else 403." },
+    { "file": "backend/src/routes/lessons.ts", "lines": "POST /:id/rebook, POST /:id/complete", "description": "Rebook uses getCreditBalance (1.5 ok, 0.5 refused) and logs lesson.booked; complete rejects a cancelled lesson with 409." },
+    { "file": "backend/src/routes/credits.ts", "lines": "POST /, GET /balance/:studentId", "description": "Credit insert and credits.* activity in one txn; balance returned as a number." },
+    { "file": "frontend/app/lib/school/services/common.ts", "lines": "9-10", "description": "LESSON_CREDIT_HOURS = 1 (was LESSON_SLOT_MINUTES / 60)." },
+    { "file": "frontend/app/lib/school/services/approvals.ts", "lines": "reviewRequest", "description": "Local mirror: approving cancellation of a completed lesson throws; request stays pending; no refund." },
+    { "file": "frontend/app/lib/school/types.ts and backend/src/routes/school.ts", "lines": "SCHOOL_SCHEMA_VERSION", "description": "Bumped 2 to 3 in both; stale local stores with -25/60 debits are re-seeded on load." }
+  ]
+}

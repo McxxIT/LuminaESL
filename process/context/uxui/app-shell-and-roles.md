@@ -14,7 +14,7 @@ BLUF: `frontend/app/page.tsx` + `layout.tsx` mount `frontend/app/components/Lumi
 
 - Demo mode: account from local state. API mode: `useAuth` session + `loadSchoolFromApi` / `refreshSchoolFromApi` (via `/school/bootstrap`); shows a boot state until the session restores.
 - `effectiveAccount` picks demo account vs `accountForUser(authUser)`. See `auth/demo-vs-api-mode.md`.
-- Known wart: `studentCredits` hardcoded 24.5 in local state; real balance should come from the credits service/ledger.
+- Known wart: `studentCredits` is local state seeded at 24; real balance should come from the credits service/ledger.
 
 ## Component folders (`frontend/app/components/`)
 

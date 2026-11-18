@@ -1,0 +1,10 @@
+{
+  "task": "B3 domain smoke, parity fixes, 1-credit-per-lesson unit, numeric-hours crash fix",
+  "planPath": "process/features/backend-cutover/active/b3-domain-smoke_18-11-26/b3-domain-smoke_PLAN_18-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": ["billing or credits", "public API or external contract changes"],
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Changes credit ledger arithmetic (numeric parser, getCreditBalance), booking and refund paths (POST /bookings, rebook, approve-cancel, absence), the demo credit unit (25/60 to 1), and public API behavior (GET /credits/balance balance string to number, lesson.created to lesson.booked, new 4xx rejections). No schema change, no migration, no auth change.",
+  "approver": "user (ENTER EXECUTE MODE 2026-11-18, Gate CONDITIONAL accepted); final approval pending the independent EVL rerun"
+}

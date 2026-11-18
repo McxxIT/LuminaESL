@@ -3,8 +3,8 @@
 Live status for the frontend/backend integration. The plan is in
 `CUTOVER_PLAN.md`; app-wide state stays in `PROGRESS.md`.
 
-**Current step:** Step B - B3 domain slices in progress (curriculum ownership and the activity log landed).
-**Last updated:** November 17, 2026.
+**Current step:** Step B - B3 domain slices complete and independently re-verified (per-domain API smoke, parity fixes, 1 credit per lesson); Step C next.
+**Last updated:** November 18, 2026.
 
 ## Board
 
@@ -17,7 +17,7 @@ Live status for the frontend/backend integration. The plan is in
 | B0.4 - Contract tests | ✅ Done | `backend/tests/contract.test.ts` + live role/command smoke matrix. |
 | B1 - Read path | ✅ Done | `api/bootstrap.ts`; API mode hydrates from bootstrap, demo/local unchanged. |
 | B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
-| B3 - Domain slices | 🟡 In progress | Course ownership and activity logging/`GET /activity` landed; per-domain smoke coverage next. |
+| B3 - Domain slices | ✅ Done | Course ownership, activity log, `npm run smoke` (11 domains, 306 checks), parity fixes, numeric credits, 1 credit per lesson. Independent EVL rerun green (Nov 18). Plan archived to `process/features/backend-cutover/completed/b3-domain-smoke_18-11-26/`. |
 | Step C - Uploads + notifications | ⬜ Not started | Depends on B. |
 | Step D - Parity + removal | ⬜ Not started | Depends on C. |
 
@@ -59,7 +59,7 @@ Live status for the frontend/backend integration. The plan is in
 - [x] Align the backend credit-hour contract with the UI's fractional-hour adjustments.
 - [x] Added backend routes for request withdrawal, course duplication, attachments,
   and dedicated rebooking.
-- [ ] Add mutation-specific browser/API smoke coverage for each migrated domain.
+- [x] Add mutation-specific browser/API smoke coverage for each migrated domain (closed by `npm run smoke` in B3).
 
 ## Domain-parity checklist (B3)
 
@@ -78,7 +78,22 @@ Live status for the frontend/backend integration. The plan is in
 - [x] Action names follow the browser store's vocabulary (`course.*`, `user.*`,
   `teacher.*`, `student.*`, `enrollment.*`, `credits.*`, `settings.updated`,
   `homework.*`, `request.*`).
-- [ ] Per-domain browser/API smoke coverage for the remaining slices.
+- [x] Per-domain API smoke: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`,
+  `backend/scripts/smoke.ts`) starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates
+  per-run fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks settings, slots, booking, on-behalf,
+  rebook, lessons, requests, credits, homework, quality, and profile: allowed role OK, denied roles 403,
+  cross-team manager 403, exact credit deltas, exactly one activity row per mutation. Never resets,
+  pushes, or truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`),
+  and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind.
+- [x] Credit `hours` are JSON numbers end to end (postgres `numeric` parser in `plugins/db.ts`); the API-mode
+  shell no longer crashes on `"12.00"` strings.
+- [x] One credit per lesson in demo mode (`LESSON_CREDIT_HOURS = 1`); `SCHOOL_SCHEMA_VERSION` 2 -> 3 (stale
+  browser stores re-seed).
+- [x] Parity fixes: booking/`POST /lessons` fill enrollment, next plan, and `ESL-####` room code; rebook,
+  reschedule, slot open/close, request create/withdraw are logged; complete refuses a cancelled lesson;
+  cancellation requests must target the teacher's own lesson; approve-cancel refuses a completed lesson
+  and never refunds twice (API and demo); homework cannot be reviewed twice (API and demo); student rating
+  and cancellation attachments go through the API in API mode.
 
 ## Verification log
 
@@ -93,7 +108,11 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 17, 2026 | B1.3 | Focus/visibility refresh path compiled and shipped; mutation-time refresh deferred to B2.2 by design | Partial (expected) |
 | Nov 17, 2026 | B1 wrap-up | Root `typecheck`, `lint`, backend `npm test`; demo-mode browser login still works after restoring `.env.local` | Pass |
 | Nov 17, 2026 | B3 curriculum | Live 20-case ownership matrix: manager creates/edits own course, unit, plan; other manager gets 403 on PATCH/DELETE course, unit rename, plan add/edit/delete; other manager may duplicate and then owns the copy; admin edits any course/plan; unknown course 404; archive cleanup 200. Plus backend `typecheck`/`lint` | Pass |
+| Nov 18, 2026 | B3 smoke | `npm run smoke` twice back to back: 11/11 domains, 306 checks each (runs `mwlgvlrl51c9`, `mwlgvwz0f90b`), settings restored to 24 h / refunds on. Deliberate red run (booking delta set to -2): `FAIL booking`, exit 1, reverted. Grep gate (no reset/push/truncate) empty. Root `typecheck`, `lint`, backend `npm test` (16/16, new `db-types.test.ts`), `git diff --check` | Pass |
+| Nov 18, 2026 | B3 browser (demo) | Chromium, fresh context pre-seeded with a v2 store: store re-seeded to v3 at 24 credits; student UI book 24.0 -> 23.0, UI cancel 23.0 -> 24.0; no console errors. Local-branch service probe (Node, memory store): book/on-behalf/rebook -1 each, early cancel +1, absence +1, approve-cancel +1 once, approve on completed refused (request pending), homework re-review refused | Pass |
+| Nov 18, 2026 | B3 browser (API) | Chromium, API mode, backend restarted after the version bump: admin, manager, teacher, student shells load without the hours crash (student chip 21.3 from numeric 21.25); student UI booking -1 with room code, UI cancel +1; teacher lesson page shows the room code and the attached plan; student UI rating stored (1 rating row, 1 `lesson.rated` row) | Pass |
 | Nov 18, 2026 | B3 activity | Live 57-check matrix on port 4100: admin reads `/activity` (manager 403, anonymous 401); `course.created/updated/duplicated/archived`, `teacher.created/updated/reassigned`, `student.created/updated`, `user.renamed/paused/archived`, `enrollment.created/updated`, `settings.updated` all log with store-style summaries; homework, credits, and request approve/reject actions re-checked; admin bootstrap carries the rows while manager/student bootstraps stay empty; newest-first ordering, paging, and `targetType` filter. Plus backend `typecheck`/`lint`/`npm test` (12/12) | Pass |
+| Nov 18, 2026 | B3 EVL rerun (independent vc-tester) | `typecheck`, `lint`, backend `npm test` (16/16, 4 files), `git diff --check`; `npm run smoke` run 1 and run 2 each 11/11 domains, 306 checks; grep gate empty; `backend/scripts` excluded from `npm test`; settings restored after both runs; port 4100 free afterwards. Browser gates were not re-run by the tester (rely on the execute log above). | Pass |
 
 ## Change log
 
@@ -106,6 +125,7 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 17, 2026 | B2 people slice: API-backed manager/teacher/student create and update, status changes, teacher assignment, enrollment, email updates, and whole-hour credit creation; async people forms. | `frontend/app/lib/school/api/school.ts`, `frontend/app/lib/school/services/people.ts`, `frontend/app/components/manager/PeopleForms.tsx`, `backend/src/routes/users.ts` |
 | Nov 17, 2026 | B2 write-path completion: migrated curriculum, bookings, teaching, approvals, homework, credits, request withdrawal, course duplication, attachments, dedicated rebooking, and fractional credits. | `frontend/app/lib/school/api/*.ts`, `frontend/app/lib/school/services/*.ts`, `backend/src/routes/*.ts`, `backend/src/db/migrations/0001_fractional_credit_hours.sql` |
 | Nov 17, 2026 | B3 curriculum ownership: shared `assertCourseEditable` guard applied to course, unit, plan, and attachment writes; duplicate intentionally left open to any manager. | `backend/src/lib/scope.ts`, `backend/src/routes/courses.ts` |
+| Nov 18, 2026 | B3 smoke and parity: postgres numeric parser + `getCreditBalance`; `resolveLessonDefaults` for booking and `POST /lessons`; typed `ActivityAction` union and `logActivity(db or tx)`; slot/rebook/reschedule/request logging; complete-cancelled 409; request lesson ownership; approve-cancel guards; homework re-review 400; optional `RATE_LIMIT_MAX` (default 300); frontend 1 credit per lesson, schema v3, API rating and request attachments; `npm run smoke`. | `backend/src/plugins/db.ts`, `backend/src/config/env.ts`, `backend/src/app.ts`, `backend/src/lib/{activity,credits,lesson-defaults,db-handle}.ts`, `backend/src/routes/{bookings,lessons,requests,credits,assignments,courses,school}.ts`, `backend/scripts/smoke.ts`, `backend/tests/*.ts`, `backend/{package,tsconfig}.json`, `package.json`, `frontend/app/lib/school/{services/*,api/teaching,notifications,seed,types}.ts`, `frontend/app/lib/data.ts`, `frontend/app/components/{LuminaApp,manager/PeopleForms,student/StudentBilling,student/StudentOverview}.tsx` |
 | Nov 18, 2026 | B3 activity parity: activity writes on course, people, enrollment, settings, homework, credit, and request routes; new admin-only paginated `GET /activity`; action names aligned with the browser store's `recordActivity` vocabulary. | `backend/src/routes/activity.ts`, `backend/src/routes/index.ts`, `backend/src/routes/{courses,users,teachers,students,enrollments,settings,assignments,credits,requests}.ts`, `backend/tests/contract.test.ts` |
 
 ## Open decisions / blockers
@@ -129,12 +149,19 @@ Live status for the frontend/backend integration. The plan is in
   same account, and only when bootstrap fails after a valid session.
 - **Writes in API mode.** All current school service writes use the API and refresh
   the role-scoped snapshot. Local/demo writes remain synchronous and local.
+- **B3 contract notes (Nov 18).** `GET /credits/balance/:studentId` returns `balance` as a number (was a
+  string). `POST /lessons` logs `lesson.booked` (was `lesson.created`); booking, on-behalf, and rebook also
+  log `lesson.booked` (no `lesson.rebooked`, matching demo). `slot.closed` and `request.withdrawn` are
+  backend-only actions (demo logs neither): accepted divergence. Slot actions use `targetType: "slot"` with
+  the real slot id. Backend lesson-cancellation requests do not check that the lesson is `scheduled` at
+  creation (the local branch does); left as is.
+- **Known parity gap (new, not fixed).** Backend `POST /lessons` does not debit a credit, while the demo
+  add-lesson path does; an early student cancel of such a lesson refunds +1. Backlog note written.
+- **Known gaps (accepted).** Booking/credit race (no row lock), no unique lessons constraint, unlocked plan
+  selection, student self-purchase up to 100 credits without payment, smoke not in CI, leave-behind
+  fixtures. Backlog notes in `process/features/backend-cutover/backlog/`.
 
 ## Next action
 
-Finish B3 with per-domain browser/API smoke coverage for the remaining slices
-(bookings/slots, lessons/teaching, requests/approvals, credits, homework, quality,
-profile), then Step C (uploads and notifications). Known small gaps: individual lesson
-plan attachment (`PATCH /lessons/:id` with `lessonPlanId`) is not logged because that
-file carries concurrent work, and `booking.created` still uses its own action name in
-`bookings.ts` for the same reason.
+Commit B3, then start Step C (uploads and notifications). B3 is closed. The earlier small gaps
+are closed: `PATCH /lessons/:id` logs `lesson.planChanged` and booking logs `lesson.booked`.

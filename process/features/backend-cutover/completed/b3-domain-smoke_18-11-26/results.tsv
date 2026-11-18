@@ -1,0 +1,6 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-18	9	0	9	0	ACTIVE	baseline	PVL first pass Gate: CONDITIONAL (outer-pvl)
+1	2026-11-18	9	0	9	9	ACTIVE	CONTINUE	supplement applied all 9 gaps; re-validate from V1
+2	2026-11-18	1	0	1	0	SATURATED	HALTED_SUCCESS	re-validate: all 9 resolved; Gate: CONDITIONAL only on R1 (FE local parity Agent-Probe) + accepted known gaps; no supplement request
+evl-0	2026-11-18	TBD	0	0	0	ACTIVE	baseline	EVL baseline after EXECUTE (execute-agent reports all gates green)
+evl-1	2026-11-18	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL vc-tester rerun: typecheck, lint, 16/16 tests, diff-check, smoke x2 (11 domains/306 checks), grep gate all green

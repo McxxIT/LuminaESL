@@ -1,0 +1,22 @@
+{
+  "task": "B3 domain smoke, parity fixes, 1-credit-per-lesson unit, numeric-hours crash fix",
+  "commands": [
+    { "command": "npm run typecheck", "result": "PASS", "notes": "frontend + backend, exit 0" },
+    { "command": "npm run lint", "result": "PASS", "notes": "backend lint now covers scripts/, exit 0" },
+    { "command": "npm run test --workspace @lumina/backend", "result": "PASS", "notes": "4 files, 16 tests. New tests/db-types.test.ts: parser registered via from, '12.00' -> 12, '-0.50' -> -0.5, RATE_LIMIT_MAX default 300. Red-first confirmed: 4/4 failed before implementation." },
+    { "command": "git diff --check", "result": "PASS", "notes": "exit 0" },
+    { "command": "npm run smoke (run 1, id mwlgvlrl51c9)", "result": "PASS", "notes": "11/11 domains, 306 checks, exit 0; settings restored to 24/true" },
+    { "command": "npm run smoke (run 2, consecutive, id mwlgvwz0f90b)", "result": "PASS", "notes": "11/11 domains, 306 checks, exit 0; settings restored to 24/true" },
+    { "command": "G-SMOKE-RED: booking expected delta temporarily set to -2, then npx tsx scripts/smoke.ts", "result": "PASS", "notes": "'FAIL booking: booking must debit exactly 1 credit', 10/11 domains, exit 1; file restored from backup (break no longer present); settings restored" },
+    { "command": "grep -inE 'db:reset|db:push|truncate|drop table|reset\\.ts' backend/scripts/smoke.ts", "result": "PASS", "notes": "no output (grep exit 1)" }
+  ],
+  "manualChecks": [
+    { "step": "Credit deltas asserted by smoke (exact to 1e-9)", "result": "PASS", "notes": "book -1; double book no second debit; 0 credits 422, no lesson, slot kept; on-behalf -1 own team, 403 cross-team; rebook 1.5 -> 0.5, 0.5 refused; early cancel +1; late cancel (72h window) 0; absence +1; absence with refunds off 0; approve-cancel +1 once, second approve fails with no refund; approve on cancelled 0; approve on completed 409, request still pending, 0; purchase +2; fractional +0.5 / -0.5; balance == ledger sum; bootstrap hours typeof number and sum == balance" },
+    { "step": "Settings restore proof", "result": "PASS", "notes": "Every run (incl. the red run) printed the original settings (24/true) at start and 'settings restored: studentLateCancellationHours=24 refundTeacherCancellations=true' at the end" },
+    { "step": "Activity rows (exactly one per mutation, filtered by targetType + targetId)", "result": "PASS", "notes": "slot.opened, slot.closed, lesson.booked (booking, on-behalf, rebook, POST /lessons), lesson.rescheduled, lesson.completed, lesson.cancelledByStudent, absence.recorded, request.created/approved/rejected/withdrawn, slot.closed on closure approve, none on withdraw, credits.purchased/adjusted, homework.*, lesson.rated, user.renamed, user.paused, settings.updated (+2 for 2 changes)" },
+    { "step": "FE-PARITY agent probe (Node, real local-branch services on a memory store)", "result": "PASS", "notes": "11/11: unit 1; seed 24; book -1; on-behalf -1; rebook -1; early cancel +1; absence +1; approve-cancel +1 once; approve on completed refused with request pending; homework review twice refused" },
+    { "step": "G-BROWSER-DEMO (Chromium, demo mode, context pre-seeded with an old v2 store)", "result": "PASS", "notes": "v2 store re-seeded to v3 (balance 24); UI book: chip 24.0 -> 23.0, ledger 24 -> 23; UI cancel: 23.0 -> 24.0; no console errors" },
+    { "step": "G-BROWSER-API (Chromium, API mode, backend restarted on :4200 after the version bump)", "result": "PASS", "notes": "admin/manager/teacher/student shells load without crash (student chip 21.3 from numeric 21.25); UI booking 21.25 -> 20.25 with room ESL-5908 (refunded afterwards); probe student UI booking 3 -> 2 with plan + ESL-1431, UI cancel 2 -> 3; teacher lesson page shows ROOM ESL-9204 and LESSON MATERIAL 'Probe Plan'; student UI rating created 1 ratings row (score 5) and exactly 1 lesson.rated row" }
+  ],
+  "result": "PASS (pending the independent EVL rerun by vc-tester)"
+}

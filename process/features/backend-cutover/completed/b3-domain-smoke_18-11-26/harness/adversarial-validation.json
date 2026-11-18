@@ -1,0 +1,12 @@
+{
+  "scenarios": [
+    { "scenario": "Double approval of one cancellation request refunds twice (race or replay)", "ruled_out": true, "rationale": "The review update requires status='pending' inside the txn; a second approve updates zero rows (409) or hits the pre-check (400). Smoke asserts the balance is unchanged after a second approve." },
+    { "scenario": "Approving cancellation of a completed lesson mints a credit", "ruled_out": true, "rationale": "The lesson row is read FOR UPDATE before the cancel; completed throws 409 and rolls back, the request stays pending, no ledger row. Smoke asserts all three." },
+    { "scenario": "A teacher files a cancellation request on another teacher's lesson to trigger a refund", "ruled_out": true, "rationale": "Request creation compares lesson.teacherId with the effective teacherId; smoke asserts 403 for a foreign lesson and 404 for an unknown one." },
+    { "scenario": "A cross-team manager books, adjusts credits, opens or closes slots, reviews requests, or records absences for another team", "ruled_out": true, "rationale": "Existing scope checks unchanged; smoke asserts 403 on each of these mutations for manager B against team A." },
+    { "scenario": "A fractional balance below one lesson still books (string compare or truncation)", "ruled_out": true, "rationale": "The balance is a JS number from the numeric parser and the compare is numeric >= 1. Smoke: 1.5 rebooks once, 0.5 refused; 0-credit booking refused with 422." },
+    { "scenario": "Smoke run against production or a remote database", "ruled_out": true, "rationale": "The script refuses NODE_ENV=production, non-local DATABASE_URL hosts (unless SMOKE_ALLOW_REMOTE=1), and port 4000, and never runs reset/push/truncate (grep gate)." },
+    { "scenario": "Smoke admin credential leak", "ruled_out": true, "rationale": "Random per-run password, never printed; the admin and all smoke users are archived in finally (archived status blocks login)." },
+    { "scenario": "Concurrent bookings by one student overspend credits", "ruled_out": false, "rationale": "Known accepted gap: no row lock on the balance read. Backlog note written; not addressed by this plan." }
+  ]
+}
