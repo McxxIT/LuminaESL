@@ -124,13 +124,13 @@ credits, homework, quality/absence, profile/notifications.
 | Enrollments | `people.enrollStudent` | `GET/POST /enrollments`, `PATCH /enrollments/:id` | Progress advance on completion (B0.2). |
 | Bookings / slots | `bookings.ts`, `teaching.openSlot` | `GET/POST/DELETE /bookings/slots`, `POST /bookings` | Student cancellation route missing (B0.2); rebook/reschedule mapping still open. |
 | Lessons / teaching | `teaching.ts` | `GET/PATCH /lessons/:id`, `POST /lessons/:id/complete` | Absence route missing (B0.2). |
-| Requests / approvals | `approvals.ts` | `GET/POST /requests`, `POST /requests/:id/review` | Confirm refund + performance side effects match the store. |
+| Requests / approvals | `approvals.ts` | `GET/POST /requests`, `POST /requests/:id/review` | Approved and rejected decisions both log activity (B3). |
 | Credits | `credits.ts`, `common.changeCredits` | `GET /credits`, `GET /credits/balance/:studentId`, `POST /credits` | Balance/ledger shape must match selectors. |
 | Homework | `homework.ts` | `GET/POST /assignments`, `POST /assignments/:id/submit`, `POST /assignments/:id/review` | Scope checks already server-side. |
 | Quality | `quality.rateLesson` | `POST /lessons/:id/ratings` | One per source per lesson (B0.2). |
 | Uploads | `files.ts`, `uploads.ts` | `POST /uploads`, `GET /uploads/:id/download` | Step C; keep attachment ids, not bytes, in the store. |
 | Notifications | `notifications.ts` | `GET /notifications` | Step C; read/mute state still client-side. |
-| Activity | `repositories.recordActivity` | `GET /activity` (new) | Needed for the admin log and notification parity. |
+| Activity | `repositories.recordActivity` | `GET /activity` (admin, paginated) | Landed in B3: every mutating route writes an activity row and the admin log reads it through the bootstrap snapshot. |
 
 ### B4. Verification per slice
 

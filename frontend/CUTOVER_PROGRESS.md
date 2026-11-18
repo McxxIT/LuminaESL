@@ -3,7 +3,7 @@
 Live status for the frontend/backend integration. The plan is in
 `CUTOVER_PLAN.md`; app-wide state stays in `PROGRESS.md`.
 
-**Current step:** Step B - B3 domain slices in progress (curriculum ownership done).
+**Current step:** Step B - B3 domain slices in progress (curriculum ownership and the activity log landed).
 **Last updated:** November 17, 2026.
 
 ## Board
@@ -17,7 +17,7 @@ Live status for the frontend/backend integration. The plan is in
 | B0.4 - Contract tests | ✅ Done | `backend/tests/contract.test.ts` + live role/command smoke matrix. |
 | B1 - Read path | ✅ Done | `api/bootstrap.ts`; API mode hydrates from bootstrap, demo/local unchanged. |
 | B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
-| B3 - Domain slices | 🟡 In progress | Course ownership parity landed; activity logging + `GET /activity`, then per-domain smoke coverage. |
+| B3 - Domain slices | 🟡 In progress | Course ownership and activity logging/`GET /activity` landed; per-domain smoke coverage next. |
 | Step C - Uploads + notifications | ⬜ Not started | Depends on B. |
 | Step D - Parity + removal | ⬜ Not started | Depends on C. |
 
@@ -70,9 +70,14 @@ Live status for the frontend/backend integration. The plan is in
   the actor and is immediately editable only by them and admins.
 - [x] 20-case live smoke matrix over POST/PATCH/DELETE on courses, units, plans,
   and duplicate for owner, other manager, and admin (including 403/404 paths).
-- [ ] Write activity entries for every mutating route (people, curriculum, lessons,
-  settings, enrollments) so the admin log and notifications stop being empty.
-- [ ] Add `GET /activity` (admin, paginated) and wire the admin log to it.
+- [x] Write activity entries for every mutating route (people, curriculum, lessons,
+  settings, enrollments, homework, credits, requests) so the admin log and
+  notifications stop being empty.
+- [x] Add `GET /activity` (admin, paginated, filterable by action/target/actor). The
+  admin log itself reads the bootstrap snapshot, which now carries the rows.
+- [x] Action names follow the browser store's vocabulary (`course.*`, `user.*`,
+  `teacher.*`, `student.*`, `enrollment.*`, `credits.*`, `settings.updated`,
+  `homework.*`, `request.*`).
 - [ ] Per-domain browser/API smoke coverage for the remaining slices.
 
 ## Verification log
@@ -88,6 +93,7 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 17, 2026 | B1.3 | Focus/visibility refresh path compiled and shipped; mutation-time refresh deferred to B2.2 by design | Partial (expected) |
 | Nov 17, 2026 | B1 wrap-up | Root `typecheck`, `lint`, backend `npm test`; demo-mode browser login still works after restoring `.env.local` | Pass |
 | Nov 17, 2026 | B3 curriculum | Live 20-case ownership matrix: manager creates/edits own course, unit, plan; other manager gets 403 on PATCH/DELETE course, unit rename, plan add/edit/delete; other manager may duplicate and then owns the copy; admin edits any course/plan; unknown course 404; archive cleanup 200. Plus backend `typecheck`/`lint` | Pass |
+| Nov 18, 2026 | B3 activity | Live 57-check matrix on port 4100: admin reads `/activity` (manager 403, anonymous 401); `course.created/updated/duplicated/archived`, `teacher.created/updated/reassigned`, `student.created/updated`, `user.renamed/paused/archived`, `enrollment.created/updated`, `settings.updated` all log with store-style summaries; homework, credits, and request approve/reject actions re-checked; admin bootstrap carries the rows while manager/student bootstraps stay empty; newest-first ordering, paging, and `targetType` filter. Plus backend `typecheck`/`lint`/`npm test` (12/12) | Pass |
 
 ## Change log
 
@@ -100,14 +106,16 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 17, 2026 | B2 people slice: API-backed manager/teacher/student create and update, status changes, teacher assignment, enrollment, email updates, and whole-hour credit creation; async people forms. | `frontend/app/lib/school/api/school.ts`, `frontend/app/lib/school/services/people.ts`, `frontend/app/components/manager/PeopleForms.tsx`, `backend/src/routes/users.ts` |
 | Nov 17, 2026 | B2 write-path completion: migrated curriculum, bookings, teaching, approvals, homework, credits, request withdrawal, course duplication, attachments, dedicated rebooking, and fractional credits. | `frontend/app/lib/school/api/*.ts`, `frontend/app/lib/school/services/*.ts`, `backend/src/routes/*.ts`, `backend/src/db/migrations/0001_fractional_credit_hours.sql` |
 | Nov 17, 2026 | B3 curriculum ownership: shared `assertCourseEditable` guard applied to course, unit, plan, and attachment writes; duplicate intentionally left open to any manager. | `backend/src/lib/scope.ts`, `backend/src/routes/courses.ts` |
+| Nov 18, 2026 | B3 activity parity: activity writes on course, people, enrollment, settings, homework, credit, and request routes; new admin-only paginated `GET /activity`; action names aligned with the browser store's `recordActivity` vocabulary. | `backend/src/routes/activity.ts`, `backend/src/routes/index.ts`, `backend/src/routes/{courses,users,teachers,students,enrollments,settings,assignments,credits,requests}.ts`, `backend/tests/contract.test.ts` |
 
 ## Open decisions / blockers
 
 - **Course ownership.** Resolved in B3: the API matches `canEditCourse`
   (admin edits all, manager edits own), duplicate stays open to any manager, and
   the copy belongs to the duplicator.
-- **`GET /activity`.** Needed for admin log/notification parity, not scheduled in
-  B0; planned for B3. Bootstrap returns an empty activity collection for non-admins.
+- **`GET /activity`.** Resolved in B3: admin-only, paginated, filterable by
+  `action`, `targetType`, `targetId`, and `actorId`. The admin log keeps reading the
+  bootstrap snapshot (now populated); non-admins still receive an empty collection.
 - **Seed parity.** The API seed now has enough to exercise every role (one
   enrollment, two lessons, one rating); the full 12-student roster and history
   remain part of item 13 / Step D.
@@ -124,8 +132,9 @@ Live status for the frontend/backend integration. The plan is in
 
 ## Next action
 
-Continue B3 with activity/notification parity. Only `assignments`, `bookings`,
-`credits`, and `requests` write `activity` rows today, and there is no `GET
-/activity` route, so the admin log is empty in API mode. After that: the remaining
-ownership/read-model gaps, per-domain smoke coverage, then Step C (uploads and
-notifications).
+Finish B3 with per-domain browser/API smoke coverage for the remaining slices
+(bookings/slots, lessons/teaching, requests/approvals, credits, homework, quality,
+profile), then Step C (uploads and notifications). Known small gaps: individual lesson
+plan attachment (`PATCH /lessons/:id` with `lessonPlanId`) is not logged because that
+file carries concurrent work, and `booking.created` still uses its own action name in
+`bookings.ts` for the same reason.
