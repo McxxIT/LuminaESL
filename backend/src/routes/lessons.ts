@@ -7,6 +7,7 @@ import {
   creditEntries,
   enrollments,
   lessons,
+  lessonPlans,
   ratings,
   settings,
   studentProfiles,
@@ -14,6 +15,8 @@ import {
   users,
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
+import { getCreditBalance } from "../lib/credits";
+import { resolveLessonDefaults } from "../lib/lesson-defaults";
 import {
   badRequest,
   conflict,
@@ -290,30 +293,56 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden("This student is not on your team");
       }
 
-      const [lesson] = await app.db
-        .insert(lessons)
-        .values({
+      const lesson = await app.db.transaction(async (tx) => {
+        // Omitted enrichment fields are filled like a booking; explicit values win.
+        const defaults = await resolveLessonDefaults(tx, {
           teacherId,
           studentId: body.studentId,
-          enrollmentId: body.enrollmentId ?? null,
-          date: body.date,
-          time: body.time,
-          endTime: addMinutes(body.time, LESSON_MINUTES),
-          title: body.title,
-          focus: body.focus ?? [],
-          roomCode: body.roomCode ?? null,
-          lessonPlanId: body.lessonPlanId ?? null,
-          createdBy: request.user.sub,
-        })
-        .returning();
-      if (!lesson) throw new Error("Failed to create lesson");
+          actorId: request.user.sub,
+        });
+        const planDefaulted = body.lessonPlanId === undefined;
+        const lessonPlanId = planDefaulted
+          ? defaults.lessonPlanId
+          : (body.lessonPlanId ?? null);
+        const [row] = await tx
+          .insert(lessons)
+          .values({
+            teacherId,
+            studentId: body.studentId,
+            enrollmentId:
+              body.enrollmentId === undefined
+                ? defaults.enrollmentId
+                : body.enrollmentId,
+            date: body.date,
+            time: body.time,
+            endTime: addMinutes(body.time, LESSON_MINUTES),
+            title: body.title,
+            focus: body.focus ?? [],
+            roomCode: body.roomCode ?? defaults.roomCode,
+            lessonPlanId,
+            planAttachedBy: planDefaulted
+              ? defaults.planAttachedBy
+              : lessonPlanId
+                ? request.user.sub
+                : null,
+            planAttachedAt: planDefaulted
+              ? defaults.planAttachedAt
+              : lessonPlanId
+                ? new Date()
+                : null,
+            createdBy: request.user.sub,
+          })
+          .returning();
+        if (!row) throw new Error("Failed to create lesson");
 
-      await logActivity(app.db, {
-        actorId: request.user.sub,
-        action: "lesson.created",
-        targetType: "lesson",
-        targetId: lesson.id,
-        summary: `Scheduled lesson "${lesson.title}"`,
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action: "lesson.booked",
+          targetType: "lesson",
+          targetId: row.id,
+          summary: `Scheduled lesson "${row.title}" on ${row.date} at ${row.time}`,
+        });
+        return row;
       });
 
       reply.status(201);
@@ -427,6 +456,35 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!updated) throw notFound("Lesson not found");
 
+      if (updated.date !== existing.date || updated.time !== existing.time) {
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "lesson.rescheduled",
+          targetType: "lesson",
+          targetId: updated.id,
+          summary: `Moved from ${existing.date} ${existing.time} to ${updated.date} ${updated.time}`,
+        });
+      }
+
+      if (body.lessonPlanId !== undefined) {
+        let summary = "Plan removed";
+        if (body.lessonPlanId) {
+          const [plan] = await app.db
+            .select({ title: lessonPlans.title })
+            .from(lessonPlans)
+            .where(eq(lessonPlans.id, body.lessonPlanId))
+            .limit(1);
+          summary = `Plan set to ${plan?.title ?? "a lesson plan"}`;
+        }
+        await logActivity(app.db, {
+          actorId: request.user.sub,
+          action: "lesson.planChanged",
+          targetType: "lesson",
+          targetId: updated.id,
+          summary,
+        });
+      }
+
       return updated;
     },
   );
@@ -446,8 +504,8 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       const result = await app.db.transaction(async (tx) => {
         const [slot] = await tx.select().from(slotOpenings).where(and(eq(slotOpenings.teacherId, original.teacherId), eq(slotOpenings.date, body.date), eq(slotOpenings.time, body.time))).limit(1);
         if (!slot) throw badRequest("That time is not open for booking");
-        const [balance] = await tx.select({ value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)` }).from(creditEntries).where(eq(creditEntries.studentId, original.studentId));
-        if ((balance?.value ?? 0) < 1) throw badRequest("The student does not have enough credits");
+        const balance = await getCreditBalance(tx, original.studentId);
+        if (balance < 1) throw badRequest("The student does not have enough credits");
         const [created] = await tx.insert(lessons).values({
           teacherId: original.teacherId, studentId: original.studentId, enrollmentId: original.enrollmentId,
           date: body.date, time: body.time, endTime: addMinutes(body.time, LESSON_MINUTES),
@@ -457,6 +515,13 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         if (!created) throw new Error("Failed to rebook lesson");
         await tx.delete(slotOpenings).where(eq(slotOpenings.id, slot.id));
         await tx.insert(creditEntries).values({ studentId: original.studentId, hours: -1, reason: "booking", description: `${original.title} lesson`, lessonId: created.id, actorId: request.user.sub });
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action: "lesson.booked",
+          targetType: "lesson",
+          targetId: created.id,
+          summary: `${original.title} on ${body.date} at ${body.time}`,
+        });
         return created;
       });
       reply.status(201);
@@ -494,6 +559,9 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         !(await managerOwnsTeacher(app.db, request.user.sub, existing.teacherId))
       ) {
         throw forbidden();
+      }
+      if (existing.status === "cancelled") {
+        throw conflict("A cancelled lesson cannot be completed");
       }
 
       const updated = await app.db.transaction(async (tx) => {

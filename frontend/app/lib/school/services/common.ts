@@ -6,8 +6,8 @@ import type { Lesson, SchoolData, SchoolUser } from "../types";
 import { teacherScheduleView } from "../views";
 import { ServiceError } from "./result";
 
-/** One 25-minute lesson costs this many credit hours (5 hours buys 12 lessons). */
-export const LESSON_CREDIT_HOURS = LESSON_SLOT_MINUTES / 60;
+/** One 25-minute lesson costs one credit (matches the backend ledger: -1 per booking, +1 per refund). */
+export const LESSON_CREDIT_HOURS = 1;
 
 export function requireUser(draft: SchoolData, userId: string): SchoolUser {
   const user = get(draft, "users", userId);

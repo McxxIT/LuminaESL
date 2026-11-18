@@ -374,13 +374,13 @@ export const studentTransactionSeed: CreditTransaction[] = [
   { id: "txn-1", date: "Nov 1, 2026", description: "Monthly credit renewal", hours: 10, amount: 140, status: "paid" },
   { id: "txn-2", date: "Oct 18, 2026", description: "Lesson credits top-up", hours: 5, amount: 75, status: "paid" },
   { id: "txn-3", date: "Oct 1, 2026", description: "Monthly credit renewal", hours: 10, amount: 140, status: "paid" },
-  { id: "txn-4", date: "Sep 22, 2026", description: "Cancelled lesson credit return", hours: 0.75, amount: 0, status: "refunded" },
+  { id: "txn-4", date: "Sep 22, 2026", description: "Cancelled lesson credit return", hours: 1, amount: 0, status: "refunded" },
 ];
 
 export const creditPackages = [
-  { hours: 5, price: 75, label: "5 lesson hours", detail: "12 twenty-five-minute sessions" },
-  { hours: 10, price: 140, label: "10 lesson hours", detail: "24 twenty-five-minute sessions · most popular" },
-  { hours: 20, price: 260, label: "20 lesson hours", detail: "48 twenty-five-minute sessions · best value" },
+  { hours: 5, price: 75, label: "5 lesson hours", detail: "5 twenty-five-minute sessions" },
+  { hours: 10, price: 140, label: "10 lesson hours", detail: "10 twenty-five-minute sessions · most popular" },
+  { hours: 20, price: 260, label: "20 lesson hours", detail: "20 twenty-five-minute sessions · best value" },
 ];
 
 export const studentTutors = [

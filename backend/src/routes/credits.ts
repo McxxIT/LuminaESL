@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { activity, creditEntries, users } from "../db/schema";
+import { creditEntries, users } from "../db/schema";
+import { logActivity } from "../lib/activity";
+import { getCreditBalance } from "../lib/credits";
 import { badRequest, forbidden } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { managerOwnsStudent, managerTeam, teacherStudentIds } from "../lib/scope";
@@ -108,14 +110,8 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden();
       }
 
-      const [row] = await app.db
-        .select({
-          value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)::numeric`,
-        })
-        .from(creditEntries)
-        .where(eq(creditEntries.studentId, params.studentId));
-
-      return { studentId: params.studentId, balance: row?.value ?? 0 };
+      const balance = await getCreditBalance(app.db, params.studentId);
+      return { studentId: params.studentId, balance };
     },
   );
 
@@ -143,28 +139,33 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden("This student is not on your team");
       }
 
-      const [entry] = await app.db
-        .insert(creditEntries)
-        .values({
-          studentId: body.studentId,
-          hours: body.hours,
-          amount: body.amount ?? null,
-          reason: body.reason,
-          description: body.description,
-          actorId: request.user.sub,
-        })
-        .returning();
-      if (!entry) throw new Error("Failed to record credit entry");
+      const entry = await app.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(creditEntries)
+          .values({
+            studentId: body.studentId,
+            hours: body.hours,
+            amount: body.amount ?? null,
+            reason: body.reason,
+            description: body.description,
+            actorId: request.user.sub,
+          })
+          .returning();
+        if (!row) throw new Error("Failed to record credit entry");
 
-      await app.db.insert(activity).values({
-        actorId: request.user.sub,
-        action:
-          body.reason === "adjustment"
-            ? "credits.adjusted"
-            : `credits.${body.reason === "purchase" ? "purchased" : "refunded"}`,
-        targetType: "credit",
-        targetId: entry.id,
-        summary: `${body.hours > 0 ? "Added" : "Removed"} ${Math.abs(body.hours)} lesson credit(s)`,
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action:
+            body.reason === "adjustment"
+              ? "credits.adjusted"
+              : body.reason === "purchase"
+                ? "credits.purchased"
+                : "credits.refunded",
+          targetType: "credit",
+          targetId: row.id,
+          summary: `${body.hours > 0 ? "Added" : "Removed"} ${Math.abs(body.hours)} lesson credit(s)`,
+        });
+        return row;
       });
 
       reply.status(201);

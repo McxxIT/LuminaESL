@@ -2,7 +2,6 @@ import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
-  activity,
   creditEntries,
   lessons,
   slotOpenings,
@@ -15,6 +14,9 @@ import {
   notFound,
   unprocessable,
 } from "../lib/errors";
+import { logActivity } from "../lib/activity";
+import { getCreditBalance } from "../lib/credits";
+import { resolveLessonDefaults } from "../lib/lesson-defaults";
 import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
 import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time";
 
@@ -105,16 +107,26 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
         throw conflict("A slot is already open for that teacher and time");
       }
 
-      const [slot] = await app.db
-        .insert(slotOpenings)
-        .values({
-          teacherId,
-          date: body.date,
-          time: body.time,
-          openedBy: request.user.sub,
-        })
-        .returning();
-      if (!slot) throw new Error("Failed to open slot");
+      const slot = await app.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(slotOpenings)
+          .values({
+            teacherId,
+            date: body.date,
+            time: body.time,
+            openedBy: request.user.sub,
+          })
+          .returning();
+        if (!row) throw new Error("Failed to open slot");
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action: "slot.opened",
+          targetType: "slot",
+          targetId: row.id,
+          summary: `Opened ${row.date} at ${row.time}`,
+        });
+        return row;
+      });
 
       reply.status(201);
       return slot;
@@ -141,7 +153,20 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
         slot.teacherId === request.user.sub;
       if (!canClose) throw forbidden();
 
-      await app.db.delete(slotOpenings).where(eq(slotOpenings.id, id));
+      await app.db.transaction(async (tx) => {
+        const [deleted] = await tx
+          .delete(slotOpenings)
+          .where(eq(slotOpenings.id, id))
+          .returning({ id: slotOpenings.id });
+        if (!deleted) throw notFound("Slot not found");
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action: "slot.closed",
+          targetType: "slot",
+          targetId: id,
+          summary: `Closed ${slot.date} at ${slot.time}`,
+        });
+      });
       return { id, deleted: true };
     },
   );
@@ -180,13 +205,7 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
           .limit(1);
         if (!slot) throw notFound("Slot not found");
 
-        const [balanceRow] = await tx
-          .select({
-            value: sql<number>`coalesce(sum(${creditEntries.hours}), 0)::numeric`,
-          })
-          .from(creditEntries)
-          .where(eq(creditEntries.studentId, studentId));
-        const balance = balanceRow?.value ?? 0;
+        const balance = await getCreditBalance(tx, studentId);
         if (balance < 1) {
           throw unprocessable("Student does not have enough lesson credits");
         }
@@ -197,6 +216,12 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
           .returning();
         if (!claimed) throw conflict("That slot was just taken");
 
+        const defaults = await resolveLessonDefaults(tx, {
+          teacherId: claimed.teacherId,
+          studentId,
+          actorId: request.user.sub,
+        });
+
         const [lesson] = await tx
           .insert(lessons)
           .values({
@@ -206,6 +231,11 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
             time: claimed.time,
             endTime: addMinutes(claimed.time, LESSON_MINUTES),
             title: "Booked lesson",
+            enrollmentId: defaults.enrollmentId,
+            lessonPlanId: defaults.lessonPlanId,
+            planAttachedBy: defaults.planAttachedBy,
+            planAttachedAt: defaults.planAttachedAt,
+            roomCode: defaults.roomCode,
             createdBy: request.user.sub,
           })
           .returning();
@@ -220,9 +250,9 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
           actorId: request.user.sub,
         });
 
-        await tx.insert(activity).values({
+        await logActivity(tx, {
           actorId: request.user.sub,
-          action: "booking.created",
+          action: "lesson.booked",
           targetType: "lesson",
           targetId: lesson.id,
           summary: `Booked a lesson on ${claimed.date} at ${claimed.time}`,

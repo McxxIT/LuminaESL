@@ -37,7 +37,7 @@ export type SchoolNotification = {
   at: string;
 };
 
-const LOW_CREDIT_HOURS = (25 / 60) * 2; // fewer than two lessons left
+const LOW_CREDIT_HOURS = 2; // fewer than two lessons left (1 credit per lesson)
 
 function shortWhen(date: string, time: string) {
   const today = isoDaysFromNow(0);

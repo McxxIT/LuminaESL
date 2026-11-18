@@ -1,7 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { activity, assignments, users } from "../db/schema";
+import { assignments, users } from "../db/schema";
+import { logActivity } from "../lib/activity";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import {
@@ -142,7 +143,7 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!created) throw new Error("Failed to create assignment");
 
-      await app.db.insert(activity).values({
+      await logActivity(app.db, {
         actorId: request.user.sub,
         action: "homework.assigned",
         targetType: "assignment",
@@ -189,7 +190,7 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!updated) throw notFound("Assignment not found");
 
-      await app.db.insert(activity).values({
+      await logActivity(app.db, {
         actorId: request.user.sub,
         action: "homework.submitted",
         targetType: "assignment",
@@ -226,6 +227,9 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
       ) {
         throw forbidden();
       }
+      if (existing.status === "reviewed") {
+        throw badRequest("This assignment has already been reviewed");
+      }
 
       const [updated] = await app.db
         .update(assignments)
@@ -239,7 +243,7 @@ export const assignmentRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!updated) throw notFound("Assignment not found");
 
-      await app.db.insert(activity).values({
+      await logActivity(app.db, {
         actorId: request.user.sub,
         action: "homework.reviewed",
         targetType: "assignment",

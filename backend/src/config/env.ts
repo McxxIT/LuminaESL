@@ -15,6 +15,7 @@ export const envSchema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   UPLOAD_DIR: z.string().default("uploads"),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
 });
 
 export type Env = z.infer<typeof envSchema>;

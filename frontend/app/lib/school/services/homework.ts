@@ -59,6 +59,7 @@ export function reviewHomework(actorId: string, assignmentId: string, input: { f
     const assignment = get(draft, "assignments", assignmentId);
     if (!assignment) throw new ServiceError("That assignment no longer exists.");
     assertCan(draft, actor, "homework.review", { teacherId: assignment.teacherId });
+    if (assignment.status === "reviewed") throw new ServiceError("This assignment has already been reviewed.");
     patch(draft, "assignments", assignmentId, {
       status: "reviewed",
       feedback: input.feedback?.trim() || assignment.feedback,

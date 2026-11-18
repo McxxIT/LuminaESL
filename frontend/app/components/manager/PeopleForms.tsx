@@ -136,7 +136,7 @@ export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose
       <label>Course<select value={form.courseId} onChange={(event) => setForm({ ...form, courseId: event.target.value })} disabled={!form.teacherId}>
         {courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}
       </select></label>
-      <label className="full-field">Starting credits (hours)<input type="number" min="0" step="0.5" value={form.startingCredits} onChange={(event) => setForm({ ...form, startingCredits: event.target.value })} /><small>One 25-minute lesson uses about 0.42 hours.</small></label>
+      <label className="full-field">Starting credits (hours)<input type="number" min="0" step="0.5" value={form.startingCredits} onChange={(event) => setForm({ ...form, startingCredits: event.target.value })} /><small>One 25-minute lesson uses 1 credit.</small></label>
     </>}
     <label>Guardian name<input value={form.guardianName} onChange={(event) => setForm({ ...form, guardianName: event.target.value })} placeholder="Optional" /></label>
     <label>Guardian email<input type="email" value={form.guardianEmail} onChange={(event) => setForm({ ...form, guardianEmail: event.target.value })} placeholder="Optional" /></label>

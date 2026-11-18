@@ -113,7 +113,7 @@ export async function buildApp({ env }: BuildAppOptions) {
     secret: env.JWT_SECRET,
     sign: { expiresIn: env.ACCESS_TOKEN_TTL },
   });
-  await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
+  await app.register(rateLimit, { max: env.RATE_LIMIT_MAX, timeWindow: "1 minute" });
   await app.register(multipart, {
     limits: { fileSize: 25 * 1024 * 1024, files: 1 },
   });

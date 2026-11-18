@@ -29,7 +29,7 @@ export default function LuminaApp() {
   const [schoolStale, setSchoolStale] = useState(false);
   const [activeNav, setActiveNav] = useState("Overview");
   const [notice, setNotice] = useState("");
-  const [studentCredits, setStudentCredits] = useState(24.5);
+  const [studentCredits, setStudentCredits] = useState(24);
   const [openPopover, setOpenPopover] = useState<"notifications" | null>(null);
   const [modal, setModal] = useState<ModalName>(null);
   const { user: authUser } = useAuth();
@@ -140,7 +140,7 @@ export default function LuminaApp() {
   function login(nextAccount: Account) {
     setAccount(nextAccount);
     setActiveNav("Overview");
-    setStudentCredits(24.5);
+    setStudentCredits(24);
     setOpenPopover(null);
     setModal(null);
     window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
@@ -155,7 +155,7 @@ export default function LuminaApp() {
     const finish = () => {
       setAccount(null);
       setActiveNav("Overview");
-      setStudentCredits(24.5);
+      setStudentCredits(24);
       window.localStorage.removeItem("lumina-account");
       setOpenPopover(null);
       setModal(null);

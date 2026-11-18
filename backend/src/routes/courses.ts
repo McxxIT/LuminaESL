@@ -323,7 +323,7 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
         body.status !== undefined && before?.status !== body.status;
       await logActivity(app.db, {
         actorId: request.user.sub,
-        action: statusChanged ? `course.${body.status}` : "course.updated",
+        action: statusChanged ? `course.${updated.status}` : "course.updated",
         targetType: "course",
         targetId: updated.id,
         summary: updated.title,

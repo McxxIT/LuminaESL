@@ -57,6 +57,7 @@ const env: Env = {
   REFRESH_TOKEN_TTL_DAYS: 30,
   CORS_ORIGIN: "http://localhost:3000",
   UPLOAD_DIR: "uploads",
+  RATE_LIMIT_MAX: 300,
 };
 
 describe("school contract", () => {

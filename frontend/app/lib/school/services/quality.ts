@@ -1,11 +1,12 @@
 import { assertCan } from "../permissions";
 import { isApiDataMode } from "../../auth/mode";
 import { refreshSchoolAfterCommand, updateSchoolSettings as updateSchoolSettingsApi } from "../api/school";
+import { rateLesson as rateLessonApi } from "../api/teaching";
 import { createId, get, query, recordActivity, upsert } from "../repositories";
 import { updateSchool } from "../store";
 import type { RatingScore, RatingSource, SchoolSettings } from "../types";
 import { requireLesson, requireUser } from "./common";
-import { run, runAsync, ServiceError, type ServiceResult } from "./result";
+import { run, runAsync, ServiceError, type ServiceCall, type ServiceResult } from "./result";
 
 /** Quality: student/parent ratings and the admin's school-wide rules. */
 
@@ -15,7 +16,13 @@ export type RateLessonInput = { from: RatingSource; score: number; comment?: str
  * A student rates a completed lesson, as themself or on behalf of their parent/guardian.
  * One rating per lesson per source; it feeds the teacher's performance score immediately.
  */
-export function rateLesson(actorId: string, lessonId: string, input: RateLessonInput): ServiceResult {
+export function rateLesson(actorId: string, lessonId: string, input: RateLessonInput): ServiceCall {
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      if (!Number.isInteger(input.score) || input.score < 1 || input.score > 5) throw new ServiceError("Choose between 1 and 5 stars.");
+      await rateLessonApi(lessonId, { score: input.score, from: input.from, ...(input.comment?.trim() ? { comment: input.comment.trim() } : {}) });
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);

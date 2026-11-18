@@ -258,9 +258,9 @@ export function createSeedSchool(now = new Date().toISOString()): SchoolData {
   studentTransactionSeed.forEach((txn) => {
     credits.push({ id: `credit-${txn.id}`, studentId: "student-mia", hours: txn.hours, amount: txn.amount, reason: txn.status === "refunded" ? "refund" : "purchase", description: txn.description, actorId: "student-mia", createdAt: new Date(txn.date).toISOString() });
   });
-  // Brings Mia to the 24.5 hours the student workspace starts with today.
+  // Brings Mia to the 24 credits (one per lesson) the student workspace starts with today.
   const miaTotal = studentTransactionSeed.reduce((total, txn) => total + txn.hours, 0);
-  credits.push({ id: "credit-mia-reconcile", studentId: "student-mia", hours: Number((24.5 - miaTotal).toFixed(2)), reason: "adjustment", description: "Lessons booked before the shared ledger", actorId: admin, createdAt: now });
+  credits.push({ id: "credit-mia-reconcile", studentId: "student-mia", hours: Number((24 - miaTotal).toFixed(2)), reason: "adjustment", description: "Lessons booked before the shared ledger", actorId: admin, createdAt: now });
   users.filter((item) => item.role === "student" && item.id !== "student-mia").forEach((student) => {
     credits.push({ id: `credit-${student.id}-start`, studentId: student.id, hours: 10, amount: 140, reason: "purchase", description: "Monthly credit renewal", actorId: student.id, createdAt: now });
   });

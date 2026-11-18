@@ -1,19 +1,64 @@
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "../db/schema";
 import { activity } from "../db/schema";
+import type { DbOrTx } from "./db-handle";
 
-type Db = PostgresJsDatabase<typeof schema>;
+type UserStatus = "active" | "paused" | "inactive" | "archived";
+type CourseStatus = "draft" | "published" | "archived";
+
+/**
+ * Every activity action the backend may log. Superset of the frontend demo names
+ * (`frontend/app/lib/school` recordActivity) plus backend-only names. Keep in sync
+ * when adding a mutation; demo logs `lesson.booked` for bookings, rebooks, and
+ * scheduled lessons. `slot.closed` and `request.withdrawn` are backend-only.
+ */
+export type ActivityAction =
+  | "absence.recorded"
+  | "course.created"
+  | "course.updated"
+  | "course.duplicated"
+  | `course.${CourseStatus}`
+  | "credits.adjusted"
+  | "credits.purchased"
+  | "credits.refunded"
+  | "enrollment.created"
+  | "enrollment.updated"
+  | "homework.assigned"
+  | "homework.submitted"
+  | "homework.reviewed"
+  | "lesson.booked"
+  | "lesson.cancelledByStudent"
+  | "lesson.completed"
+  | "lesson.planChanged"
+  | "lesson.rated"
+  | "lesson.rescheduled"
+  | "manager.created"
+  | "request.created"
+  | "request.approved"
+  | "request.rejected"
+  | "request.withdrawn"
+  | "settings.updated"
+  | "slot.opened"
+  | "slot.closed"
+  | "student.created"
+  | "student.updated"
+  | "student.reassigned"
+  | "teacher.created"
+  | "teacher.reassigned"
+  | "teacher.updated"
+  | "user.created"
+  | "user.renamed"
+  | "user.updated"
+  | `user.${UserStatus}`;
 
 export type ActivityInput = {
   actorId: string;
-  action: string;
+  action: ActivityAction;
   targetType: string;
   targetId: string;
   summary: string;
 };
 
 export async function logActivity(
-  db: Db,
+  db: DbOrTx,
   input: ActivityInput,
 ): Promise<void> {
   await db.insert(activity).values(input);

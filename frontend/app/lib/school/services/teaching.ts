@@ -4,7 +4,7 @@ import { assertCan } from "../permissions";
 import { createId, get, patch, query, recordActivity, remove, upsert } from "../repositories";
 import { getSchoolSnapshot, updateSchool } from "../store";
 import { isApiDataMode } from "../../auth/mode";
-import { completeLesson as completeLessonApi, createRequest, withdrawRequest } from "../api/teaching";
+import { completeLesson as completeLessonApi, createRequest, uploadDataUrlAttachment, withdrawRequest } from "../api/teaching";
 import { openSlot as openSlotApi } from "../api/bookings";
 import type { LessonAttendance, LessonCancellationRequest, SlotClosureRequest } from "../types";
 import { requireLesson, requireUser } from "./common";
@@ -59,7 +59,13 @@ export type CancellationRequestInput = {
 };
 
 export function requestLessonCancellation(actorId: string, lessonId: string, input: CancellationRequestInput): ServiceCall {
-  if (isApiDataMode()) return runAsync(async () => { await createRequest({ type: "lesson-cancellation", lessonId, reason: input.reason, comment: input.comment }); });
+  if (isApiDataMode()) {
+    return runAsync(async () => {
+      // Two steps: store the file first, then file the request pointing at it.
+      const attachmentId = input.attachment ? await uploadDataUrlAttachment(input.attachment) : undefined;
+      await createRequest({ type: "lesson-cancellation", lessonId, reason: input.reason, comment: input.comment, ...(attachmentId ? { attachmentId } : {}) });
+    });
+  }
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     const lesson = requireLesson(draft, lessonId);

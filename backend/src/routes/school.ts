@@ -21,7 +21,7 @@ import {
 import { adminIds } from "../lib/scope";
 
 /** Mirrors `SCHOOL_SCHEMA_VERSION` in `frontend/app/lib/school/types.ts`. */
-export const SCHOOL_SCHEMA_VERSION = 2;
+export const SCHOOL_SCHEMA_VERSION = 3;
 
 /** The response keys, checked against `SchoolCollections` in `tests/contract.test.ts`. */
 export const BOOTSTRAP_COLLECTION_KEYS = [

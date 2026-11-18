@@ -5,7 +5,7 @@
  */
 
 /** Bump when the stored shape changes and add a migration in `store.ts` `upgrade()`. */
-export const SCHOOL_SCHEMA_VERSION = 2;
+export const SCHOOL_SCHEMA_VERSION = 3;
 
 /** YYYY-MM-DD */
 export type ISODate = string;

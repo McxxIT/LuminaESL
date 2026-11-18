@@ -2,14 +2,14 @@ import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
-  activity,
   creditEntries,
   lessons,
   requests,
   settings,
   slotOpenings,
 } from "../db/schema";
-import { badRequest, forbidden, notFound } from "../lib/errors";
+import { logActivity } from "../lib/activity";
+import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { managerOwnsTeacher, managerTeam } from "../lib/scope";
 import { isValidClockTime } from "../lib/time";
@@ -120,21 +120,47 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden("This teacher is not on your team");
       }
 
-      const [created] = await app.db
-        .insert(requests)
-        .values({
-          type: body.type,
-          teacherId,
-          date: body.date ?? null,
-          time: body.time ?? null,
-          lessonId: body.lessonId ?? null,
-          reason: body.reason,
-          comment: body.comment ?? null,
-          attachmentId: body.attachmentId ?? null,
-          requestedBy: request.user.sub,
-        })
-        .returning();
-      if (!created) throw new Error("Failed to create request");
+      if (body.type === "lesson-cancellation" && body.lessonId) {
+        // The lesson must belong to the teacher the request is filed for.
+        const [lesson] = await app.db
+          .select({ teacherId: lessons.teacherId })
+          .from(lessons)
+          .where(eq(lessons.id, body.lessonId))
+          .limit(1);
+        if (!lesson) throw notFound("Lesson not found");
+        if (lesson.teacherId !== teacherId) {
+          throw forbidden("That lesson does not belong to this teacher");
+        }
+      }
+
+      const created = await app.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(requests)
+          .values({
+            type: body.type,
+            teacherId,
+            date: body.date ?? null,
+            time: body.time ?? null,
+            lessonId: body.lessonId ?? null,
+            reason: body.reason,
+            comment: body.comment ?? null,
+            attachmentId: body.attachmentId ?? null,
+            requestedBy: request.user.sub,
+          })
+          .returning();
+        if (!row) throw new Error("Failed to create request");
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action: "request.created",
+          targetType: "request",
+          targetId: row.id,
+          summary:
+            row.type === "slot-closure"
+              ? `Asked to close ${row.date} at ${row.time}`
+              : "Asked to cancel a lesson",
+        });
+        return row;
+      });
 
       reply.status(201);
       return created;
@@ -180,14 +206,14 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
             reviewedAt: new Date(),
             reviewNote: body.reviewNote ?? null,
           })
-          .where(eq(requests.id, id))
+          .where(and(eq(requests.id, id), eq(requests.status, "pending")))
           .returning();
-        if (!updated) throw notFound("Request not found");
+        if (!updated) throw conflict("This request has already been reviewed");
 
         if (body.status === "approved") {
           if (updated.type === "slot-closure") {
             if (updated.date && updated.time) {
-              await tx
+              const closed = await tx
                 .delete(slotOpenings)
                 .where(
                   and(
@@ -195,21 +221,46 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
                     eq(slotOpenings.date, updated.date),
                     eq(slotOpenings.time, updated.time),
                   ),
-                );
+                )
+                .returning({ id: slotOpenings.id });
+              for (const slot of closed) {
+                await logActivity(tx, {
+                  actorId: request.user.sub,
+                  action: "slot.closed",
+                  targetType: "slot",
+                  targetId: slot.id,
+                  summary: `Closed ${updated.date} at ${updated.time}`,
+                });
+              }
             }
           } else if (updated.lessonId) {
-            const [cancelled] = await tx
-              .update(lessons)
-              .set({
-                status: "cancelled",
-                cancelReason: updated.reason,
-                updatedAt: new Date(),
-              })
+            // Check the lesson before touching it: a completed lesson cannot be
+            // cancelled (the throw rolls back, so the request stays pending), and an
+            // already-cancelled lesson resolves the request without a second refund.
+            const [lesson] = await tx
+              .select({ id: lessons.id, status: lessons.status })
+              .from(lessons)
               .where(eq(lessons.id, updated.lessonId))
-              .returning({
-                id: lessons.id,
-                studentId: lessons.studentId,
-              });
+              .for("update")
+              .limit(1);
+            if (lesson?.status === "completed") {
+              throw conflict("A completed lesson cannot be cancelled");
+            }
+            const [cancelled] =
+              lesson && lesson.status !== "cancelled"
+                ? await tx
+                    .update(lessons)
+                    .set({
+                      status: "cancelled",
+                      cancelReason: updated.reason,
+                      updatedAt: new Date(),
+                    })
+                    .where(eq(lessons.id, updated.lessonId))
+                    .returning({
+                      id: lessons.id,
+                      studentId: lessons.studentId,
+                    })
+                : [];
 
             if (cancelled && shouldRefund) {
               await tx.insert(creditEntries).values({
@@ -224,7 +275,7 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
           }
         }
 
-        await tx.insert(activity).values({
+        await logActivity(tx, {
           actorId: request.user.sub,
           action: `request.${body.status}`,
           targetType: "request",
@@ -258,6 +309,13 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
         }
         const [deleted] = await tx.delete(requests).where(eq(requests.id, id)).returning({ id: requests.id });
         if (!deleted) throw notFound("Request not found");
+        await logActivity(tx, {
+          actorId: request.user.sub,
+          action: "request.withdrawn",
+          targetType: "request",
+          targetId: id,
+          summary: `Withdrew ${existing.type} request`,
+        });
         return deleted;
       });
       return { ...result, withdrawn: true };

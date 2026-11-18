@@ -21,6 +21,10 @@ export function reviewRequest(actorId: string, requestId: string, decision: Revi
     if (!request) throw new ServiceError("That request no longer exists.");
     assertCan(draft, actor, "request.review", { teacherId: request.teacherId });
     if (request.status !== "pending") throw new ServiceError("That request has already been reviewed.");
+    // Mirrors the backend: a completed lesson cannot be cancelled, so the request stays pending.
+    if (request.type === "lesson-cancellation" && decision === "approved" && get(draft, "lessons", request.lessonId)?.status === "completed") {
+      throw new ServiceError("That lesson is already completed and cannot be cancelled.");
+    }
 
     patch(draft, "requests", request.id, { status: decision, reviewedBy: actor.id, reviewedAt: new Date().toISOString(), reviewNote: note.trim() || undefined });
 
