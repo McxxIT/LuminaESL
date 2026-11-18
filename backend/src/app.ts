@@ -115,7 +115,7 @@ export async function buildApp({ env }: BuildAppOptions) {
   });
   await app.register(rateLimit, { max: env.RATE_LIMIT_MAX, timeWindow: "1 minute" });
   await app.register(multipart, {
-    limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   });
   await app.register(dbPlugin, { connectionString: env.DATABASE_URL });
   await app.register(authPlugin);

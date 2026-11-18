@@ -10,6 +10,13 @@ import { badRequest, notFound } from "../lib/errors";
 
 const idParams = z.object({ id: z.string().uuid() });
 
+/** Matches the frontend accept rule (`services/uploads.ts`). */
+const ACCEPTED_TYPES =
+  /^(application\/pdf|image\/|application\/(msword|vnd\.openxmlformats-officedocument\.|vnd\.ms-powerpoint))/;
+
+/** Matches the frontend `MAX_UPLOAD_BYTES` (5 MB); the multipart limit in `app.ts` is the backstop. */
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
 export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     "/",
@@ -17,9 +24,15 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const file = await request.file();
       if (!file) throw badRequest("No file provided");
+      if (!ACCEPTED_TYPES.test(file.mimetype)) {
+        throw badRequest("Upload a PDF, image, Word, or PowerPoint file.");
+      }
 
       const buffer = await file.toBuffer();
       if (buffer.length === 0) throw badRequest("Uploaded file is empty");
+      if (buffer.length > MAX_UPLOAD_BYTES) {
+        throw badRequest("Files must be 5 MB or smaller.");
+      }
 
       const directory = resolve(app.config.UPLOAD_DIR);
       await mkdir(directory, { recursive: true });

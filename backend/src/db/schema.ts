@@ -492,6 +492,24 @@ export const activity = pgTable(
   (table) => [index("activity_actor_idx").on(table.actorId)],
 );
 
+/** Per-user bell state. Notification content is derived (feed + role rules); only state is stored. */
+export const notificationState = pgTable("notification_state", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  mutedCategories: text("muted_categories")
+    .array()
+    .default(sql`'{}'::text[]`)
+    .notNull(),
+  readIds: text("read_ids")
+    .array()
+    .default(sql`'{}'::text[]`)
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().default(1),
   schoolName: text("school_name").default("Lumina ESL").notNull(),
