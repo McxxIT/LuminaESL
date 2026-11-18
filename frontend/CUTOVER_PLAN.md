@@ -149,13 +149,14 @@ and student. Add a Playwright case for the user-visible flow before moving on.
 
 ## Step C - Uploads and notifications
 
-- [ ] Replace IndexedDB/localStorage bytes with `POST /uploads` and
+- [x] Replace IndexedDB/localStorage bytes with `POST /uploads` and
   `GET /uploads/:id/download`; keep attachment ids on plans and cancellation
-  evidence.
-- [ ] Feed `useNotifications` from `GET /notifications`; keep the per-role
-  derivation until the activity log covers every event.
-- [ ] Decide notification read/mute storage per user and implement it on the
-  backend.
+  evidence. (Demo mode keeps IndexedDB/localStorage behind the same helpers.)
+- [x] Feed `useNotifications` from `GET /notifications`; keep the per-role
+  derivation until the activity log covers every event. (Merged and deduped by
+  target, capped at 30 items.)
+- [x] Decide notification read/mute storage per user and implement it on the
+  backend. (`notification_state` table + `GET`/`PATCH /notifications/state`.)
 
 ## Step D - Parity suite, migration, removal
 

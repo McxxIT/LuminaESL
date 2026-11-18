@@ -1,7 +1,7 @@
 ---
 name: context:database-schema-and-models
 description: "Tables, enums, relationships, and DB plugin wiring in backend/src/db/schema.ts"
-keywords: schema, tables, enums, drizzle, users, lessons, enrollments, slot_openings, credit_entries, settings, manager
+keywords: schema, tables, enums, drizzle, users, lessons, enrollments, slot_openings, credit_entries, settings, notifications, notification_state, attachments
 related: [context:all-database]
 date: 17-11-26
 ---
@@ -21,7 +21,7 @@ BLUF: All tables are defined in `backend/src/db/schema.ts` (~520 lines). Ids are
 - Teaching: `enrollments` (has `nextPlanIndex`), `lessons` (status, attendance, `roomCode` max 40 chars — NOT `meeting_url`, feedback, scores), `slot_openings` (unique index teacher+date+time), `requests`, `absences`, `ratings`.
 - Homework: `assignments`.
 - Billing: `credit_entries` — append-only ledger, `hours numeric(8,2)` (fractional since migration 0001).
-- System: `activity` (audit feed), `settings` (singleton row id 1: onTheSpotCancellationHours 12, studentLateCancellationHours 24, bookingDayStart/End, performanceWindowDays, refundTeacherCancellations).
+- System: `activity` (audit feed), `notification_state` (per-user bell state: `muted_categories text[]`, `read_ids text[]`, cascade on user), `settings` (singleton row id 1: onTheSpotCancellationHours 12, studentLateCancellationHours 24, bookingDayStart/End, performanceWindowDays, refundTeacherCancellations).
 
 Indexes: `users_role_idx`, `refresh_tokens_user_idx`, `lessons_teacher_date_idx`, `lessons_student_date_idx`, `enrollments_*_idx`, `assignments_*_idx`, `credit_entries_student_idx`, etc.
 

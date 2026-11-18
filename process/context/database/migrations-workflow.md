@@ -13,7 +13,7 @@ BLUF: Edit `backend/src/db/schema.ts`, run `npm run db:generate`, review the SQL
 ## Config and files
 
 - `backend/drizzle.config.ts`: schema `./src/db/schema.ts`, out `./src/db/migrations`, dialect postgresql, `strict: true`; reads `DATABASE_URL` from `backend/.env` via dotenv.
-- Migrations: `0000_material_jane_foster.sql` (baseline), `0001_fractional_credit_hours.sql` (`credit_entries.hours` -> `numeric(8,2)`), plus `meta/_journal.json` and snapshots. `_journal.json` is currently modified in the working tree — never hand-edit it.
+- Migrations: `0000_material_jane_foster.sql` (baseline), `0001_fractional_credit_hours.sql` (`credit_entries.hours` -> `numeric(8,2)`), `0002_notification_state.sql` (bell read/mute table, additive), plus `meta/_journal.json` and snapshots. `_journal.json` and the snapshot move with the SQL; never hand-edit them.
 - Root scripts (run from repo root): `db:generate`, `db:migrate`, `db:push` (dev shortcut, skips migration files — avoid for shared schema work), `db:seed`, `db:reset`, `db:studio`.
 
 ## Keep-in-sync checklist (every schema change)

@@ -1,10 +1,20 @@
+---
+name: context:all-tests
+description: "Test and verification guide: backend vitest, per-domain API smoke, gates, and known gaps"
+keywords: tests, testing, vitest, smoke, verification, gates, typecheck, lint, contract test, browser check, debugging failures
+related: [context:all-context, context:all-auth]
+metadata:
+  read_when: testing, verification gates, or debugging runtime failures
+date: 18-11-26
+---
+
 # lumina-esl - All Tests
 
-Last updated: 2026-11-17
+Last updated: 2026-11-18
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** Only the backend has automated tests (vitest, 16 tests, 4 files, no DB needed). `npm run smoke` is a separate hybrid per-domain API smoke. The frontend has none: verify it with typecheck + lint + build + manual browser check. Authenticated business rules (booking, refunds, approvals) are verified manually against seeded local Postgres.
+**BLUF:** Only the backend has automated tests (vitest, 17 tests, 4 files, no DB needed). `npm run smoke` is a separate hybrid per-domain API smoke. The frontend has none: verify it with typecheck + lint + build + manual browser check. Authenticated business rules (booking, refunds, approvals) are verified manually against seeded local Postgres.
 
 Do not load the whole `process/context/tests/` folder by default. Start here, then drill down.
 
@@ -56,7 +66,7 @@ Vitest is the only runner. There is no Playwright, no jest, no frontend runner, 
 | backend | `npm run test --workspace @lumina/backend` | No | `vitest run` |
 | backend | `npm run test:watch --workspace @lumina/backend` | No | watch mode |
 | backend | `npm run typecheck --workspace @lumina/backend` | No | `tsc --noEmit` |
-| backend | `npm run lint --workspace @lumina/backend` | No | `eslint src tests` |
+| backend | `npm run lint --workspace @lumina/backend` | No | `eslint src tests scripts` |
 | frontend | `npm run typecheck --workspace @lumina/frontend` | No | |
 | frontend | `npm run lint --workspace @lumina/frontend` | No | next core-web-vitals + typescript |
 | root | `npm run db:migrate` | Yes | Applies Drizzle migrations |
@@ -74,12 +84,12 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | Agent-probe | Agent drives or inspects a running stack | Use `vc-agent-browser` against `npm run dev` (demo mode is default; API mode needs `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`); curl smoke against the seeded API |
 | Known-gap | Not verified automatically | See Known Gaps below |
 
-## Per-Test-File Coverage (backend/tests, 16 tests)
+## Per-Test-File Coverage (backend/tests, 17 tests)
 
 | File | Tests | Covers |
 |---|---|---|
 | `app.test.ts` | 4 | `/health` 200; unknown route 404 `NOT_FOUND`; `/api/v1/lessons` without token 401; bad login body 400 `VALIDATION_ERROR` |
-| `contract.test.ts` | 5 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes; `/school/bootstrap` 401 without token |
+| `contract.test.ts` | 6 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes (including `uploads` and `notifications/state`); `/school/bootstrap` 401 without token; notification state + upload routes 401 without token |
 | `password.test.ts` | 3 | scrypt hash/verify, salted uniqueness, `addMinutes` midnight wrap |
 | `db-types.test.ts` | 4 | DB-free: postgres `numeric` (OID 1700) parser registration and parsing; `RATE_LIMIT_MAX` env default 300 |
 
@@ -88,7 +98,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 ## Smoke Gate (`npm run smoke`)
 
 - Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
-- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 11 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, homework, quality, profile): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation. 306 checks per run; last green: two consecutive runs, 2026-11-18.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 13 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, upload 5 MB/MIME rules, notification feed scoping and state roundtrip. 343 checks per run; last green: 2026-11-18.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
@@ -111,12 +121,12 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 - No concurrency test for double-booking; booking balance read and debit are not row-locked, (backlog: `booking-credit-concurrency_NOTE_18-11-26.md`); backend `POST /lessons` does not debit while demo does (smoke asserts current behavior). Observed, not fixed.
 - No unique constraint on lessons (teacher, date, time); the slot-row claim is the only guard.
 - No CI; backend "build" is typecheck only.
-- Open item: mutation-specific browser/API smoke per migrated domain (cutover step B3).
+- Open item: no committed browser/e2e suite; the Step D parity suite (login, booking, cancellation/refund, homework, upload, notification) is the planned home.
 - Working tree carries much uncommitted cutover work; re-run gates before relying on a baseline.
 
 ## Last Verified Test Run
 
-2026-11-18: `npm run test --workspace @lumina/backend`: 4 files, 16 tests passed (independent vc-tester rerun). `npm run smoke` x2: 11/11 domains, 306 checks, exit 0.
+2026-11-18: `npm run test --workspace @lumina/backend`: 4 files, 17 tests passed. `npm run smoke`: 13/13 domains, 343 checks, exit 0 (plus a deliberate red run that exited 1).
 
 ---
 

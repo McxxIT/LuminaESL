@@ -1,3 +1,12 @@
+---
+name: context:all-context
+description: "Root context router: repo architecture, stack, structure, conventions, testing gates, and routing to the context groups"
+keywords: context router, architecture, repository structure, technology stack, conventions, lumina esl, where to look, backend, frontend, postgres, cutover
+related: [context:all-planning, context:all-tests, context:all-database, context:all-auth, context:all-uxui]
+metadata:
+  read_when: any substantial planning, research, review, or implementation task
+date: 18-11-26
+---
 # lumina-esl - All Context
 
 Last updated: 2026-11-18
@@ -78,18 +87,21 @@ For most substantial tasks:
 | File | Read when |
 |---|---|
 | `process/context/all-context.md` | any substantial planning, research, review, or implementation task |
+| `process/context/auth/all-auth.md` | JWT + refresh-cookie auth, role scoping, and demo-vs-API mode — the auth group entrypoint/router |
+| `process/context/database/all-database.md` | Drizzle/PostgreSQL schema, migrations, seed/reset, and booking/credit integrity — the database group entrypoint/router |
+| `process/context/planning/all-planning.md` | creating, resuming, or archiving a plan |
 | `process/context/tests/all-tests.md` | testing, verification gates, or debugging runtime failures |
-| `process/context/planning/all-planning.md` | creating or resuming a plan |
+| `process/context/uxui/all-uxui.md` | Next.js 16 / React 19 / Tailwind 4 frontend: app shell, role components, school data layer, styling — the uxui group entrypoint/router |
 
 ## Current Context Groups
 
 | Group | Entry point | Scope |
 |---|---|---|
-| database | `process/context/database/all-database.md` | Drizzle schema, migrations, seed/reset, ledger and booking data rules |
-| auth | `process/context/auth/all-auth.md` | JWT/refresh auth, roles, manager scoping, demo mode vs API mode |
-| uxui | `process/context/uxui/all-uxui.md` | Next.js role screens, components, local/api service layer UI patterns |
-| tests | `process/context/tests/all-tests.md` | vitest backend tests, verification gates, known gaps |
-| planning | `process/context/planning/all-planning.md` | plan formats, task folders, existing cutover plans |
+| `auth/` | `process/context/auth/all-auth.md` | JWT + refresh-cookie auth, role scoping, and demo-vs-API mode — the auth group entrypoint/router |
+| `database/` | `process/context/database/all-database.md` | Drizzle/PostgreSQL schema, migrations, seed/reset, and booking/credit integrity — the database group entrypoint/router |
+| `planning/` | `process/context/planning/all-planning.md` | Plan formats, task folders, and the existing cutover and feature plans |
+| `tests/` | `process/context/tests/all-tests.md` | Test and verification guide: backend vitest, per-domain API smoke, gates, and known gaps |
+| `uxui/` | `process/context/uxui/all-uxui.md` | Next.js 16 / React 19 / Tailwind 4 frontend: app shell, role components, school data layer, styling — the uxui group entrypoint/router |
 <!-- /GENERATED:routing -->
 
 ## Task Routing Table
@@ -255,7 +267,8 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - `npm run db:reset` TRUNCATES all tables (refuses production). Destructive; never use it as a verification gate.
 - Meeting links live in `lessons.roomCode` (max 40 chars), NOT `meeting_url`.
 - Parents are not a login role: guardian fields on `student_profiles`; parent ratings go through the student account (`ratingSource: "parent"`).
-- Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist.
+- Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`.
+- The bell is the activity feed merged with the role derivation (deduped by target, cap 30). Read ids and muted categories are per user in `notification_state` via `GET`/`PATCH /notifications/state`; demo mode still uses localStorage. Notification ids are stored server-side, so keep them short.
 - Demo mode is the DEFAULT (`isDemoMode()` true unless `NEXT_PUBLIC_DEMO_MODE === "false"`). `LuminaApp.tsx` seeds `studentCredits` local state at 24 (matches the demo seed).
 - The working tree holds large uncommitted cutover work; check `git status` before assuming a clean base.
 
@@ -288,14 +301,14 @@ These stay in place and remain the source of truth for cutover status.
 |---|---|
 | `frontend/ADMIN_PLAN.md` | Admin/manager product plan; all phases done |
 | `frontend/CUTOVER_PLAN.md` | File-level plan for local-store to API cutover |
-| `frontend/CUTOVER_PROGRESS.md` | Live board: Step A, B0.1-B0.4, B1, B2 done; B3 domain slices next; Step C (uploads/notifications) and Step D (parity/removal) not started |
+| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, and C done; Step D (parity/removal) next |
 | `frontend/PROGRESS.md` | App-wide state and verification commands |
 
 ## Workflow
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (11 domains, 306 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), browser check in demo and API mode.
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 343 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), browser check in demo and API mode.
 
 ## Validator Registry
 
@@ -322,8 +335,8 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 ## Open Questions / Outstanding Work
 
-- Cutover B3 domain slices, Step C (uploads/notifications), Step D (parity/removal) not started.
-- Mutation-specific browser/API smoke per migrated domain is an open item.
+- Cutover Step D (parity suite, one-time import, remove the browser-store fallback) not started.
+- No committed browser/e2e suite: Step C was verified with ad-hoc Playwright runs; Step D adds the parity suite.
 - Booking concurrency/precision risks above are unresolved.
 - Curriculum Library not built; no frontend tests; no CI.
 

@@ -3,7 +3,7 @@
 Live status for the frontend/backend integration. The plan is in
 `CUTOVER_PLAN.md`; app-wide state stays in `PROGRESS.md`.
 
-**Current step:** Step B - B3 domain slices complete and independently re-verified (per-domain API smoke, parity fixes, 1 credit per lesson); Step C next.
+**Current step:** Step C - uploads and notifications complete (API uploads/downloads, activity-backed bell, per-user read/mute state); Step D next.
 **Last updated:** November 18, 2026.
 
 ## Board
@@ -18,7 +18,7 @@ Live status for the frontend/backend integration. The plan is in
 | B1 - Read path | ✅ Done | `api/bootstrap.ts`; API mode hydrates from bootstrap, demo/local unchanged. |
 | B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
 | B3 - Domain slices | ✅ Done | Course ownership, activity log, `npm run smoke` (11 domains, 306 checks), parity fixes, numeric credits, 1 credit per lesson. Independent EVL rerun green (Nov 18). Plan archived to `process/features/backend-cutover/completed/b3-domain-smoke_18-11-26/`. |
-| Step C - Uploads + notifications | ⬜ Not started | Depends on B. |
+| Step C - Uploads + notifications | ✅ Done | API uploads/downloads (5 MB + MIME allowlist), activity-backed bell merged with the role derivation, `notification_state` read/mute per user. Browser + smoke evidence Nov 18. |
 | Step D - Parity + removal | ⬜ Not started | Depends on C. |
 
 ## Rule-gap checklist (B0.2)
@@ -95,6 +95,30 @@ Live status for the frontend/backend integration. The plan is in
   and never refunds twice (API and demo); homework cannot be reviewed twice (API and demo); student rating
   and cancellation attachments go through the API in API mode.
 
+## Step C checklist (uploads + notifications)
+
+- [x] `requestBlob` + typed download helpers in `app/lib/api/client.ts`; new
+  `api/uploads.ts` and `api/notifications.ts`; shared `school/attachment-download.ts`
+  picks API bytes vs IndexedDB/localStorage bytes.
+- [x] Plan-file uploads and downloads use `POST /uploads` and `GET /uploads/:id/download`
+  in API mode (`services/uploads.ts`, `ManagerCurriculum.tsx`, `TeacherLessons.tsx`);
+  attachment ids stay on plans and cancellation evidence. Upload size limited to 5 MB and
+  the MIME allowlist (pdf, image/*, msword, docx, pptx) is enforced on the server.
+- [x] Teacher cancellation evidence uploads through the API (`uploadDataUrlAttachment`)
+  and renders inline in the manager review modal by id (`CancellationAttachment`,
+  object URL preview, download fallback).
+- [x] `useNotifications` merges `GET /notifications` with the per-role derivation
+  (`activityNotification` + `mergeNotifications`, deduped by target, sorted, capped at 30).
+- [x] Read/mute state is per user in the new `notification_state` table
+  (`GET`/`PATCH /notifications/state`, 300 read ids, category allowlist); the bell
+  writes optimistically and Settings writes mute changes through.
+- [x] Demo/local mode unchanged: IndexedDB uploads/downloads and localStorage
+  read/mute still work (browser-verified Nov 18).
+- [x] Smoke gained `uploads` (16 checks) and `notifications` (21 checks) domains;
+  contract tests cover both routes plus 401s.
+- [x] Notification ids stay bounded (the "lessons without a plan" reminder no longer
+  embeds every lesson id) so `PATCH /notifications/state` accepts mark-all-read.
+
 ## Verification log
 
 | Date | Slice | What was checked | Result |
@@ -113,6 +137,10 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 18, 2026 | B3 browser (API) | Chromium, API mode, backend restarted after the version bump: admin, manager, teacher, student shells load without the hours crash (student chip 21.3 from numeric 21.25); student UI booking -1 with room code, UI cancel +1; teacher lesson page shows the room code and the attached plan; student UI rating stored (1 rating row, 1 `lesson.rated` row) | Pass |
 | Nov 18, 2026 | B3 activity | Live 57-check matrix on port 4100: admin reads `/activity` (manager 403, anonymous 401); `course.created/updated/duplicated/archived`, `teacher.created/updated/reassigned`, `student.created/updated`, `user.renamed/paused/archived`, `enrollment.created/updated`, `settings.updated` all log with store-style summaries; homework, credits, and request approve/reject actions re-checked; admin bootstrap carries the rows while manager/student bootstraps stay empty; newest-first ordering, paging, and `targetType` filter. Plus backend `typecheck`/`lint`/`npm test` (12/12) | Pass |
 | Nov 18, 2026 | B3 EVL rerun (independent vc-tester) | `typecheck`, `lint`, backend `npm test` (16/16, 4 files), `git diff --check`; `npm run smoke` run 1 and run 2 each 11/11 domains, 306 checks; grep gate empty; `backend/scripts` excluded from `npm test`; settings restored after both runs; port 4100 free afterwards. Browser gates were not re-run by the tester (rely on the execute log above). | Pass |
+| Nov 18, 2026 | C backend | `notification_state` migration applied (`npm run db:migrate`); contract tests for `GET /notifications`, `GET`/`PATCH /notifications/state`, `POST /uploads`, `GET /uploads/:id/download` incl. 401s (17 tests); upload validation 5 MB + MIME allowlist; `typecheck`, `lint` | Pass |
+| Nov 18, 2026 | C browser (API mode) | Chromium, `DEMO_MODE=false`, `DATA_SOURCE=api`: admin signs in through `/auth/login` + bootstrap, uploads a PDF (`201`), downloads identical bytes, bell merges the 35-row activity feed (30 shown), mark-all-read persists (32 read ids, 0 unread after reload), mute persists through reload, teacher files a cancellation with a PNG, manager review modal renders the evidence from a blob URL and downloads it; no page errors. 25/25 checks | Pass |
+| Nov 18, 2026 | C browser (demo mode) | Chromium, `.env.local` defaults: IndexedDB upload + byte-identical download, localStorage bell read state survives reload, mute survives reload, teacher cancellation evidence stored as a data URL and rendered inline for the manager; no page errors. 10/10 checks | Pass |
+| Nov 18, 2026 | C smoke | `npm run smoke`: 13/13 domains, 343 checks (`uploads` 16, `notifications` 21), settings restored; deliberate red run (301-item feed cap) failed `notifications` with exit 1, then reverted. Root `typecheck`, `lint`, backend `npm test` (17/17), `git diff --check`, grep gate (no reset/push/truncate) | Pass |
 
 ## Change log
 
@@ -127,6 +155,7 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 17, 2026 | B3 curriculum ownership: shared `assertCourseEditable` guard applied to course, unit, plan, and attachment writes; duplicate intentionally left open to any manager. | `backend/src/lib/scope.ts`, `backend/src/routes/courses.ts` |
 | Nov 18, 2026 | B3 smoke and parity: postgres numeric parser + `getCreditBalance`; `resolveLessonDefaults` for booking and `POST /lessons`; typed `ActivityAction` union and `logActivity(db or tx)`; slot/rebook/reschedule/request logging; complete-cancelled 409; request lesson ownership; approve-cancel guards; homework re-review 400; optional `RATE_LIMIT_MAX` (default 300); frontend 1 credit per lesson, schema v3, API rating and request attachments; `npm run smoke`. | `backend/src/plugins/db.ts`, `backend/src/config/env.ts`, `backend/src/app.ts`, `backend/src/lib/{activity,credits,lesson-defaults,db-handle}.ts`, `backend/src/routes/{bookings,lessons,requests,credits,assignments,courses,school}.ts`, `backend/scripts/smoke.ts`, `backend/tests/*.ts`, `backend/{package,tsconfig}.json`, `package.json`, `frontend/app/lib/school/{services/*,api/teaching,notifications,seed,types}.ts`, `frontend/app/lib/data.ts`, `frontend/app/components/{LuminaApp,manager/PeopleForms,student/StudentBilling,student/StudentOverview}.tsx` |
 | Nov 18, 2026 | B3 activity parity: activity writes on course, people, enrollment, settings, homework, credit, and request routes; new admin-only paginated `GET /activity`; action names aligned with the browser store's `recordActivity` vocabulary. | `backend/src/routes/activity.ts`, `backend/src/routes/index.ts`, `backend/src/routes/{courses,users,teachers,students,enrollments,settings,assignments,credits,requests}.ts`, `backend/tests/contract.test.ts` |
+| Nov 18, 2026 | Step C: API uploads/downloads with 5 MB + MIME validation, activity-backed bell merged with the role derivation, per-user `notification_state` (read ids + muted categories), cancellation evidence by attachment id, bounded notification ids, smoke `uploads`/`notifications` domains. | `backend/src/{db/schema.ts,lib/notifications.ts,routes/notifications.ts,routes/uploads.ts,app.ts}`, `backend/src/db/migrations/0002_notification_state.sql`, `backend/scripts/smoke.ts`, `backend/tests/contract.test.ts`, `frontend/app/lib/{api/client.ts,hooks/useNotifications.ts,school/notifications.ts,school/attachment-download.ts,school/api/{uploads,notifications}.ts,school/services/{uploads,teaching,curriculum}.ts,school/views.ts,types.ts,school/index.ts}`, `frontend/app/components/{manager/ManagerApprovals.tsx,manager/ManagerCurriculum.tsx,manager/ManagerSettings.tsx,teacher/TeacherLessons.tsx}` |
 
 ## Open decisions / blockers
 
@@ -160,8 +189,19 @@ Live status for the frontend/backend integration. The plan is in
 - **Known gaps (accepted).** Booking/credit race (no row lock), no unique lessons constraint, unlocked plan
   selection, student self-purchase up to 100 credits without payment, smoke not in CI, leave-behind
   fixtures. Backlog notes in `process/features/backend-cutover/backlog/`.
+- **Step C notifications (Nov 18).** The bell shows the activity feed merged with the role-derived items
+  (deduped by target, newest first, capped at 30). Read/mute state lives per user in `notification_state`
+  (`read_ids` capped at 300, `muted_categories` limited to the eight known categories); `PATCH` is partial so
+  a read update cannot wipe muted categories. Notification ids must stay short because they are stored in
+  `read_ids`; the "lessons without a plan" reminder now uses count + date range instead of every lesson id.
+- **Step C uploads (Nov 18).** API mode stores bytes under `UPLOAD_DIR` and metadata in `attachments`;
+  the 5 MB cap is enforced in the route and mirrored by the multipart limit. Demo mode keeps
+  IndexedDB/localStorage, behind the same `downloadAttachmentFile` helper.
+- **Demo `lumina-account` in API mode (note).** API sign-in still writes the demo account blob to
+  localStorage (removed on the next mount); it is not read in API mode. Candidate for Step D cleanup.
 
 ## Next action
 
-Commit B3, then start Step C (uploads and notifications). B3 is closed. The earlier small gaps
-are closed: `PATCH /lessons/:id` logs `lesson.planChanged` and booking logs `lesson.booked`.
+Commit Step C, then start Step D (parity suite, one-time import, remove the fallback). Step C is closed:
+uploads/downloads, the activity-backed bell, and per-user read/mute state are live in API mode with demo
+mode unchanged.

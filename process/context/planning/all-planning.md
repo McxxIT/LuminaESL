@@ -1,3 +1,13 @@
+---
+name: context:all-planning
+description: "Plan formats, task folders, and the existing cutover and feature plans"
+keywords: planning, plan, PRD, task folder, active, completed, backlog, cutover, riper-5, generate-plan
+related: [context:all-context, context:all-tests]
+metadata:
+  read_when: creating, resuming, or archiving a plan
+date: 18-11-26
+---
+
 # Planning Context
 
 This file is the canonical planning context entrypoint for lumina-esl.
