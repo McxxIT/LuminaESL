@@ -107,6 +107,21 @@ describe("school contract", () => {
     expect(
       app.hasRoute({ method: "GET", url: "/api/v1/activity" }),
     ).toBe(true);
+    expect(
+      app.hasRoute({ method: "POST", url: "/api/v1/uploads" }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({ method: "GET", url: "/api/v1/uploads/:id/download" }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({ method: "GET", url: "/api/v1/notifications" }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({ method: "GET", url: "/api/v1/notifications/state" }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({ method: "PATCH", url: "/api/v1/notifications/state" }),
+    ).toBe(true);
   });
 
   it("exposes the bootstrap endpoint behind authentication", async () => {
@@ -123,5 +138,21 @@ describe("school contract", () => {
       url: "/api/v1/activity",
     });
     expect(response.statusCode).toBe(401);
+  });
+
+  it("exposes uploads and notification state behind authentication", async () => {
+    const uploads = await app.inject({ method: "POST", url: "/api/v1/uploads" });
+    expect(uploads.statusCode).toBe(401);
+    const state = await app.inject({
+      method: "GET",
+      url: "/api/v1/notifications/state",
+    });
+    expect(state.statusCode).toBe(401);
+    const patch = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/notifications/state",
+      payload: { readIds: [] },
+    });
+    expect(patch.statusCode).toBe(401);
   });
 });

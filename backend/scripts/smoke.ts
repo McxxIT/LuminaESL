@@ -1,5 +1,5 @@
 /**
- * API smoke test: proves every B3 domain end to end against the local Postgres.
+ * API smoke test: proves every school domain end to end against the local Postgres.
  *
  *   npm run smoke            (root alias)  |  npm run smoke --workspace @lumina/backend
  *
@@ -149,6 +149,11 @@ function arr(value: unknown, context: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${context}: expected an array`);
   return value;
 }
+function fieldArr(value: unknown, key: string): unknown[] {
+  const field = obj(value, key)[key];
+  if (!Array.isArray(field)) throw new Error(`expected array "${key}", got ${JSON.stringify(field)}`);
+  return field;
+}
 
 async function call(token: string | null, method: string, path: string, body?: unknown): Promise<Res> {
   const headers: Record<string, string> = {};
@@ -170,6 +175,19 @@ async function call(token: string | null, method: string, path: string, body?: u
     }
   }
   return { status: response.status, body: parsed };
+}
+
+async function upload(token: string | null, file: { name: string; type: string; bytes: Uint8Array }): Promise<Res> {
+  const form = new FormData();
+  form.append("file", new Blob([file.bytes], { type: file.type }), file.name);
+  return call(token, "POST", "/uploads", form);
+}
+
+async function download(token: string | null, id: string): Promise<{ status: number; bytes: Uint8Array }> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${base}/uploads/${id}/download`, { headers });
+  return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
 }
 
 let checkCount = 0;
@@ -296,6 +314,8 @@ async function addCredits(studentLabel: string, hours: number, reason: "purchase
 
 let enrollmentId = "";
 let firstPlanId = "";
+let courseId = "";
+let unitId = "";
 
 async function setup(): Promise<void> {
   const [row] = await db
@@ -336,10 +356,10 @@ async function setup(): Promise<void> {
 
   const course = await call(tok("managerA"), "POST", "/courses", { title: `Smoke course ${runId}`, level: "B1", status: "published" });
   expectStatus(course, 201, "create course");
-  const courseId = str(course.body, "id");
+  courseId = str(course.body, "id");
   const unit = await call(tok("managerA"), "POST", `/courses/${courseId}/units`, { title: "Unit 1", order: 0 });
   expectStatus(unit, 201, "create unit");
-  const unitId = str(unit.body, "id");
+  unitId = str(unit.body, "id");
   for (let order = 0; order < 12; order += 1) {
     const plan = await call(tok("managerA"), "POST", `/courses/${courseId}/units/${unitId}/plans`, { title: `Plan ${order + 1}`, order });
     expectStatus(plan, 201, "create plan");
@@ -566,7 +586,7 @@ async function requestsScenario(): Promise<void> {
   // Lesson cancellation with an attachment: approve refunds +1 exactly once.
   const lessonId = await bookFor("studentA", "teacherA", 12);
   const form = new FormData();
-  form.append("file", new Blob(["smoke attachment"], { type: "text/plain" }), "smoke-note.txt");
+  form.append("file", new Blob(["%PDF-1.4 smoke attachment"], { type: "application/pdf" }), "smoke-note.pdf");
   const upload = await call(tok("teacherA"), "POST", "/uploads", form);
   expectStatus(upload, 201, "upload attachment");
   const attachmentId = str(upload.body, "id");
@@ -576,7 +596,7 @@ async function requestsScenario(): Promise<void> {
   check(obj(cancelReq.body, "request").attachmentId === attachmentId, "request did not keep attachmentId");
   const readBack = await call(tok("managerA"), "GET", `/uploads/${attachmentId}`);
   expectStatus(readBack, 200, "read attachment back");
-  check(str(readBack.body, "name") === "smoke-note.txt", "attachment name read-back");
+  check(str(readBack.body, "name") === "smoke-note.pdf", "attachment name read-back");
   const before = await balance("studentA");
   expectStatus(await call(tok("managerA"), "POST", `/requests/${cancelId}/review`, { status: "approved" }), 200, "approve cancellation");
   check(near(await balance("studentA"), before + 1), "approve-cancel must refund exactly 1");
@@ -713,6 +733,88 @@ async function profileScenario(): Promise<void> {
   await expectOneActivity("user", uid("studentZero"), "user.paused");
 }
 
+async function uploadsScenario(): Promise<void> {
+  const content = new TextEncoder().encode(`smoke upload ${runId}`);
+  const uploaded = await upload(tok("managerA"), { name: "smoke-plan.pdf", type: "application/pdf", bytes: content });
+  expectStatus(uploaded, 201, "manager uploads a plan file");
+  const id = str(uploaded.body, "id");
+  check(str(uploaded.body, "name") === "smoke-plan.pdf", "upload keeps the file name");
+  check(num(uploaded.body, "size") === content.length, "upload reports the exact byte size");
+
+  expectStatus(await call(tok("managerA"), "GET", `/uploads/${id}`), 200, "read attachment metadata");
+  const bytes = await download(tok("managerA"), id);
+  check(bytes.status === 200, `download expected 200, got ${bytes.status}`);
+  check(bytes.bytes.length === content.length, `download length ${bytes.bytes.length} != ${content.length}`);
+  check(Buffer.compare(Buffer.from(bytes.bytes), Buffer.from(content)) === 0, "download returns the same bytes");
+
+  const attach = await call(tok("managerA"), "POST", `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`, {
+    id, name: "smoke-plan.pdf", type: "application/pdf", size: content.length, storageKey: "smoke",
+  });
+  expectStatus(attach, 200, "attach upload to a plan");
+
+  expectStatus(await call(null, "GET", `/uploads/${id}`), 401, "anonymous reads attachment");
+  check((await download(null, id)).status === 401, "anonymous download is refused");
+  expectStatus(await upload(null, { name: "x.pdf", type: "application/pdf", bytes: content }), 401, "anonymous uploads");
+  expectStatus(await upload(tok("managerA"), { name: "run.exe", type: "application/octet-stream", bytes: content }), 400, "unsupported file type");
+  expectStatus(await upload(tok("managerA"), { name: "empty.pdf", type: "application/pdf", bytes: new Uint8Array() }), 400, "empty upload");
+  const oversized = await upload(tok("managerA"), { name: "big.pdf", type: "application/pdf", bytes: new Uint8Array(5 * 1024 * 1024 + 1) });
+  check(oversized.status === 413 || oversized.status === 400, `oversized upload rejected (got ${oversized.status})`);
+
+  // Current behavior: uploads write no activity row of their own.
+  await expectNoActivity("attachment", id, "attachment.uploaded");
+}
+
+async function notificationsScenario(): Promise<void> {
+  const initial = await call(tok("studentA"), "GET", "/notifications/state");
+  expectStatus(initial, 200, "read notification state");
+  check(fieldArr(initial.body, "readIds").length === 0, "new user starts with no read ids");
+
+  const patched = await call(tok("studentA"), "PATCH", "/notifications/state", {
+    mutedCategories: ["credits"], readIds: ["note-1", "note-2"],
+  });
+  expectStatus(patched, 200, "save notification state");
+  check(fieldArr(patched.body, "mutedCategories").includes("credits"), "saved muted category returned");
+  check(fieldArr(patched.body, "readIds").length === 2, "saved read ids returned");
+
+  const reread = await call(tok("studentA"), "GET", "/notifications/state");
+  expectStatus(reread, 200, "read state after save");
+  check(JSON.stringify(fieldArr(reread.body, "readIds")) === JSON.stringify(["note-1", "note-2"]), "read ids persisted");
+
+  const other = await call(tok("studentZero"), "GET", "/notifications/state");
+  expectStatus(other, 200, "read another user's state");
+  check(fieldArr(other.body, "readIds").length === 0, "notification state is per user");
+
+  const partial = await call(tok("studentA"), "PATCH", "/notifications/state", { readIds: ["note-3"] });
+  expectStatus(partial, 200, "partial state update");
+  check(JSON.stringify(fieldArr(partial.body, "mutedCategories")) === JSON.stringify(["credits"]), "partial update keeps muted categories");
+
+  const many = Array.from({ length: 350 }, (_, index) => `id-${index}`);
+  const capped = await call(tok("studentA"), "PATCH", "/notifications/state", { readIds: many });
+  expectStatus(capped, 200, "save more than 300 read ids");
+  const cappedIds = fieldArr(capped.body, "readIds");
+  check(cappedIds.length === 300, `read ids capped at 300, got ${cappedIds.length}`);
+  check(cappedIds[299] === "id-349", "the cap keeps the newest read ids");
+
+  expectStatus(await call(tok("studentA"), "PATCH", "/notifications/state", { mutedCategories: ["nope"] }), 400, "invalid muted category");
+  expectStatus(await call(null, "GET", "/notifications/state"), 401, "anonymous reads state");
+  expectStatus(await call(null, "PATCH", "/notifications/state", { readIds: [] }), 401, "anonymous writes state");
+
+  // The feed is actor-or-target scoped. profileScenario renamed studentA, so the admin's
+  // user.renamed row targets this student and must be visible.
+  const feed = await call(tok("studentA"), "GET", "/notifications?limit=100");
+  expectStatus(feed, 200, "notification feed");
+  const items = fieldArr(feed.body, "items");
+  check(items.length > 0, "feed has rows for the signed-in user");
+
+  const foreign = await call(tok("studentB"), "GET", "/notifications?limit=100");
+  expectStatus(foreign, 200, "another user's feed");
+  const ownIds = new Set(items.map((item) => str(item, "id")));
+  check(
+    !fieldArr(foreign.body, "items").some((item) => ownIds.has(str(item, "id"))),
+    "feeds are scoped per user",
+  );
+}
+
 // ---------------------------------------------------------------- runner
 
 type Outcome = { domain: string; checks: number; error?: string };
@@ -759,6 +861,8 @@ async function main(): Promise<number> {
   await scenario("homework", homeworkScenario);
   await scenario("quality", qualityScenario);
   await scenario("profile", profileScenario);
+  await scenario("uploads", uploadsScenario);
+  await scenario("notifications", notificationsScenario);
 
   const failed = outcomes.filter((outcome) => outcome.error);
   const total = outcomes.reduce((sum, outcome) => sum + outcome.checks, 0);
