@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Icon from "../Icon";
 import Toggle from "../student/Toggle";
+import { isApiDataMode } from "../../lib/auth/mode";
+import { getNotificationState, saveNotificationState } from "../../lib/school/api/notifications";
 import { DEFAULT_STAFF_PREFERENCES, staffPreferencesKey, type StaffPreferences } from "../../lib/hooks/useNotifications";
 import { usePersonalValue } from "../../lib/hooks/usePersonalValue";
 import { resetSchool, type NotificationCategory, type SchoolUser } from "../../lib/school";
@@ -26,8 +28,25 @@ export default function ManagerSettings({ user, onNavigate, onRequestLogout, onN
   const [resetOpen, setResetOpen] = useState(false);
   const enabled = categories.filter((category) => !prefs.mutedCategories.includes(category.key)).length;
 
+  // API mode stores mute state per user; hydrate once so another device's choice shows up.
+  useEffect(() => {
+    if (!isApiDataMode()) return;
+    let active = true;
+    getNotificationState()
+      .then((state) => {
+        if (!active) return;
+        setPrefs((current) => ({ ...current, mutedCategories: state.mutedCategories as NotificationCategory[] }));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [setPrefs]);
+
   function toggle(key: NotificationCategory, on: boolean) {
-    setPrefs((current) => ({ ...current, mutedCategories: on ? current.mutedCategories.filter((item) => item !== key) : [...new Set([...current.mutedCategories, key])] }));
+    const mutedCategories = on
+      ? prefs.mutedCategories.filter((item) => item !== key)
+      : [...new Set([...prefs.mutedCategories, key])];
+    setPrefs({ ...prefs, mutedCategories });
+    if (isApiDataMode()) void saveNotificationState({ mutedCategories }).catch(() => {});
     onNotice(on ? "Notifications turned on." : "Notifications turned off.");
   }
 

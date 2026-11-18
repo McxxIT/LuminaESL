@@ -60,6 +60,18 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return parse<T>(response);
 }
 
+/** Binary GET (downloads). Same 401 refresh contract as `request`, but returns a Blob. */
+export async function requestBlob(path: string): Promise<Blob> {
+  const response = await send(path, { method: "GET", auth: true });
+  if (response.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed) return requestBlob(path);
+    unauthorizedHandler?.();
+  }
+  if (!response.ok) throw await toApiError(response);
+  return response.blob();
+}
+
 /** Exchange the httpOnly refresh cookie for a new access token. Single-flight per tab. */
 export function refreshSession(): Promise<AuthResponse | null> {
   if (!refreshPromise) {
@@ -125,6 +137,7 @@ async function send(path: string, options: Required<Pick<RequestOptions, "method
 
 async function parse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
+  if (!response.ok) throw await toApiError(response);
 
   const text = await response.text();
   let payload: unknown = null;
@@ -136,10 +149,22 @@ async function parse<T>(response: Response): Promise<T> {
     }
   }
 
-  if (response.ok) return payload as T;
+  return payload as T;
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
 
   const error = (payload as ApiErrorBody | null)?.error;
-  throw new ApiError(
+  return new ApiError(
     response.status,
     error?.code ?? `HTTP_${response.status}`,
     error?.message ?? `Request failed with status ${response.status}`,

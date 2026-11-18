@@ -266,7 +266,6 @@ export function attachFileToPlan(actorId: string, planId: string, file: { name: 
     if (!plan || !unit) throw new ServiceError("Lesson plan not found.");
     await attachLessonPlanFile(unit.courseId, unit.id, planId, file);
   });
-  if (isApiDataMode()) return runAsync(async () => { throw new ServiceError("File uploads are not part of the curriculum API yet."); });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "attachment.upload");

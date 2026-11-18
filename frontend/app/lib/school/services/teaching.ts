@@ -55,14 +55,18 @@ export function withdrawSlotClosure(actorId: string, date: string, time: string)
 export type CancellationRequestInput = {
   reason: string;
   comment: string;
-  attachment?: { name: string; type: string; dataUrl: string };
+  attachment?: { name: string; type: string; dataUrl?: string };
 };
 
 export function requestLessonCancellation(actorId: string, lessonId: string, input: CancellationRequestInput): ServiceCall {
   if (isApiDataMode()) {
     return runAsync(async () => {
       // Two steps: store the file first, then file the request pointing at it.
-      const attachmentId = input.attachment ? await uploadDataUrlAttachment(input.attachment) : undefined;
+      let attachmentId: string | undefined;
+      if (input.attachment) {
+        if (!input.attachment.dataUrl) throw new ServiceError("The attachment could not be read. Try another file.");
+        attachmentId = await uploadDataUrlAttachment({ ...input.attachment, dataUrl: input.attachment.dataUrl });
+      }
       await createRequest({ type: "lesson-cancellation", lessonId, reason: input.reason, comment: input.comment, ...(attachmentId ? { attachmentId } : {}) });
     });
   }
@@ -76,10 +80,12 @@ export function requestLessonCancellation(actorId: string, lessonId: string, inp
     if (!reason || !comment) throw new ServiceError("Add a reason and a comment.");
     let attachmentId: string | undefined;
     if (input.attachment) {
+      const dataUrl = input.attachment.dataUrl;
+      if (!dataUrl) throw new ServiceError("The attachment could not be read. Try another file.");
       attachmentId = createId("attachment");
       const storageKey = fileStorageKey(attachmentId);
-      if (!saveFile(storageKey, input.attachment.dataUrl)) throw new ServiceError("The attachment could not be saved. Try a smaller file.");
-      upsert(draft, "attachments", { id: attachmentId, name: input.attachment.name, type: input.attachment.type, size: input.attachment.dataUrl.length, storageKey, uploadedBy: actor.id, uploadedAt: new Date().toISOString() });
+      if (!saveFile(storageKey, dataUrl)) throw new ServiceError("The attachment could not be saved. Try a smaller file.");
+      upsert(draft, "attachments", { id: attachmentId, name: input.attachment.name, type: input.attachment.type, size: dataUrl.length, storageKey, uploadedBy: actor.id, uploadedAt: new Date().toISOString() });
     }
     const request: LessonCancellationRequest = { id: createId("request"), type: "lesson-cancellation", lessonId, teacherId: lesson.teacherId, reason, comment, attachmentId, status: "pending", requestedAt: new Date().toISOString(), requestedBy: actor.id };
     upsert(draft, "requests", request);

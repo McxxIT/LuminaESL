@@ -7,12 +7,42 @@ import Modal from "../shared/Modal";
 import { formatTimestamp, slotEnd } from "../../lib/scheduling";
 import { formatLessonDate } from "../../lib/student";
 import type { SchoolUser } from "../../lib/school";
-import type { TeacherLesson, TeacherSlotClosure } from "../../lib/types";
+import { downloadAttachmentFile, useAttachmentObjectUrl } from "../../lib/school/attachment-download";
+import type { TeacherLesson, TeacherLessonAttachment, TeacherSlotClosure } from "../../lib/types";
 import type { useApprovals } from "./useApprovals";
 
 type Decision = "approved" | "rejected";
 type ClosureTarget = { closure: TeacherSlotClosure; decision: Decision };
 type CancellationTarget = { lesson: TeacherLesson; decision: Decision };
+
+/** Cancellation evidence: inline in demo mode, authenticated download (or preview) in API mode. */
+function CancellationAttachment({ attachment, onNotice }: {
+  attachment: TeacherLessonAttachment;
+  onNotice: (message: string) => void;
+}) {
+  const apiUrl = useAttachmentObjectUrl(attachment.dataUrl ? undefined : attachment.id);
+  const href = attachment.dataUrl ?? apiUrl;
+  const isImage = attachment.type.startsWith("image/");
+
+  async function download() {
+    try {
+      if (!(await downloadAttachmentFile(attachment))) onNotice(`${attachment.name} is not available on this device yet.`);
+    } catch {
+      onNotice(`Could not download ${attachment.name}. Try again.`);
+    }
+  }
+
+  return <div className="lesson-detail-section">
+    <span className="eyebrow">ATTACHMENT</span>
+    {href
+      ? <a href={href} target="_blank" rel="noreferrer" download={attachment.name}>
+        {isImage
+          ? <Image src={href} alt={attachment.name} width={240} height={160} unoptimized style={{ width: "100%", height: "auto", maxWidth: 240, borderRadius: 8 }} />
+          : <><Icon name="file" size={14} /> {attachment.name}</>}
+      </a>
+      : <button type="button" className="icon-text-button" onClick={download}><Icon name="file" size={14} /> {attachment.name}</button>}
+  </div>;
+}
 
 export default function ManagerApprovals({ user, approvals, onNotice }: {
   user: SchoolUser;
@@ -117,14 +147,7 @@ export default function ManagerApprovals({ user, approvals, onNotice }: {
       <form id="manager-cancellation-form" onSubmit={submitCancellation}>
         <div className="lesson-detail-section manager-review-reason"><span className="eyebrow">REASON</span><p><strong>{cancellationTarget.lesson.cancellation?.reason}</strong> · requested by {cancellationTarget.lesson.cancellation?.requestedBy ?? "Teacher"}</p></div>
         <div className="lesson-detail-section"><span className="eyebrow">TEACHER COMMENT</span><p>{cancellationTarget.lesson.cancellation?.comment}</p></div>
-        {cancellationTarget.lesson.cancellation?.attachment && <div className="lesson-detail-section">
-          <span className="eyebrow">ATTACHMENT</span>
-          <a href={cancellationTarget.lesson.cancellation.attachment.dataUrl} target="_blank" rel="noreferrer" download={cancellationTarget.lesson.cancellation.attachment.name}>
-            {cancellationTarget.lesson.cancellation.attachment.type.startsWith("image/")
-              ? <Image src={cancellationTarget.lesson.cancellation.attachment.dataUrl} alt={cancellationTarget.lesson.cancellation.attachment.name} width={240} height={160} unoptimized style={{ maxWidth: "100%", height: "auto", borderRadius: 8 }} />
-              : <><Icon name="file" size={14} /> {cancellationTarget.lesson.cancellation.attachment.name}</>}
-          </a>
-        </div>}
+        {cancellationTarget.lesson.cancellation?.attachment && <CancellationAttachment attachment={cancellationTarget.lesson.cancellation.attachment} onNotice={onNotice} />}
         <label className="student-field">Note to teacher (optional)<textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder={cancellationTarget.decision === "approved" ? "e.g. Approved. We will rebook the student." : "e.g. Please keep this lesson; we cannot cover it."} /></label>
         <div className={`lesson-callout ${cancellationTarget.decision === "approved" ? "" : "warning"}`}><Icon name={cancellationTarget.decision === "approved" ? "check" : "x"} size={16} /><div><strong>{cancellationTarget.decision === "approved" ? "The lesson will be cancelled" : "The lesson stays scheduled"}</strong><p>{cancellationTarget.decision === "approved" ? "The teacher and student both see it as cancelled." : "The teacher sees your note and keeps the lesson."}</p></div></div>
       </form>

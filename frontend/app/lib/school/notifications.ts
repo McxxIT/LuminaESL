@@ -14,7 +14,7 @@ import {
   studentsForUser,
   teachersForUser,
 } from "./selectors";
-import type { SchoolData, SchoolUser } from "./types";
+import type { ActivityEntry, SchoolData, SchoolUser } from "./types";
 import { nameOf } from "./views";
 
 /**
@@ -35,6 +35,8 @@ export type SchoolNotification = {
   nav: string;
   /** For ordering (newest / most urgent first). */
   at: string;
+  /** Internal dedupe key (`targetType:targetId`), not rendered. */
+  targetKey?: string;
 };
 
 const LOW_CREDIT_HOURS = 2; // fewer than two lessons left (1 credit per lesson)
@@ -64,7 +66,8 @@ function forManager(data: SchoolData, user: SchoolUser): SchoolNotification[] {
   });
   const weekEnd = isoDaysFromNow(7);
   const missing = lessonsForUser(data, user).filter((lesson) => lesson.status === "scheduled" && lesson.date >= isoDaysFromNow(0) && lesson.date <= weekEnd && !lessonPlanForLesson(data, lesson));
-  if (missing.length) items.push({ id: `plans-${missing.map((lesson) => lesson.id).join(",")}`, category: "plans", icon: "file", title: `${missing.length} lesson${missing.length === 1 ? "" : "s"} without a plan`, detail: missing.slice(0, 2).map((lesson) => `${lesson.title} (${shortWhen(lesson.date, lesson.time)})`).join(", "), nav: "Schedule", at: new Date().toISOString() });
+  // Bounded id: it is persisted in the bell read state, so never embed the full lesson list.
+  if (missing.length) items.push({ id: `plans-${missing.length}-${missing[0].date}-${missing[missing.length - 1].date}`, category: "plans", icon: "file", title: `${missing.length} lesson${missing.length === 1 ? "" : "s"} without a plan`, detail: missing.slice(0, 2).map((lesson) => `${lesson.title} (${shortWhen(lesson.date, lesson.time)})`).join(", "), nav: "Schedule", at: new Date().toISOString() });
   const teacherIds = new Set(teachersForUser(data, user).map((teacher) => teacher.id));
   query(data, "ratings", (rating) => teacherIds.has(rating.teacherId) && rating.score <= 2 && rating.createdAt >= since(7)).forEach((rating) => {
     items.push({ id: `rating-${rating.id}`, category: "quality", icon: "star", title: `${rating.score}-star rating`, detail: `${nameOf(data, rating.teacherId)} · ${rating.authorName}${rating.comment ? `: "${rating.comment}"` : ""}`, nav: "Performance", at: rating.createdAt });
@@ -124,4 +127,160 @@ export function notificationsForUser(data: SchoolData, user: SchoolUser | undefi
   if (!user) return [];
   const items = user.role === "admin" || user.role === "manager" ? forManager(data, user) : user.role === "teacher" ? forTeacher(data, user) : forStudent(data, user);
   return items.filter((item) => !muted.includes(item.category)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30);
+}
+
+// Activity feed -> bell items ---------------------------------------------------------------
+
+type UserRole = SchoolUser["role"];
+
+const ACTION_TITLES: Record<string, string> = {
+  "absence.recorded": "Teacher absence",
+  "credits.adjusted": "Credits adjusted",
+  "credits.purchased": "Credits purchased",
+  "credits.refunded": "Credits refunded",
+  "course.archived": "Course archived",
+  "course.created": "Course created",
+  "course.duplicated": "Course duplicated",
+  "course.published": "Course published",
+  "course.updated": "Course updated",
+  "enrollment.created": "Enrollment created",
+  "enrollment.updated": "Enrollment updated",
+  "homework.assigned": "Homework assigned",
+  "homework.reviewed": "Homework reviewed",
+  "homework.submitted": "Homework submitted",
+  "lesson.booked": "New booking",
+  "lesson.cancelledByStudent": "Lesson cancelled",
+  "lesson.completed": "Lesson completed",
+  "lesson.planChanged": "Lesson plan changed",
+  "lesson.rated": "New rating",
+  "lesson.rescheduled": "Lesson rescheduled",
+  "manager.created": "Manager added",
+  "request.approved": "Request approved",
+  "request.created": "New request",
+  "request.rejected": "Request declined",
+  "request.withdrawn": "Request withdrawn",
+  "settings.updated": "School settings updated",
+  "slot.closed": "Slot closed",
+  "slot.opened": "Slot opened",
+  "student.created": "Student added",
+  "student.reassigned": "Student reassigned",
+  "student.updated": "Student updated",
+  "teacher.created": "Teacher added",
+  "teacher.reassigned": "Teacher reassigned",
+  "teacher.updated": "Teacher updated",
+  "user.archived": "Account archived",
+  "user.created": "Account created",
+  "user.inactive": "Account paused",
+  "user.paused": "Account paused",
+  "user.renamed": "Name updated",
+  "user.updated": "Account updated",
+};
+
+const CATEGORY_ICONS: Partial<Record<NotificationCategory, NotificationIcon>> = {
+  approvals: "check",
+  credits: "wallet",
+  plans: "file",
+  quality: "star",
+  lessons: "calendar",
+  requests: "bell",
+  homework: "book",
+  feedback: "star",
+};
+
+function familyOf(action: string): string {
+  return action.split(".")[0] ?? action;
+}
+
+function categoryOf(action: string): NotificationCategory {
+  const family = familyOf(action);
+  if (family === "request") return "approvals";
+  if (family === "credits") return "credits";
+  if (family === "homework") return "homework";
+  if (family === "lesson" && action === "lesson.rated") return "feedback";
+  if (family === "lesson" || family === "slot" || family === "absence") return "lessons";
+  return "plans";
+}
+
+function navFor(action: string, role: UserRole): string {
+  const family = familyOf(action);
+  if (family === "request" || family === "absence") {
+    return role === "admin" || role === "manager" ? "Approvals" : "Lessons";
+  }
+  if (family === "lesson") {
+    return role === "admin" || role === "manager" ? "Schedule" : "Lessons";
+  }
+  if (family === "slot") {
+    return role === "teacher" ? "Booking slots" : role === "student" ? "Lessons" : "Schedule";
+  }
+  if (family === "homework") return role === "student" ? "Assignments" : "Students";
+  if (family === "credits") return role === "student" ? "Billing" : "Students";
+  if (family === "rating") return role === "teacher" ? "Analytics" : "Performance";
+  if (family === "course" || family === "enrollment") return role === "student" ? "Progress" : "Curriculum";
+  if (family === "settings") return role === "admin" ? "School settings" : "Settings";
+  if (family === "manager") return "Managers";
+  if (family === "teacher") return role === "admin" || role === "manager" ? "Teachers" : "Students";
+  if (family === "user" || family === "student") return role === "student" ? "Profile" : "Students";
+  return "Overview";
+}
+
+function prettify(action: string): string {
+  const words = action.replace(/[._]/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Maps one activity row to a bell item. Titles stay generic; `summary` carries the detail. */
+export function activityNotification(entry: ActivityEntry, role: UserRole): SchoolNotification {
+  const category = categoryOf(entry.action);
+  return {
+    id: `act-${entry.id}`,
+    category,
+    icon: CATEGORY_ICONS[category] ?? "bell",
+    title: ACTION_TITLES[entry.action] ?? prettify(entry.action),
+    detail: entry.summary,
+    nav: navFor(entry.action, role),
+    at: entry.createdAt,
+    targetKey: `${entry.targetType}:${entry.targetId}`,
+  };
+}
+
+/** Derived ids that mirror a specific record, so activity rows for the same record do not repeat. */
+const DERIVED_TARGETS: [prefix: string, targetType: string][] = [
+  ["reviewed-", "request"],
+  ["req-", "request"],
+  ["next-", "lesson"],
+  ["booked-", "lesson"],
+  ["feedback-", "lesson"],
+  ["rate-", "lesson"],
+  ["cancelled-", "lesson"],
+  ["rating-", "lesson"],
+  ["hw-reviewed-", "assignment"],
+  ["hw-", "assignment"],
+  ["credits-", "user"],
+];
+
+function derivedTargetKey(id: string): string | undefined {
+  for (const [prefix, targetType] of DERIVED_TARGETS) {
+    if (id.startsWith(prefix)) return `${targetType}:${id.slice(prefix.length)}`;
+  }
+  return undefined;
+}
+
+/**
+ * API mode: merge the activity feed with the role derivation. The derived item wins when both
+ * describe the same record (it carries the richer copy); muted categories hide both sources.
+ */
+export function mergeNotifications(
+  derived: SchoolNotification[],
+  feed: SchoolNotification[],
+  muted: NotificationCategory[] = [],
+): SchoolNotification[] {
+  const covered = new Set(derived.map((item) => item.targetKey ?? derivedTargetKey(item.id)).filter(Boolean));
+  const merged = [...derived];
+
+  for (const item of feed) {
+    if (item.targetKey && covered.has(item.targetKey)) continue;
+    merged.push(item);
+  }
+
+  return merged.filter((item) => !muted.includes(item.category)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30);
 }

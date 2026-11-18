@@ -10,4 +10,4 @@ export { createId, recordActivity } from "./repositories";
 export { createLocalStorageAdapter, createMemoryAdapter, type StorageAdapter } from "./adapter";
 export { SEED_IDS } from "./seed";
 export { nameOf, lessonMaterialView, toTeacherLessonView, performanceForTeacher, attachmentView, teacherScheduleView, toStudentLessonView, studentLessonsView, creditTransactionsView, teamWeekView, weekStartFor, openSlotsForTeacher, performanceRules, toStudentAssignmentView, toTeacherHomeworkView, type TeamWeekDay, type TeamWeekItem } from "./views";
-export { notificationsForUser, type SchoolNotification, type NotificationCategory } from "./notifications";
+export { activityNotification, mergeNotifications, notificationsForUser, type SchoolNotification, type NotificationCategory } from "./notifications";

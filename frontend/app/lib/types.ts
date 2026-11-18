@@ -150,9 +150,11 @@ export type TeacherAttendance = "attended" | "no-show";
 export type TeacherLessonCancellationStatus = "pending" | "approved" | "rejected";
 
 export type TeacherLessonAttachment = {
+  /** API attachment id; present in API mode, where `dataUrl` is omitted. */
+  id?: string;
   name: string;
   type: string;
-  dataUrl: string;
+  dataUrl?: string;
 };
 
 export type TeacherLessonRatingSource = "student" | "parent";

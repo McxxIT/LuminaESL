@@ -7,7 +7,7 @@ import StudentModal from "../student/StudentModal";
 import type { AddTeacherLessonInput, CancelLessonRequestInput, CompleteLessonInput } from "./useTeacherWorkspace";
 import { teacherFocusOptions } from "../../lib/data";
 import type { ServiceCall } from "../../lib/school/services";
-import { readFileAsync } from "../../lib/school/files";
+import { downloadAttachmentFile } from "../../lib/school/attachment-download";
 import { buildDaySlots, canJoinLesson, LESSON_SLOT_MINUTES, slotStartDate } from "../../lib/scheduling";
 import { ON_THE_SPOT_CANCELLATION_POINTS } from "../../lib/teacherPerformance";
 import { useSchool } from "../../lib/hooks/useSchool";
@@ -260,14 +260,17 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
     onNotice(completeForm.attendance === "attended" ? `${completeTarget.title} marked complete.` : `${completeTarget.title} marked as a no-show.`);
   }
 
-  function downloadMaterial(lesson: TeacherLesson, material: TeacherLessonMaterial) {
+  async function downloadMaterial(lesson: TeacherLesson, material: TeacherLessonMaterial) {
     if (material.attachment) {
-      const link = document.createElement("a");
-      link.href = material.attachment.dataUrl;
-      link.download = material.attachment.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      try {
+        if (!(await downloadAttachmentFile(material.attachment))) {
+          onNotice(`${material.attachment.name} is not available on this device yet.`);
+          return;
+        }
+      } catch {
+        onNotice(`Could not download ${material.attachment.name}. Try again.`);
+        return;
+      }
     } else {
       downloadTextFile(material.fileName, lessonMaterialText(lesson, material));
     }
@@ -275,18 +278,12 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
   }
 
   async function downloadPlanFile(file: NonNullable<TeacherLessonMaterial["files"]>[number]) {
-    const dataUrl = await readFileAsync(file.storageKey);
-    if (!dataUrl) {
-      onNotice(`${file.name} is not available on this device yet.`);
-      return;
+    try {
+      if (await downloadAttachmentFile(file)) onNotice(`Downloaded ${file.name}.`);
+      else onNotice(`${file.name} is not available on this device yet.`);
+    } catch {
+      onNotice(`Could not download ${file.name}. Try again.`);
     }
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = file.name;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    onNotice(`Downloaded ${file.name}.`);
   }
 
   function joinLesson(lesson: TeacherLesson) {
@@ -300,6 +297,18 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
 
   function attachmentPreview(attachment: TeacherLessonAttachment) {
     const isImage = attachment.type.startsWith("image/");
+    if (!attachment.dataUrl) {
+      return <div className="lesson-detail-section">
+        <span className="eyebrow">ATTACHMENT</span>
+        <button type="button" className="icon-text-button" onClick={async () => {
+          try {
+            if (!(await downloadAttachmentFile(attachment))) onNotice(`${attachment.name} is not available on this device yet.`);
+          } catch {
+            onNotice(`Could not download ${attachment.name}. Try again.`);
+          }
+        }}><Icon name="file" size={14} /> {attachment.name}</button>
+      </div>;
+    }
     return <div className="lesson-detail-section">
       <span className="eyebrow">ATTACHMENT</span>
       {isImage
@@ -458,7 +467,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
         <label className="full-field">Comment<textarea rows={3} value={cancelComment} onChange={(event) => setCancelComment(event.target.value)} placeholder="Explain what happened and why this lesson cannot go ahead. At least 10 characters." required minLength={10} autoFocus /></label>
         <label className="full-field">Supporting attachment (image or PDF)<input type="file" accept="image/*,application/pdf" onChange={(event) => handleCancelAttachment(event.target.files?.[0])} /></label>
         {cancelAttachment && <div className="booking-summary full-field">
-          {cancelAttachment.type.startsWith("image/")
+          {cancelAttachment.dataUrl && cancelAttachment.type.startsWith("image/")
             ? <Image src={cancelAttachment.dataUrl} alt={cancelAttachment.name} width={40} height={40} unoptimized style={{ objectFit: "cover", borderRadius: 6 }} />
             : <Icon name="file" size={16} />}
           <span>{cancelAttachment.name}</span>

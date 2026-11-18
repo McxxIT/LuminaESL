@@ -2,6 +2,7 @@ import { buildDaySlots, isSlotInPast } from "../scheduling";
 import { initials, parseISODate, toISODate } from "../student";
 import { computeTeacherPerformance, type PerformanceRules, type TeacherPerformance } from "../teacherPerformance";
 import type { CreditTransaction, StudentAssignment, StudentLesson, TeacherHomework, TeacherLesson, TeacherLessonMaterial, TeacherSlotClosure, TeacherSlotOpening } from "../types";
+import { isApiDataMode } from "../auth/mode";
 import { readFile } from "./files";
 import { get, list, query } from "./repositories";
 import { lessonsForStudent, lessonsForTeacher, plansForCourse, ratingsForLesson } from "./selectors";
@@ -95,11 +96,12 @@ export function performanceRules(data: SchoolData): PerformanceRules {
   return { onTheSpotHours: data.settings.onTheSpotCancellationHours, windowDays: data.settings.performanceWindowDays };
 }
 
-/** File attached to a request, with its bytes loaded from the file store. */
+/** File attached to a request. Bytes load on demand (`dataUrl`) in demo mode or by id in API mode. */
 export function attachmentView(data: SchoolData, attachmentId: string | undefined) {
   const meta = get(data, "attachments", attachmentId);
-  const dataUrl = readFile(meta?.storageKey);
-  return meta && dataUrl ? { name: meta.name, type: meta.type, dataUrl } : undefined;
+  if (!meta) return undefined;
+  const dataUrl = isApiDataMode() ? undefined : readFile(meta.storageKey);
+  return dataUrl ? { id: meta.id, name: meta.name, type: meta.type, dataUrl } : { id: meta.id, name: meta.name, type: meta.type };
 }
 
 /** A teacher's slot rules in the shape `buildDaySlots` and the Booking slots page use. */

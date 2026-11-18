@@ -20,7 +20,7 @@ import {
   type SchoolData,
   type SchoolUser,
 } from "../../lib/school";
-import { readFileAsync } from "../../lib/school/files";
+import { downloadAttachmentFile } from "../../lib/school/attachment-download";
 import {
   addUnit,
   canEditCourse,
@@ -80,14 +80,11 @@ type Dialog =
   | null;
 
 async function downloadFile(file: AttachmentMeta, onNotice: (message: string) => void) {
-  const dataUrl = await readFileAsync(file.storageKey);
-  if (!dataUrl) return onNotice(`${file.name} is not available in this browser.`);
-  const link = document.createElement("a");
-  link.href = dataUrl;
-  link.download = file.name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  try {
+    if (!(await downloadAttachmentFile(file))) onNotice(`${file.name} is not available in this browser.`);
+  } catch {
+    onNotice(`Could not download ${file.name}. Try again.`);
+  }
 }
 
 function UnitNameModal({ initial, onSubmit, onClose }: { initial: string; onSubmit: (title: string) => ServiceCall<unknown>; onClose: () => void }) {
