@@ -36,3 +36,8 @@ yarn-error.log*
 # uploads
 backend/uploads/
 .vibecode-backup*/
+
+# e2e artifacts (Playwright)
+test-results/
+playwright-report/
+blob-report/
