@@ -1,6 +1,6 @@
 ---
 name: context:all-tests
-description: "Test and verification guide: backend vitest, per-domain API smoke, gates, and known gaps"
+description: "Test and verification guide: backend vitest, browser parity suite (`npm run e2e`), per-domain API smoke, gates, and known gaps"
 keywords: tests, testing, vitest, smoke, verification, gates, typecheck, lint, contract test, browser check, debugging failures
 related: [context:all-context, context:all-auth]
 metadata:
@@ -14,7 +14,11 @@ Last updated: 2026-11-18
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** Only the backend has automated tests (vitest, 17 tests, 4 files, no DB needed). `npm run smoke` is a separate hybrid per-domain API smoke. The frontend has none: verify it with typecheck + lint + build + manual browser check. Authenticated business rules (booking, refunds, approvals) are verified manually against seeded local Postgres.
+**BLUF:** The backend has automated tests (vitest, 17 tests, 4 files, no DB needed). The frontend has a
+committed browser parity suite (`@playwright/test`, 10 tests: 9 API mode + 1 demo regression) run by
+`npm run e2e`. `npm run smoke` is a separate hybrid per-domain API smoke. There is no frontend
+unit/component runner and no CI; authenticated business rules outside the parity suite are verified by
+`npm run smoke` or by hand against seeded local Postgres.
 
 Do not load the whole `process/context/tests/` folder by default. Start here, then drill down.
 
@@ -176,8 +180,3 @@ exit 0 both times, no leftover node processes or bound ports afterwards. Same da
 every test in the file with an actionable message and repaired nothing; `npm run test --workspace
 @lumina/backend`: 4 files, 17 tests passed; `npm run smoke`: 13/13 domains, 343 checks, exit 0 (plus a
 deliberate red run that exited 1).
-
----
-
-**Status:** DONE
-**Summary:** Populated from study findings; test run confirmed.

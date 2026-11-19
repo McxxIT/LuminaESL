@@ -34,8 +34,20 @@ Use this folder for durable, repo-specific operating instructions that must stay
   Authoritative end-to-end system behavior reference: every phase, every required skill (with
   REQUIRED vs CONDITIONAL labels), both test loops, /goal block format, phase program inner loop,
   infrastructure gaps (D1/H4/G1/I2), and before/after hardening table. Split into numbered files
-  01-overview … 12-reference. The legacy single-file monolith is archived (read-only) at
-  `archive/vc-system-behavior-reference_ARCHIVED_09-06-26.md`.
+  01-overview … 12-reference; the legacy single-file monolith is not kept in this repo.
+  File map (every file stays reachable from here):
+  - `vc-system-behavior/01-overview.md` — system map, reading order, hardening summary
+  - `vc-system-behavior/02-skill-tiers.md` — skill tier ownership (actor / contract / helper)
+  - `vc-system-behavior/03-session-start.md` — session bootstrap and context discovery
+  - `vc-system-behavior/04-research.md` — RESEARCH phase reference
+  - `vc-system-behavior/05-spec.md` — SPEC phase reference
+  - `vc-system-behavior/06-innovate.md` — INNOVATE phase reference
+  - `vc-system-behavior/07-plan.md` — PLAN phase contract
+  - `vc-system-behavior/08-validate.md` — VALIDATE (PVL) contract
+  - `vc-system-behavior/09-execute.md` — EXECUTE phase contract
+  - `vc-system-behavior/10-update-process.md` — UPDATE PROCESS contract, incl. the Tier-1 audit gates
+  - `vc-system-behavior/11-phase-programs.md` — multi-phase program rules
+  - `vc-system-behavior/12-reference.md` — signal definitions, validator registry, removed skills
 - `orchestration.md`
   Delegation rules, subagent status protocol, context isolation, feature-scope routing, intent clarification rules, validate gate and skip conditions, BLOCKED escalation path, two-tier fan-out escalation, and research-first rules for service-shaped work.
 - `implementation-standards.md`

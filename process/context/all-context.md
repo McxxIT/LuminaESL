@@ -217,7 +217,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 17 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`, 10 tests in both data modes) |
+| Tests | vitest 3 (backend, `backend/tests`, 17 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 9 API-mode tests + 1 demo regression, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -270,7 +270,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`.
 - The bell is the activity feed merged with the role derivation (deduped by target, cap 30). Read ids and muted categories are per user in `notification_state` via `GET`/`PATCH /notifications/state`; demo mode still uses localStorage. Notification ids are stored server-side, so keep them short.
 - Demo mode is the DEFAULT (`isDemoMode()` true unless `NEXT_PUBLIC_DEMO_MODE === "false"`). `LuminaApp.tsx` seeds `studentCredits` local state at 24 (matches the demo seed).
-- The working tree holds large uncommitted cutover work; check `git status` before assuming a clean base.
+- Cutover work lands in committed slices, one per step; check `git status` before assuming a clean base.
 
 ## Environment and Configuration
 
@@ -301,7 +301,7 @@ These stay in place and remain the source of truth for cutover status.
 |---|---|
 | `frontend/ADMIN_PLAN.md` | Admin/manager product plan; all phases done |
 | `frontend/CUTOVER_PLAN.md` | File-level plan for local-store to API cutover |
-| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, and C done; Step D (parity/removal) next |
+| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, and C done; Step D1 (parity suite) done; D2 (one-time import) and D3 (fallback removal) next |
 | `frontend/PROGRESS.md` | App-wide state and verification commands |
 
 ## Workflow
@@ -335,10 +335,10 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 ## Open Questions / Outstanding Work
 
-- Cutover Step D (parity suite, one-time import, remove the browser-store fallback) not started.
-- No committed browser/e2e suite: Step C was verified with ad-hoc Playwright runs; Step D adds the parity suite.
+- Cutover D1 (parity suite) is done: `npm run e2e` is the browser gate in both data modes. D2 (one-time import) and D3 (remove the browser-store fallback) are not started.
+- No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
 - Booking concurrency/precision risks above are unresolved.
-- Curriculum Library not built; no frontend tests; no CI.
+- Curriculum Library not built; no frontend unit or component tests; no CI.
 
 ## Scan Metadata
 

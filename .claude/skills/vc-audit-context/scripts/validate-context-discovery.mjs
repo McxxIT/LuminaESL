@@ -34,7 +34,8 @@ function walk(dir, predicate, out = []) {
   const abs = path.join(root, dir);
   if (!fs.existsSync(abs)) return out;
   for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-    const rel = path.join(dir, entry.name);
+    // Root-relative paths always use "/" so router/group-entrypoint matching works on Windows too.
+    const rel = path.posix.join(dir, entry.name);
     if (entry.isDirectory()) walk(rel, predicate, out);
     else if (!predicate || predicate(rel)) out.push(rel);
   }
@@ -88,7 +89,7 @@ const legacyEntrypoints = [
 ];
 
 function parseFrontmatter(file) {
-  const text = read(file);
+  const text = read(file).replace(/\r\n/g, "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   return Object.fromEntries(
@@ -191,6 +192,8 @@ if (!bareKitMode) {
   // --- frontmatter routing contract: keyword coverage + related-link integrity ---
   // Build a slug registry (context:{slug}) across all context docs first.
   const contextDocNames = new Set();
+  const routerName = parseFrontmatter(router).name;
+  if (routerName) contextDocNames.add(routerName);
   for (const doc of contextDocs) {
     if (doc === router) continue;
     const name = parseFrontmatter(doc).name;

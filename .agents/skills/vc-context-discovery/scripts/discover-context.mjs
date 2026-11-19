@@ -47,7 +47,8 @@ function walk(dir, out = []) {
   const abs = path.join(root, dir);
   if (!fs.existsSync(abs)) return out; // never throw on missing root
   for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-    const rel = path.join(dir, entry.name);
+    // Root-relative paths always use "/" so routing/grouping regexes match on Windows too.
+    const rel = path.posix.join(dir, entry.name);
     if (entry.isDirectory()) walk(rel, out);
     else out.push(rel);
   }
@@ -165,7 +166,7 @@ function contextDocsWithFm() {
 function groupOf(relPath) {
   // process/context/{group}/all-{group}.md -> {group}; root all-context.md -> null
   const rest = relPath.replace(/^process\/context\//, "");
-  const parts = rest.split(path.sep);
+  const parts = rest.split("/");
   return parts.length > 1 ? parts[0] : null;
 }
 
@@ -220,7 +221,8 @@ if (emitRouting || checkRouting) {
   }
   const fresh = buildRoutingBlock();
   if (checkRouting) {
-    if (existing.trim() !== fresh.trim()) {
+    const normalize = (s) => s.replace(/\r\n/g, "\n").trim();
+    if (normalize(existing) !== normalize(fresh)) {
       console.error(`${ROUTER} routing block is STALE — run discover-context.mjs --emit-routing to rebuild.`);
       process.exit(1);
     }
@@ -345,7 +347,7 @@ if (feature) {
   const groups = new Map();
   for (const d of featureFiles) {
     const rest = d.path.startsWith(base) ? d.path.slice(base.length) : d.path;
-    const sub = rest.split(path.sep)[0] || ".";
+    const sub = rest.split("/")[0] || ".";
     if (!groups.has(sub)) groups.set(sub, []);
     groups.get(sub).push(d);
   }

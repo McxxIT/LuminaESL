@@ -22,4 +22,4 @@ BLUF: Styling is Tailwind 4.3 (`@import "tailwindcss"` via `@tailwindcss/turbopa
 
 - `frontend/AGENTS.md` (auto-managed by `next dev`; do not edit or remove) warns that Next 16 has breaking changes versus training data — read `frontend/node_modules/next/dist/docs/` before writing Next code (routing, caching, params as promises, etc.).
 - Tailwind 4 uses CSS-first config (no `tailwind.config.js`); put theme additions in `globals.css`.
-- Lint: `frontend/eslint.config.mjs` (next core-web-vitals + typescript). Verify with `npm run typecheck`, `npm run lint`, `npm run build`, and a manual browser check — there are no frontend tests.
+- Lint: `frontend/eslint.config.mjs` (next core-web-vitals + typescript). Verify with `npm run typecheck`, `npm run lint`, and the browser parity suite (`npm run e2e`, both data modes); there is no unit/component runner.

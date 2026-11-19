@@ -42,4 +42,5 @@ This group covers: app shell and role components, the `lib/school` data layer (s
 ## Canonical Notes
 
 - use `process/context/uxui/all-uxui.md` as the entrypoint
-- Frontend has no automated tests; verify with typecheck, lint, build, and a manual browser check in demo and API mode.
+- Frontend has a browser parity suite (`npm run e2e`) but no unit/component runner; verify component work
+  with typecheck, lint, and the suite, then a manual browser check in demo and API mode.

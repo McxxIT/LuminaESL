@@ -37,4 +37,4 @@ Other frontend env: `NEXT_PUBLIC_API_URL`. Env names only — see `frontend/.env
 
 admin@ (Jamie Smith), manager@ (Priya Raman), manager2@ (Marco Bianchi), teacher@ (Alex Johnson), student@ (Mia Chen). Demo UI accepts any non-empty password; API mode password `Password123!` (seeded by `npm run db:seed`). "Reset demo workspace" in Settings only reseeds the browser store.
 
-Progress of the cutover: `frontend/CUTOVER_PROGRESS.md` (Step A, B0-B2 done; B3 domain slices next).
+Progress of the cutover: `frontend/CUTOVER_PROGRESS.md` (Steps A-C and D1 done; D2 one-time import and D3 fallback removal next).

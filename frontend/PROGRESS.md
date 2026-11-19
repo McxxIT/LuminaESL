@@ -361,7 +361,7 @@ and one dataset to test.
 ### Joint integration and cutover
 
 11. **Align accounts and seeds.** ✅ (**Step A**, done November 16, 2026.) One demo account set (`.school`) now exists in both the API seed and the browser seed, with matching names, profile links, and documented logins.
-12. **End-to-end parity suite.** Run the existing Playwright audit flow against the API-backed build, and add login, booking, cancellation/refund, homework, upload, and notification cases to CI before enabling the API path by default.
+12. **End-to-end parity suite.** ✅ (**Step D1**, done November 18, 2026.) `npm run e2e` runs login, booking, cancellation/refund, homework, upload, and notification in API mode plus a demo-mode regression. CI wiring is deferred because the repo has no pipeline: `process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`.
 13. **Migrate and remove duplicates.** Provide a one-time import from `lumina-school:v1`/IndexedDB, then delete duplicated seed data and the browser-store fallback once the API path is the default. Keep a documented rollback flag for one release.
 
 ### Product decisions carried over
@@ -378,9 +378,12 @@ and open decisions live in `CUTOVER_PROGRESS.md`.
 - **Step A - Align accounts and seeds:** done November 16, 2026. One `.school`
   account set exists in the API seed and the browser seed; `npm run db:reset` is
   the guarded local reset.
-- **Step B - Data adapter cutover:** in progress. See `CUTOVER_PROGRESS.md`.
-- **Steps C and D:** uploads/notifications, then the parity suite and removal of
-  the browser-store fallback.
+- **Step B - Data adapter cutover:** done, and Step C - uploads and
+  notifications - is done too. See `CUTOVER_PROGRESS.md`.
+- **Step D1 - Parity suite:** done November 18, 2026. `npm run e2e` runs 9
+  API-mode specs plus 1 demo-mode regression.
+- **Steps D2 and D3:** one-time import from `lumina-school:v1`/IndexedDB, then
+  removal of the browser-store fallback. Not started.
 
 Keep this summary and the two files in sync when a step lands; do not re-grow the
 detail here.

@@ -27,7 +27,8 @@ function walk(dir, predicate, out = []) {
   const abs = path.join(root, dir);
   if (!fs.existsSync(abs)) return out;
   for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-    const rel = path.join(dir, entry.name);
+    // Root-relative paths always use "/" so /active/ and /completed/ filters match on Windows too.
+    const rel = path.posix.join(dir, entry.name);
     if (entry.isDirectory()) walk(rel, predicate, out);
     else if (!predicate || predicate(rel)) out.push(rel);
   }
@@ -46,10 +47,13 @@ for (const dir of ["process/general-plans/active", "process/general-plans/comple
   if (!fs.existsSync(path.join(root, dir))) fail(`${dir} missing`);
 }
 
+const PLAN_NAME = /(^|[_-])plan([_-]|\.|$)/i;
 const allPlans = [
   ...walk("process/general-plans", (rel) => rel.endsWith(".md")),
   ...walk("process/features", (rel) => rel.endsWith(".md")),
-].sort();
+]
+  .filter((file) => PLAN_NAME.test(path.posix.basename(file)))
+  .sort();
 
 const activePlans = allPlans.filter((file) => file.includes("/active/"));
 const completedPlans = allPlans.filter((file) => file.includes("/completed/"));

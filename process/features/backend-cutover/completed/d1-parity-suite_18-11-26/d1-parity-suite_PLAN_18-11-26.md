@@ -3,7 +3,7 @@ name: plan:d1-parity-suite
 description: "COMPLEX plan: in-repo Playwright parity suite for the six umbrella flows, API mode plus demo regression, runnable with one command"
 date: 18-11-26
 feature: backend-cutover
-status: COMPLETE (EXECUTE done 18-11-26; awaiting UPDATE PROCESS)
+status: COMPLETE (EXECUTE + UPDATE PROCESS done 18-11-26; archived)
 ---
 
 # D1 — Parity Suite
@@ -199,12 +199,13 @@ P1 must be green before P2 starts (harness and helpers are shared). P2 before P3
 
 ## Resume and Execution Handoff
 
-Status: EXECUTE complete 18-11-26. Suite lives in `frontend/e2e/`; report in
-`d1-parity-suite_REPORT_18-11-26.md`. Nothing is archived yet.
+Status: COMPLETE — EXECUTE and UPDATE PROCESS 18-11-26. Suite lives in `frontend/e2e/`; the
+EXECUTE report and UPDATE PROCESS report are in this folder. Archived under
+`process/features/backend-cutover/completed/`.
 
 - Re-run: `npm run e2e` (needs local Postgres, `backend/.env`, a seeded DB, ports 3000/3100/4000 free).
 - Commands that must stay green: `npm run typecheck`; `npm run lint`; `npm run test --workspace @lumina/backend`; `git diff --check`; `npm run e2e`.
 - Do not edit `.env.local` or `backend/.env`; per-mode env is injected by `e2e/serve.mjs`.
 - `process/context/**` was updated in the same session (all-context, tests) because the plan's V4 and the
   user's request required it; UPDATE PROCESS should verify, not redo.
-- Next Step: UPDATE PROCESS (archive this folder, refresh context, close the cutover board row), then D2/D3 plans.
+- Next Step: D2 (one-time import) and D3 (browser-store fallback removal) plans; this folder is archived.

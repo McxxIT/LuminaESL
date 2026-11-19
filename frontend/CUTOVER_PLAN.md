@@ -160,12 +160,14 @@ and student. Add a Playwright case for the user-visible flow before moving on.
 
 ## Step D - Parity suite, migration, removal
 
-- [ ] Run the existing Playwright audit flow against the API-backed build; add
+- [x] Run the existing Playwright audit flow against the API-backed build; add
   login, booking, cancellation/refund, homework, upload, and notification cases
-  to CI.
-- [ ] Provide a one-time import from `lumina-school:v1` and IndexedDB into
+  to CI. **D1 done November 18, 2026:** `npm run e2e` runs all six flows in API
+  mode plus a demo regression. CI wiring is deferred because the repo has no
+  pipeline: `process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`.
+- [ ] D2 - Provide a one-time import from `lumina-school:v1` and IndexedDB into
   PostgreSQL.
-- [ ] Delete duplicated seed data and the browser-store fallback from the
+- [ ] D3 - Delete duplicated seed data and the browser-store fallback from the
   production path; keep a documented rollback flag
   (`NEXT_PUBLIC_DATA_SOURCE=local`) for one release.
 

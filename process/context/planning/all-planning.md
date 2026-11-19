@@ -38,7 +38,7 @@ Each task folder holds `{slug}_PLAN_{dd-mm-yy}.md` plus colocated reports. Flat 
 |---|---|---|
 | `frontend/ADMIN_PLAN.md` | Admin/manager product plan | All phases done |
 | `frontend/CUTOVER_PLAN.md` | File-level plan for cutting the frontend over to the real API | Active reference |
-| `frontend/CUTOVER_PROGRESS.md` | Live cutover board and dated verification log | Step A, B0.1 to B0.4, B1, B2, B3 (domain slices + `npm run smoke`) done; Step C next; Step C (uploads, notifications) and Step D (parity, removal) not started |
+| `frontend/CUTOVER_PROGRESS.md` | Live cutover board and dated verification log | Steps A, B0.1-B0.4, B1, B2, B3 (domain slices + `npm run smoke`), C (uploads, notifications) and D1 (parity suite) done; D2 (one-time import) and D3 (fallback removal) next |
 | `frontend/PROGRESS.md` | App-wide state and verification commands | Current |
 
 ## Rules
@@ -60,8 +60,3 @@ Each task folder holds `{slug}_PLAN_{dd-mm-yy}.md` plus colocated reports. Flat 
 - a cutover step completes or is re-scoped
 - feature folders are added or renamed
 - example plan shapes move or go stale
-
----
-
-**Status:** DONE
-**Summary:** Populated from study findings and user answers.

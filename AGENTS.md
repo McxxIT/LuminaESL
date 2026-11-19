@@ -8,7 +8,9 @@ Keep this file aligned with [CLAUDE.md](CLAUDE.md)
 as much as possible while adapting Claude-native concepts to Codex-native constructs.
 
 Codex discovers project-local skills from `.agents/skills/`. In this repo, `.agents/skills/`
-is a symlink to `.claude/skills/` so Codex and Claude share the same underlying skill tree:
+holds its own tracked copy of the `.claude/skills/` tree, so Codex and Claude see the same
+skill catalog (the two trees are currently byte-identical; a symlink is the intended shape but
+git checks them out as two directories on Windows, so **edit both when you change a skill**):
 
 - `.claude/skills/` is the canonical source for shared skills and command-style workflows
 - `.claude/agents/` remains the canonical source for specialist agents and RIPER-5 mode agents
@@ -417,8 +419,10 @@ Cross-phase utilities (skills, not agents):
 Do not assume `.claude/skills/` is scanned directly by Codex. For Codex compatibility, make
 sure the relevant capability is exposed under
 [`.agents/skills/`](.agents/skills).
-In this repo, `.agents/skills/` is already a symlink to the canonical `.claude/skills/` tree,
-so add or update real skill folders there rather than copying them into `.codex/`.
+In this repo, `.agents/skills/` is a tracked copy of the canonical `.claude/skills/` tree, so
+add or update real skill folders in `.claude/skills/` and mirror the same edit there rather than
+copying anything into `.codex/`. `node .claude/skills/vc-audit-vc/scripts/validate-skills.mjs`
+reports the copy as a deviation from the symlink contract; that is expected here.
 
 ## Routing Protocol
 

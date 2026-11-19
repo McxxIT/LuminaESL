@@ -7,7 +7,7 @@ feature: backend-cutover
 
 # Parity suite in CI
 
-status: deferred
+status: BLOCKED
 item: D1-CI (from d1-parity-suite_PLAN_18-11-26, umbrella item "add ... to CI")
 reason: The repo has no CI provider, no pipeline config, and no disposable test database. `npm run e2e` needs a migrated, seeded Postgres plus three free ports, so it cannot be bolted onto an existing pipeline because none exists.
 

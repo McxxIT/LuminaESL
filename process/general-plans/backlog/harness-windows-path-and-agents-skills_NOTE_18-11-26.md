@@ -1,54 +1,85 @@
 ---
 name: note:harness-windows-path-and-agents-skills
-description: "Backlog: three audit validators mis-handle Windows path separators, and .agents/skills is a committed duplicate tree instead of the documented symlink"
+description: "Backlog: Windows path bugs in kit validators (locally fixed 18-11-26) plus the .agents/skills duplicate tree and the README guide-sync mismatch"
 date: 18-11-26
 ---
 
 # Harness audits on Windows
 
-status: open
-item: found during Step C UPDATE PROCESS (2026-11-18), not caused by Step C
-reason: All three findings live in kit-managed code/docs (`.claude/skills/**`, `AGENTS.md`), so a local
-edit would diverge from the remote kit; they should be fixed upstream and pulled with `vc-update`.
+status: done-with-gap
+item: found during Step C UPDATE PROCESS (2026-11-18); Windows path fixes applied during D1 UPDATE PROCESS (2026-11-18)
+reason: The path bugs were in kit-managed scripts, so the local fix diverges from the remote kit and should be upstreamed. The `.agents/skills` shape and the README catalog assumption are still open.
 
 ## Findings
 
-1. **Windows path separators (3 validators).** Kit scripts build paths with `path.join`, which yields
-   `process\context\...` on Windows, while the checks compare against forward-slash literals or split
-   on `/`.
-   - `vc-audit-context/scripts/validate-context-discovery.mjs` (`walk` + `replace(/^process\/context\//)`)
-     reports every context doc as "not indexed by all-context.md or its group entrypoint" (16/16 docs).
-   - `vc-context-discovery/scripts/discover-context.mjs` (`groupOf` + `/(^|\/)all-[^/]+\.md$/`)
-     finds 0 group entrypoints, so `--emit-routing` writes an empty table and `--check-routing`
-     always reports the routing block STALE.
-   - `vc-audit-plans/scripts/validate-plan-inventory.mjs` (`file.includes("/active/")`) always reports
-     `activePlans: 0, completedPlans: 0`, so it passes vacuously instead of scanning plans.
-   - Fix shape: normalize to POSIX inside `walk` (`rel.split(path.sep).join("/")`) and in `groupOf`,
-     or use `path.posix` comparisons.
-2. **`.agents/skills` is not a symlink.** `AGENTS.md` describes it as a symlink to `.claude/skills`, and
-   `validate-context-discovery.mjs` asserts `realpath(.agents/skills) === realpath(.claude/skills)`.
-   In this checkout git tracks `.agents/skills` as regular files (mode `100644`, 339 files) and
-   `core.symlinks` is `false`. The two trees were byte-identical on 2026-11-18, so nothing is broken
-   today, but every `.claude/skills` edit must be mirrored by hand.
-   - Fix options: enable symlinks and replace the duplicate tree with a real link (needs a
-     Windows-capable checkout path), or keep the duplicate tree and update `AGENTS.md` plus the
-     validator's parity assertion so the documented shape matches reality.
-3. **Root router heading must follow frontmatter immediately.** `vc-generate-context/scripts/validate-all-context.mjs`
-   strips frontmatter with `/^---\n[\s\S]*?\n---\n/` and then requires `^#\s`, so a blank line between
-   `---` and the `#` heading fails "missing top-level heading". `process/context/all-context.md` now has
-   frontmatter with no blank line before its heading (other context docs keep the blank line; only the
-   root file is validated).
+1. **Windows path/line-ending bugs in kit scripts (6 files) — FIXED LOCALLY 2026-11-18.** Kit scripts
+   built root-relative paths with `path.join`, which yields `process\context\...` on Windows, while
+   the checks compare against forward-slash literals, split on `/`, or match `/active/`; two more
+   scripts assumed LF line endings or scanned folder guides as documents.
+   - `vc-audit-context/scripts/validate-context-discovery.mjs` — `walk` + frontmatter parsing;
+     previously reported every nested context doc as "not indexed" and flagged the routing block
+     stale. Also skipped the root router when building the `related` slug registry, so
+     `related: [context:all-context]` always looked dangling, and its frontmatter parser only
+     accepted LF line endings.
+   - `vc-context-discovery/scripts/discover-context.mjs` — `walk`, `groupOf`, and the `--feature`
+     subfolder split; previously found 0 group entrypoints, so `--emit-routing` wrote an empty
+     table that `--check-routing` then reported as stale.
+   - `vc-audit-plans/scripts/validate-plan-inventory.mjs` — `walk`; previously reported
+     `activePlans: 0, completedPlans: 0`, so it passed vacuously instead of scanning plans. Also
+     now filters to files whose basename contains `PLAN`, so `_GUIDE.md`/`REPORT`/`SPEC` files are
+     not scored as plans.
+   - `vc-audit-vc/scripts/validate-protocol-wiring.mjs` — `walk`; previously warned that every
+     agent's `process/development-protocols/*.md` reference "does not exist". With the path fixed it
+     exposed real drift: `all-development-protocols.md` did not index the 12
+     `vc-system-behavior/*.md` files (now it does, and it no longer cites a non-existent
+     `archive/` copy of the monolith).
+   - `vc-generate-context/scripts/validate-all-context.mjs` — frontmatter strip only accepted LF, so
+     a CRLF checkout made the root router look like it had no top-level heading.
+   - `vc-audit-plans/scripts/validate-backlog-notes.mjs` — scanned `_GUIDE.md` folder guides as
+     backlog notes and demanded `status`/`item`/`reason` fields from them.
+   - Fix shape applied: `path.posix.join` inside `walk`, `/` splits, CRLF-tolerant frontmatter and
+     routing comparison, router included in the `related` registry, `_`-prefixed guides skipped.
+     Mirrored to the `.agents/skills` copy of each file.
+   - Upstream: send these six patches to the kit repo with `vc-publish`, then pull with `vc-update`.
 
-## Verified state (2026-11-18)
+2. **`.agents/skills` is not a symlink — STILL OPEN.** `AGENTS.md` used to describe it as a symlink
+   to `.claude/skills`, and `validate-skills.mjs` asserts
+   `realpath(.agents/skills) === realpath(.claude/skills)`. In this checkout git tracks
+   `.agents/skills` as regular files (mode `100644`, 339 files, `core.symlinks` is `false`). The two
+   trees were byte-identical on 2026-11-18, so nothing is broken today, but every `.claude/skills`
+   edit must be mirrored by hand.
+   - Done: `AGENTS.md` now states the real shape and the mirroring rule.
+   - Remaining: `validate-skills.mjs` will keep reporting this until the tree becomes a real
+     symlink (needs a symlink-capable checkout) or the validator learns to accept a byte-identical
+     copy.
 
-- `validate-context-discovery.mjs`: warnings 0 (after backfilling `keywords` on `all-context.md`,
-  `tests/all-tests.md`, `planning/all-planning.md`); failures are exactly findings 1 and 2.
-- `discover-context.mjs --check-routing`: fails on Windows only; a POSIX-normalized replica of the
-  generator reproduces the on-disk block byte-for-byte (5 group entrypoints, correct descriptions).
-- `validate-plan-inventory.mjs`: exits 0; the real inventory is 0 active plans and 2 completed plans.
-- `validate-all-context.mjs` and `validate-protocol-discovery.mjs` (22 protocol docs): clean.
+3. **Root router heading must follow frontmatter immediately — FIXED LOCALLY 2026-11-18.**
+   `vc-generate-context/scripts/validate-all-context.mjs` now strips frontmatter with
+   `/^---\r?\n[\s\S]*?\r?\n---\r?\n/`, so a CRLF checkout no longer makes `all-context.md` look like
+   it is missing its heading. The "no blank line before the heading" convention is unchanged.
+
+4. **`validate-guide-sync.mjs` is not applicable here — STILL OPEN (documentation).** It expects a
+   skill catalog in the root `README.md`, but this repo's README is the product readme (requirements,
+   setup, scripts, API, demo accounts) and has no skill/agent section; harness docs live in
+   `AGENTS.md`/`CLAUDE.md`. The check reports 10+ skills "missing from README.md skill catalog"
+   because no catalog exists. Either add a catalog section or teach the validator that this repo
+   documents skills elsewhere.
+
+## Verified state (2026-11-18, D1 UPDATE PROCESS)
+
+- `validate-context-discovery.mjs`: 16 docs, 266 concrete refs, 0 warnings; only failure is
+  finding 2.
+- `discover-context.mjs --check-routing`: in sync (5 group entrypoints, POSIX paths).
+- `validate-plan-inventory.mjs`: real scan — 0 active plans, 3 completed plans, 0 samples, clean
+  under `--strict`.
+- `validate-protocol-wiring.mjs`: 22 protocols, 15 agents, 0 warnings, 0 failures.
+- `validate-all-context.mjs`: 0 failures, 0 warnings.
+- `validate-backlog-notes.mjs` (feature and general backlog): 0 failures.
+- `validate-guide-sync.mjs`: still red — finding 4.
+- `validate-skills.mjs`: still red — finding 2.
 
 ## Next step
 
-NEW PLAN REQUIRED only if the kit is to be fixed locally; otherwise upstream the `walk`/`groupOf`
-normalization and the `.agents/skills` decision to the remote kit repo (`vc-publish`), then `vc-update`.
+NEW PLAN REQUIRED only if the kit is to be fixed locally again; otherwise upstream the six patches
+with `vc-publish`, then decide `.agents/skills` (real symlink vs validated copy) and the README
+catalog question upstream so `vc-update` does not reintroduce the Windows failures.

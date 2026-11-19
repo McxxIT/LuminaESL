@@ -7,7 +7,7 @@ feature: backend-cutover
 
 # Attachment access scope
 
-status: open
+status: BLOCKED
 item: C-RISK-ATTACHMENT-SCOPE (from step-c-uploads-notifications_PLAN_18-11-26, risk section)
 reason: Download scoping needs per-record ownership rules that do not exist for lesson plans and request evidence yet.
 

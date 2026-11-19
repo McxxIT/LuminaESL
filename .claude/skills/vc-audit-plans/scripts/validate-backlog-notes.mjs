@@ -27,6 +27,7 @@ if (!target) {
     const noteFiles = fs
       .readdirSync(dir)
       .filter((f) => /\.md$/i.test(f) || /note/i.test(f))
+      .filter((f) => !f.startsWith("_"))
       .filter((f) => fs.statSync(path.join(dir, f)).isFile());
 
     for (const f of noteFiles) {

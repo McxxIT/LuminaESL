@@ -3,7 +3,7 @@ phase: d1-parity-suite-execute
 date: 2026-11-18
 status: COMPLETE
 feature: backend-cutover
-plan: process/features/backend-cutover/active/d1-parity-suite_18-11-26/d1-parity-suite_PLAN_18-11-26.md
+plan: process/features/backend-cutover/completed/d1-parity-suite_18-11-26/d1-parity-suite_PLAN_18-11-26.md
 ---
 
 # D1 - Parity Suite - EXECUTE Report
@@ -141,7 +141,159 @@ only real fix; that is the same gap the smoke suite has.
 
 ## Handoff
 
-- Plan: `process/features/backend-cutover/active/d1-parity-suite_18-11-26/d1-parity-suite_PLAN_18-11-26.md` (all boxes ticked).
+- Plan: `process/features/backend-cutover/completed/d1-parity-suite_18-11-26/d1-parity-suite_PLAN_18-11-26.md` (all boxes ticked).
 - Report: this file.
-- Next: UPDATE PROCESS (archive the task folder, re-run the context/plan audits, close the D1
-  board row), then plan D2 (one-time import) and D3 (fallback removal).
+- Archived: `process/features/backend-cutover/completed/d1-parity-suite_18-11-26/`.
+- Next: plan D2 (one-time import) and D3 (fallback removal).
+
+## UPDATE PROCESS (2026-11-18)
+
+TL;DR: D1 is archived and the cutover docs stop claiming the suite does not exist. The only code
+touched was kit tooling: six audit-script fixes (four Windows path bugs plus two CRLF/correctness
+bugs), which turned `validate-protocol-wiring` from 9 false warnings into a real check and exposed a
+missing 12-file protocol index (added). Nothing under `frontend/`, `backend/`, or `package.json`
+changed.
+
+### What Was Done
+
+- **Archived** the task folder with `git mv`:
+  `active/d1-parity-suite_18-11-26/` -> `completed/d1-parity-suite_18-11-26/` (folder name unchanged,
+  no `completed_` prefix). Plan frontmatter is now `COMPLETE (EXECUTE + UPDATE PROCESS done
+  18-11-26; archived)`; the plan's "Resume and Execution Handoff" and the report's frontmatter
+  `plan:` + Plan Link now point at `completed/`.
+- **Context refreshed (6 files):**
+  - `all-context.md` - Tests row (9 API + 1 demo, not "10 in both modes"), planning row (D1 done),
+    Open Questions (D1 done; D2/D3 open; no unit runner; no CI), dropped the stale "large
+    uncommitted cutover work" gotcha, regenerated the `GENERATED:routing` block.
+  - `tests/all-tests.md` - frontmatter description now names the parity suite (this is what the
+    generator emits), BLUF rewritten (the frontend is no longer test-less), stray generator footer
+    removed.
+  - `uxui/all-uxui.md`, `uxui/styling-tailwind4.md` - "no frontend tests" replaced with the parity
+    suite plus the real remaining gap (no unit/component runner).
+  - `planning/all-planning.md` - cutover row no longer contradicts itself ("Step C next ... Step C
+    not started" replaced with A-C + D1 done, D2/D3 next); footer removed.
+  - `auth/demo-vs-api-mode.md` - closing cutover-progress line updated.
+- **Backlog truth:** `e2e-ci-wiring_NOTE` `status: deferred` -> `BLOCKED`;
+  `attachment-access-scope_NOTE` `status: open` -> `BLOCKED` (both were invalid for
+  `validate-backlog-notes`). `frontend-test-runner_NOTE` rewritten: D1 closed the browser half;
+  service-level local-branch assertions and the uncommitted B3 memory-adapter probe are still
+  uncovered.
+- **Umbrella truth:** `frontend/CUTOVER_PLAN.md` Step D item 1 is ticked with the D1 date and the
+  deferred CI note; remaining bullets are labelled D2/D3. `frontend/PROGRESS.md` item 12 marked done
+  and its "Step B in progress / Steps C and D" summary now reads A-C + D1 done, D2/D3 next.
+- **Harness path fixes (approved item 9, plus two same-class discoveries):**
+  - `vc-context-discovery/scripts/discover-context.mjs` - `path.posix.join` in `walk`, `/` splits in
+    `groupOf` and the `--feature` grouping, CRLF-tolerant routing comparison.
+  - `vc-audit-context/scripts/validate-context-discovery.mjs` - same walk fix, CRLF-tolerant
+    frontmatter parser, root router included in the `related` slug registry.
+  - `vc-audit-plans/scripts/validate-plan-inventory.mjs` - same walk fix; also filters to
+    `PLAN`-named files so `_GUIDE.md`/`REPORT`/`SPEC` are not scored as plans.
+  - `vc-audit-vc/scripts/validate-protocol-wiring.mjs` - same walk fix, which exposed real drift:
+    `all-development-protocols.md` did not index the 12 `vc-system-behavior/*.md` files. Added the
+    12-file map and removed the reference to a non-existent `archive/` copy of the monolith.
+  - `vc-generate-context/scripts/validate-all-context.mjs` - CRLF-tolerant frontmatter strip (a
+    Windows checkout made the router look like it had no top-level heading).
+  - `vc-audit-plans/scripts/validate-backlog-notes.mjs` - skips `_GUIDE.md` folder guides, which are
+    not backlog notes.
+  - All six files mirrored byte-for-byte into `.agents/skills/` (the two trees are separate tracked
+    copies, not a symlink).
+- **`AGENTS.md`** now states the real `.agents/skills` shape (tracked copy, mirror edits by hand)
+  instead of claiming a symlink.
+- **Harness debt note**
+  `process/general-plans/backlog/harness-windows-path-and-agents-skills_NOTE_18-11-26.md` updated:
+  finding 1 (path bugs) marked fixed locally with an upstream `vc-publish` step; open items are the
+  duplicate skill tree and `validate-guide-sync` expecting a skill catalog in a product README.
+
+### What Was Skipped/Deferred
+
+- **CI wiring** for the parity suite - still deferred: `e2e-ci-wiring_NOTE_18-11-26.md`.
+- **D2 (one-time import) and D3 (fallback removal)** - not started; next plans.
+- **`validate-skills.mjs` failure** (`.agents/skills` is a duplicate tree) - deliberately not
+  restructured; converting it needs a symlink-capable checkout or a validator change. Recorded in
+  the debt note.
+- **`validate-guide-sync.mjs` failure** - not fixed; the repo README is a product readme with no skill
+  catalog, so the check is not applicable as written. Recorded, not papered over.
+- **Re-running `npm run e2e`** - deliberately not re-run: no `frontend/**`, `package.json`, or
+  backend file changed in this phase, so the C1/C2 evidence still stands.
+
+### Test Gate Outcomes
+
+| Gate | Command | Result |
+|---|---|---|
+| Plan inventory | `validate-plan-inventory.mjs --strict` | green - 0 active, 3 completed, 0 samples (was a vacuous 0/0 before the path fix) |
+| Backlog notes | `validate-backlog-notes.mjs process/features/backend-cutover/backlog` | green - 0 warnings, 0 failures |
+| Context discovery | `validate-context-discovery.mjs` | 16 docs / 266 refs, 0 warnings, 1 failure: `.agents/skills does not resolve to .claude/skills` (finding 2, accepted) |
+| Routing block | `discover-context.mjs --check-routing` | green - in sync, 5 group entrypoints |
+| All-context structure | `validate-all-context.mjs` | green - 0/0 |
+| Protocol wiring | `validate-protocol-wiring.mjs` | green - 22 protocols, 15 agents, 0 warnings, 0 failures (was 9 false warnings) |
+| Skills | `validate-skills.mjs` | red - duplicate skill tree (finding 2) |
+| Guide sync | `validate-guide-sync.mjs` | red - README has no skill catalog (finding 4) |
+| Agent parity | `validate-agent-parity.mjs` | green with pre-existing body-drift warnings |
+| Plan artifact | `validate-plan-artifact.mjs <plan>` | 0 failures / 0 warnings on the plan content before archival; re-running on the archived path exits 1 with the scope guard ("not under .../active/"), which is expected for a completed plan |
+| Whitespace | `git diff --check` | green |
+
+Not run this phase: `npm run typecheck`, `npm run lint`, backend vitest, `npm run e2e`, `npm run smoke`
+- no source or dependency change. Last green evidence is recorded in `tests/all-tests.md`.
+
+### Plan Deviations
+
+- The plan said "UPDATE PROCESS should verify, not redo" the context updates. Verified and corrected:
+  five context docs still carried pre-D1 claims (the frontend has no tests; Step D not started), so
+  this phase did edit them.
+- The plan did not anticipate tooling work. Six kit scripts were patched because the Tier-1 context
+  audit could not otherwise distinguish real drift from Windows path noise. Scope expansion was
+  approved explicitly (item 9); the four extra same-class bugs were disclosed before they were fixed.
+- `validate-plan-inventory` had been passing vacuously on Windows since before D1; this phase made it
+  scan for real, so "0 active / 3 completed" is the first meaningful result.
+
+### Test Infra Gaps Found
+
+- Parity suite residue still lands in the dev DB (documented, attributable by `runId`).
+- No unit/component runner for the frontend service layer -
+  `frontend-test-runner_NOTE_18-11-26.md`.
+- No CI job, so "green twice locally" is the strongest available evidence -
+  `e2e-ci-wiring_NOTE_18-11-26.md`.
+- The validator suite still cannot be fully green on this checkout (duplicate skill tree, README
+  catalog assumption). Both are recorded and neither blocks the cutover.
+
+### SPEC Achievement
+
+n/a - D1 has no `*_SPEC_*.md`; the plan's Validate Contract rows were scored in the EXECUTE report.
+
+### Closeout Packet
+
+1. Selected plan path: `process/features/backend-cutover/completed/d1-parity-suite_18-11-26/d1-parity-suite_PLAN_18-11-26.md`
+2. Closeout classification: **Archived - ready to move on**
+3. What was finished: D1 parity suite (9 API + 1 demo, `npm run e2e`), docs, backlog notes, archive, context refresh, harness path fixes
+4. Verified: suite green twice back to back; deliberate-red artifacts; loud preconditions; typecheck/lint/vitest; the validator set above. Unverified: CI wiring (no pipeline); frontend unit runner; D2/D3 behavior
+5. Cleanup done: plan archived, paths fixed, context refreshed, backlog statuses corrected. Still needed: none for D1
+6. Next valid state: **PLAN for D2** (one-time import) or D3 (fallback removal) - separate plans under `process/features/backend-cutover/active/`
+7. Commit checkpoint: process commit only (this phase); the three D1 source commits are already on `developing`
+8. Regression status: n/a (single-phase task, not a phase program)
+9. SPEC achievement: n/a (no SPEC)
+
+### Forward Preview
+
+#### Test Infra Found
+
+`npm run e2e` (root alias) -> API suite on :3000 + backend :4000, then demo regression on :3100.
+`e2e:api` / `e2e:demo` per workspace. Preconditions fail loudly; notification state restored in
+`finally`; the backend webServer uses `npm run start` (the `tsx watch` child leak is documented).
+
+#### Blast Radius Changes
+
+Beyond the plan: six `.claude/skills/**` script patches mirrored into `.agents/skills/**`,
+`AGENTS.md` wording, one harness debt note, and the 12-file protocol index in
+`process/development-protocols/all-development-protocols.md`. No `frontend/`, `backend/`, or
+dependency change.
+
+#### Commands to Stay Green
+
+`npm run typecheck`; `npm run lint`; `npm run test --workspace @lumina/backend`;
+`git diff --check`; `npm run e2e` (needs local Postgres, `backend/.env`, a seeded DB, ports
+3000/3100/4000 free); `npm run smoke` for the domains the parity suite does not cover.
+
+#### Dependency Changes
+
+None this phase. D1 added `@playwright/test` `1.65.1` (exact) to `frontend/devDependencies` - no
+browser download, matches the cached chromium build.
