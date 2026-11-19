@@ -5,7 +5,8 @@
 export * from "./types";
 export * from "./selectors";
 export { can, assertCan, PermissionError, type SchoolAction, type PermissionTarget } from "./permissions";
-export { getSchoolSnapshot, subscribeSchool, updateSchool, resetSchool, hydrateSchool, clearSchoolSnapshot, configureSchoolStore, configureSchoolDataSource, SCHOOL_STORAGE_KEY, type SchoolDataSource } from "./store";
+export { getSchoolSnapshot, subscribeSchool, updateSchool, resetSchool, hydrateSchool, clearSchoolSnapshot, configureSchoolStore, configureSchoolDataSource, SCHOOL_STORAGE_KEY, API_CACHE_KEY, type SchoolDataSource } from "./store";
+export { captureLocalSnapshot, readPendingImport, hasPendingImport, hasImportedArchive, archivePendingImport, clearPendingImport, PENDING_IMPORT_KEY, IMPORT_ARCHIVE_PREFIX, type PendingImport } from "./import/capture";
 export { createId, recordActivity } from "./repositories";
 export { createLocalStorageAdapter, createMemoryAdapter, type StorageAdapter } from "./adapter";
 export { SEED_IDS } from "./seed";

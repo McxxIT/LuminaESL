@@ -4,7 +4,14 @@ import { migrateLegacyWorkspaces } from "./migrate";
 import { createSeedSchool, defaultSchoolSettings } from "./seed";
 import { SCHOOL_SCHEMA_VERSION, type SchoolData } from "./types";
 
+/** The local/demo school. API mode never writes this key (see `API_CACHE_KEY`). */
 export const SCHOOL_STORAGE_KEY = "lumina-school:v1";
+/**
+ * API mode's offline cache. It is deliberately a different key from `SCHOOL_STORAGE_KEY`:
+ * hydrating `/school/bootstrap` into `lumina-school:v1` used to overwrite the user's local
+ * school on the first API sign-in, which destroyed the data the one-time import needs.
+ */
+export const API_CACHE_KEY = "lumina-school:api-cache";
 export { SCHOOL_SCHEMA_VERSION };
 
 /** `local` keeps the browser store; `api` hydrates it from `GET /school/bootstrap`. */
@@ -40,6 +47,8 @@ export function createEmptySchool(): SchoolData {
 const SERVER_SNAPSHOT: SchoolData = createEmptySchool();
 
 let adapter: StorageAdapter = createLocalStorageAdapter(SCHOOL_STORAGE_KEY);
+/** API mode's cache adapter. Only used while `dataSource === "api"`. */
+const apiCacheAdapter: StorageAdapter = createLocalStorageAdapter(API_CACHE_KEY);
 /** True until `configureSchoolStore` swaps in another adapter; the default one needs a browser. */
 let adapterIsBrowserDefault = true;
 let dataSource: SchoolDataSource = isApiDataMode() ? "api" : "local";
@@ -134,10 +143,15 @@ export function updateSchool<T>(mutator: (draft: SchoolData) => T): T {
  * Replace the snapshot with data fetched from the API (or its offline cache).
  * Unlike `updateSchool` this is always persisted, so the last good payload can
  * be used the next time the API is unreachable.
+ *
+ * API mode persists to `lumina-school:api-cache`, never to the local store key:
+ * overwriting `lumina-school:v1` here is what used to destroy local-only data
+ * before it could be imported.
  */
 export function hydrateSchool(data: SchoolData): SchoolData {
   snapshot = data;
-  adapter.save(data);
+  if (dataSource === "api" && adapterIsBrowserDefault) apiCacheAdapter.save(data);
+  else adapter.save(data);
   emit();
   return data;
 }

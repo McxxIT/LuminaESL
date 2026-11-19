@@ -12,6 +12,7 @@ import { useAuth } from "../lib/hooks/useAuth";
 import { accountForUser, restoreSession, signOut } from "../lib/auth/session";
 import { isApiDataMode, isDemoMode } from "../lib/auth/mode";
 import { loadSchoolFromApi, refreshSchoolFromApi } from "../lib/school/api/bootstrap";
+import { captureLocalSnapshot } from "../lib/school/import/capture";
 import { clearSchoolSnapshot } from "../lib/school/store";
 import { adminNavItems, managerNavItems, studentNavItems, teacherNavItems } from "../lib/data";
 import { friendlyRole, initials } from "../lib/student";
@@ -75,6 +76,9 @@ export default function LuminaApp() {
   // API mode: fill the store from the role-scoped bootstrap once a session exists.
   useEffect(() => {
     if (!apiData || !authEmail) return;
+    // Must run before `loadSchoolFromApi`: hydrating the bootstrap used to overwrite the
+    // local school, which is the data the one-time import needs.
+    captureLocalSnapshot();
     let cancelled = false;
     loadSchoolFromApi(authEmail)
       .then(({ source }) => {
