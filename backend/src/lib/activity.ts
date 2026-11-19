@@ -35,6 +35,7 @@ export type ActivityAction =
   | "request.approved"
   | "request.rejected"
   | "request.withdrawn"
+  | "school.imported"
   | "settings.updated"
   | "slot.opened"
   | "slot.closed"
