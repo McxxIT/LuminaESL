@@ -16,6 +16,8 @@ reason: The repo has no CI and no disposable test database; the smoke runs only 
 - `npm run smoke` (`backend/scripts/smoke.ts`) needs local Postgres + the backend env file and is not run automatically.
 - Each run leaves rows behind (archived `smoke-{runId}-*@smoke.lumina.test` users, a course with 12 plans, lessons, ledger rows, activity rows). The script never deletes data by design.
 
+See also `e2e-ci-wiring_NOTE_18-11-26.md`, which describes the same blocker for the Playwright suite (no CI provider, no disposable database). Cross-linked rather than merged because that item is `BLOCKED` and this one is `done-with-gap`.
+
 ## Next step
 
 NEW PLAN REQUIRED: a CI job with a throwaway Postgres (migrate, seed, smoke), or a dedicated test database the smoke can truncate safely. Until then, archived smoke users can be filtered out of admin lists by status.

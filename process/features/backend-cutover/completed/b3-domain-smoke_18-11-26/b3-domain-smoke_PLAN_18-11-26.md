@@ -3,6 +3,7 @@ name: plan:b3-domain-smoke
 description: "COMPLEX plan: committed API smoke per domain, local-vs-API parity fixes, 1-credit-per-lesson unit, numeric-hours crash fix"
 date: 18-11-26
 feature: backend-cutover
+status: COMPLETE (archived 18-11-26; validate gate CONDITIONAL with user-accepted residual R1 plus named known gaps, all backlogged)
 ---
 
 # B3 Domain Smoke, Parity Fixes, and Numeric-Hours Fix

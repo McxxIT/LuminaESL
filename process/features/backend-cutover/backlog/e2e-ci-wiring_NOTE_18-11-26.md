@@ -17,6 +17,8 @@ reason: The repo has no CI provider, no pipeline config, and no disposable test 
 - The suite runs against the shared dev database and leaves rows behind on purpose (uploaded plan files, one booked lesson, one booked+cancelled lesson, one reviewed assignment, restored `notification_state`).
 - Playwright writes `frontend/test-results/`, `frontend/playwright-report/`, and `frontend/blob-report/`; all three are gitignored and excluded from frontend ESLint.
 
+See also `smoke-ci-and-fixtures_NOTE_18-11-26.md`, which records the same blocker for `npm run smoke` (no CI, no disposable database). Cross-linked rather than merged because that item is `done-with-gap` and this one is `BLOCKED`.
+
 ## Next step
 
 NEW PLAN REQUIRED: add a CI job with a throwaway Postgres service, then:
