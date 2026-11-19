@@ -5,9 +5,18 @@ import Icon from "../Icon";
 import { useSchool } from "../../lib/hooks/useSchool";
 import { recentActivity, type ActivityEntry, type SchoolData, type SchoolUser } from "../../lib/school";
 import { updateSchoolSettings } from "../../lib/school/services";
+import { isApiDataMode } from "../../lib/auth/mode";
+import { captureLocalSnapshot, readPendingImport, type PendingImport } from "../../lib/school";
+import {
+  buildReceipt,
+  importPending,
+  previewPendingImport,
+  type ImportPreview,
+  type ImportRun,
+} from "../../lib/school/import/run";
 import { formatTimestamp } from "../../lib/scheduling";
 
-type Tab = "rules" | "activity";
+type Tab = "rules" | "activity" | "import";
 
 const categories: { key: string; label: string; match: (action: string) => boolean }[] = [
   { key: "all", label: "All activity", match: () => true },
@@ -88,6 +97,150 @@ function RulesForm({ user, settings, onNotice }: { user: SchoolUser; settings: R
   </form>;
 }
 
+function ImportSummary({ result }: { result: ImportRun | ImportPreview["result"] }) {
+  const rows = Object.entries(result.counts).filter(
+    ([, count]) => count.created || count.adopted || count.dropped || count.skippedSeed,
+  );
+  return <>
+    <div className="settings-rule">
+      <div>
+        <strong>Totals</strong>
+        <p>{result.totals.created} created · {result.totals.adopted} matched existing records · {result.totals.dropped} dropped · {result.totals.skippedSeed} untouched seed rows skipped</p>
+      </div>
+    </div>
+    {result.pendingUploads > 0 && <div className="settings-rule">
+      <div><strong>Attachments to upload</strong><p>{result.pendingUploads} file{result.pendingUploads === 1 ? "" : "s"} will be uploaded when you import.</p></div>
+    </div>}
+    {rows.map(([name, count]) => <div className="settings-rule" key={name}>
+      <div>
+        <strong>{name}</strong>
+        <p>{count.created} created · {count.adopted} matched · {count.dropped} dropped · {count.skippedSeed} seed</p>
+      </div>
+    </div>)}
+    {result.alreadyImported && <div className="settings-rule">
+      <div><strong>Already imported</strong><p>This browser school has been imported before. A second run is refused unless you force it.</p></div>
+    </div>}
+    {result.warnings.length > 0 && <div className="settings-rule">
+      <div>
+        <strong>Warnings ({result.warnings.length}{result.warningsTruncated ? "+" : ""})</strong>
+        <ul className="manager-help">
+          {result.warnings.slice(0, 8).map((warning) => <li key={`${warning.collection}-${warning.localId}`}>{warning.collection}: {warning.message}</li>)}
+        </ul>
+      </div>
+    </div>}
+  </>;
+}
+
+function ImportPanel({ onNotice }: { onNotice: (message: string) => void }) {
+  const [pending, setPending] = useState<PendingImport | null>(() => readPendingImport());
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [run, setRun] = useState<ImportRun | null>(null);
+  const [includeSeedRecords, setIncludeSeedRecords] = useState(false);
+  const [importSettings, setImportSettings] = useState(false);
+  const [busy, setBusy] = useState<"preview" | "import" | null>(null);
+  const [error, setError] = useState("");
+
+  const options = { includeSeedRecords, importSettings };
+
+  function refreshCapture() {
+    setError("");
+    setRun(null);
+    setPreview(null);
+    const captured = captureLocalSnapshot({ force: true });
+    setPending(captured ?? readPendingImport());
+    onNotice(captured ? "Captured the local school from this browser." : "No local school found in this browser.");
+  }
+
+  async function previewCapture() {
+    setBusy("preview");
+    setError("");
+    try {
+      setPreview(await previewPendingImport(options));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Preview failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function importCapture() {
+    setBusy("import");
+    setError("");
+    try {
+      const result = await importPending(options);
+      setRun(result);
+      setPreview(null);
+      setPending(null);
+      onNotice(`Imported ${result.totals.created} records into the shared school.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Import failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function downloadReceipt() {
+    if (!run) return;
+    const blob = new Blob([buildReceipt(run)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `lumina-import-receipt-${run.marker.replace(/[:.]/g, "-")}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return <section className="panel student-panel settings-rules">
+    <div className="settings-rule">
+      <div>
+        <strong>Local school on this browser</strong>
+        {pending
+          ? <p>{pending.recordCount} records captured {formatTimestamp(pending.capturedAt)} from a store seeded {formatTimestamp(pending.sourceSeededAt)}.</p>
+          : <p>Nothing is waiting to be imported. The local store is kept after an import, so you can capture it again.</p>}
+      </div>
+      <button type="button" className="cancel-button" onClick={refreshCapture}><Icon name="repeat" size={15} /> Capture again</button>
+    </div>
+
+    <div className="settings-rule">
+      <div><strong>Untouched demo records</strong><p>Records identical to the demo seed are skipped, so the shared school is not duplicated. Modified records are imported as new rows.</p></div>
+      <label className="settings-toggle"><input type="checkbox" checked={includeSeedRecords} onChange={(event) => setIncludeSeedRecords(event.target.checked)} /><span>{includeSeedRecords ? "Import everything" : "Skip seed rows"}</span></label>
+    </div>
+
+    <div className="settings-rule">
+      <div><strong>School-wide rules</strong><p>Import the settings captured from this browser over the shared ones. Leave this off to keep the rules other people already rely on.</p></div>
+      <label className="settings-toggle"><input type="checkbox" checked={importSettings} onChange={(event) => setImportSettings(event.target.checked)} /><span>{importSettings ? "Import settings" : "Keep school settings"}</span></label>
+    </div>
+
+    {error && <p className="form-error" role="alert"><Icon name="x" size={14} /> {error}</p>}
+
+    <div className="settings-actions">
+      <span className="manager-help">{preview ? "Nothing has been written yet." : "Preview first: it writes nothing."}</span>
+      <button type="button" className="cancel-button" onClick={previewCapture} disabled={!pending || busy !== null}>
+        <Icon name="search" size={15} /> {busy === "preview" ? "Checking…" : "Preview"}
+      </button>
+      <button type="button" className="primary-button" onClick={importCapture} disabled={!pending || busy !== null}>
+        <Icon name="upload" size={15} /> {busy === "import" ? "Importing…" : "Import into the shared school"}
+      </button>
+    </div>
+
+    {preview && <div className="settings-rules">
+      <h2 className="section-title">Preview</h2>
+      <ImportSummary result={preview.result} />
+      <p className="manager-help">{preview.diff.identical} of {preview.diff.total} local records are untouched demo data.</p>
+    </div>}
+
+    {run && <div className="settings-rules">
+      <h2 className="section-title">Imported</h2>
+      <ImportSummary result={run} />
+      {run.uploadFailures.length > 0 && <p className="form-error" role="alert"><Icon name="x" size={14} /> {run.uploadFailures.length} file(s) could not be uploaded. They are listed in the receipt.</p>}
+      <div className="settings-actions">
+        <span className="manager-help">{run.archivedKey ? "The captured snapshot is archived in this browser." : "The captured snapshot is cleared."}</span>
+        <button type="button" className="cancel-button" onClick={downloadReceipt}><Icon name="download" size={15} /> Download receipt</button>
+      </div>
+    </div>}
+  </section>;
+}
+
 export default function AdminSettings({ user, onNotice }: { user: SchoolUser; onNotice: (message: string) => void }) {
   const [tab, setTab] = useState<Tab>("rules");
   const [category, setCategory] = useState("all");
@@ -113,10 +266,12 @@ export default function AdminSettings({ user, onNotice }: { user: SchoolUser; on
     <div className="student-tabbar settings-tabs" role="tablist" aria-label="School settings">
       <button type="button" role="tab" aria-selected={tab === "rules"} className={`student-tab ${tab === "rules" ? "active" : ""}`} onClick={() => setTab("rules")}>Rules</button>
       <button type="button" role="tab" aria-selected={tab === "activity"} className={`student-tab ${tab === "activity" ? "active" : ""}`} onClick={() => setTab("activity")}>Activity log<span>{view.activity.length}</span></button>
+      {isApiDataMode() && <button type="button" role="tab" aria-selected={tab === "import"} className={`student-tab ${tab === "import" ? "active" : ""}`} onClick={() => setTab("import")}>Import local data</button>}
     </div>
 
     {/* Remount the form when saved settings change so it shows the stored values. */}
     {tab === "rules" && <RulesForm key={JSON.stringify(view.settings)} user={user} settings={view.settings} onNotice={onNotice} />}
+    {isApiDataMode() && tab === "import" && <ImportPanel onNotice={onNotice} />}
 
     {tab === "activity" && <section className="panel student-panel">
       <div className="student-filterbar">
