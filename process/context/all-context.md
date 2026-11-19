@@ -303,7 +303,7 @@ These stay in place and remain the source of truth for cutover status.
 |---|---|
 | `frontend/ADMIN_PLAN.md` | Admin/manager product plan; all phases done |
 | `frontend/CUTOVER_PLAN.md` | File-level plan for local-store to API cutover |
-| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, C, and D1 (parity suite) done; D2 (one-time import) done; D3 (fallback removal) next |
+| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, C, D1 (parity suite), and D2 (one-time import, archived in `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`) done; D3 (fallback removal) next |
 | `frontend/PROGRESS.md` | App-wide state and verification commands |
 
 ## Workflow
@@ -337,7 +337,7 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 ## Open Questions / Outstanding Work
 
-- Cutover D1 (parity suite) and D2 (one-time import) are done. D3 (remove the browser-store fallback) is not started; `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
+- Cutover D1 (parity suite) and D2 (one-time import, archived in `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`) are done. D3 (remove the browser-store fallback) is not started; `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
 - No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
 - Booking concurrency/precision risks above are unresolved.
 - Curriculum Library not built; no frontend unit or component tests; no CI.

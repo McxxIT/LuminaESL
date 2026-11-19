@@ -3,7 +3,7 @@ name: plan:d2-one-time-import
 description: "COMPLEX plan: one-time, admin-only import of a browser's lumina-school:v1 snapshot (plus its attachment bytes) into PostgreSQL with full history preserved"
 date: 19-11-26
 feature: backend-cutover
-status: PLANNED (awaiting explicit ENTER EXECUTE MODE)
+status: COMPLETE (EXECUTE + UPDATE PROCESS done 19-11-26; archived)
 ---
 
 # D2 — One-Time Import into PostgreSQL
@@ -24,7 +24,7 @@ context-envelope:
 ```
 
 **Date**: 19-11-26
-**Status**: PLANNED — INNOVATE decisions settled in the research doc; no code written yet.
+**Status**: COMPLETE — executed 19-11-26; all 13 Validate Contract rows green, report in `d2-one-time-import_EXECUTE_19-11-26.md`.
 **Complexity**: COMPLEX (storage-key migration, a new admin API surface, a new admin UI, history-preserving inserts, two run modes that must stay independent)
 **Branch**: developing
 **Umbrella**: `frontend/CUTOVER_PLAN.md` §Step D item 2 ("one-time import of local data") and `frontend/CUTOVER_PROGRESS.md` board row "D2".
@@ -300,15 +300,19 @@ P1 before P2: the endpoint is only safe once API mode stops writing `v1`, and th
 
 ## Resume and Execution Handoff
 
-Status: PLANNED. No code written. Research is in `d2-one-time-import_RESEARCH_19-11-26.md` (same folder).
+Status: COMPLETE and archived (19-11-26). All P1-P4 checklist boxes are ticked and every gate is
+green; the execution record is `d2-one-time-import_EXECUTE_19-11-26.md` (same folder), research in
+`d2-one-time-import_RESEARCH_19-11-26.md`. This plan is a historical contract; do not resume it.
 
-- Execute in order: P1 → P2 → P3 → P4. Do not start P3 before the P2 response contract is green.
-- Regression commands that must stay green: `npm run typecheck`; `npm run lint`; `npm run test --workspace @lumina/backend`; `npm run smoke`; `npm run e2e`.
-- Preconditions for the browser gates: local Postgres reachable, `backend/.env` present, seeded database, ports 3000/3100/4000 free, no `.env*` edits.
-- Context to read before starting: `process/context/all-context.md`, `process/context/tests/all-tests.md`, `frontend/CUTOVER_PLAN.md` §Step D.
-- If a plan step turns out to be wrong, update this plan file in the same session rather than silently deviating.
-- Commit the plan as docs before implementation; then follow the D1 pattern of one commit per phase.
+- Execution order used: P1 → P2 → P3 → P4, with the profile/user id collision found and fixed during P4.
+- Registered deviations (capture helper names, password hash location, 400 vs 422 validation, UI gate,
+  receipt gate, 13th planner test) are listed in the execute report.
+- Regression commands that were kept green: `npm run typecheck`; `npm run lint`;
+  `npm run test --workspace @lumina/backend`; `npm run smoke`; `npm run e2e` (twice back to back).
 
 ## Next Step
 
-Review this plan (especially the six override assumptions), then say **ENTER EXECUTE MODE** to start P1. D3 (fallback removal) stays blocked until D2 is executed and verified, because D3 depends on local data being importable.
+D2 is closed. The next lane is **D3 — fallback removal** (`frontend/CUTOVER_PLAN.md` §Step D item 3):
+stop reading the browser store on the production path, keep `NEXT_PUBLIC_DATA_SOURCE=local` as the
+documented rollback flag for one release, and leave the local store as the import source until the
+flag is removed. Open D3 with a new PLAN; this archived plan needs no further work.

@@ -145,7 +145,9 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   `notification_state` churn that is restored, and - from `import.spec.ts` - one imported student with
   profile, a course/unit/plan chain, an enrollment, one completed lesson dated 2031-03-05, an approved
   cancellation request, an uploaded PDF, one `school.imported` marker plus a second marker from the
-  forced run. Unique `runId` markers keep rows attributable; the D2 execute report lists the residue.
+  forced run. Unique `runId` markers keep rows attributable; the archived D2 execute report
+  (`process/features/backend-cutover/completed/d2-one-time-import_19-11-26/d2-one-time-import_EXECUTE_19-11-26.md`)
+  lists the residue.
 - Failure artifacts: `frontend/test-results/{api,demo}/<test>/` gets `test-failed-1.png`, `video.webm`,
   `trace.zip` (`npx playwright show-trace <zip>`), and `error-context.md`; the HTML report goes to
   `frontend/playwright-report/`. All three folders are gitignored and excluded from ESLint.

@@ -382,8 +382,13 @@ and open decisions live in `CUTOVER_PROGRESS.md`.
   notifications - is done too. See `CUTOVER_PROGRESS.md`.
 - **Step D1 - Parity suite:** done November 18, 2026. `npm run e2e` runs 9
   API-mode specs plus 1 demo-mode regression.
-- **Steps D2 and D3:** one-time import from `lumina-school:v1`/IndexedDB, then
-  removal of the browser-store fallback. Not started.
+- **Step D2 - One-time import:** done November 19, 2026, archived to
+  `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`.
+  Admin-only `/school/import` plus preview, store-key split, pre-bootstrap
+  capture, receipt. The suite is now 13 API-mode tests plus the demo regression.
+- **Step D3 - Fallback removal:** not started. Remove the browser-store fallback
+  from the production path and keep `NEXT_PUBLIC_DATA_SOURCE=local` as the
+  rollback flag for one release.
 
 Keep this summary and the two files in sync when a step lands; do not re-grow the
 detail here.

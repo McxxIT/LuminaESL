@@ -3,7 +3,7 @@
 Live status for the frontend/backend integration. The plan is in
 `CUTOVER_PLAN.md`; app-wide state stays in `PROGRESS.md`.
 
-**Current step:** Step D2 - one-time import complete (admin-only `/school/import` + preview, store-key split, capture before first bootstrap); D3 next.
+**Current step:** Step D2 - one-time import closed and archived; Step D3 - fallback removal next.
 **Last updated:** November 19, 2026.
 
 ## Board
@@ -19,7 +19,7 @@ Live status for the frontend/backend integration. The plan is in
 | B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
 | B3 - Domain slices | ✅ Done | Course ownership, activity log, `npm run smoke` (11 domains, 306 checks), parity fixes, numeric credits, 1 credit per lesson. Independent EVL rerun green (Nov 18). Plan archived to `process/features/backend-cutover/completed/b3-domain-smoke_18-11-26/`. |
 | Step C - Uploads + notifications | ✅ Done | API uploads/downloads (5 MB + MIME allowlist), activity-backed bell merged with the role derivation, `notification_state` read/mute per user. Browser + smoke evidence Nov 18. |
-| Step D - Parity + removal | ✅ D1 + D2 done | D1 parity suite: Playwright, green twice back to back. D2 one-time import: admin-only `/school/import` + `/import/preview`, store-key split, pre-bootstrap capture, receipt; suite is now 13 API + 1 demo, green twice back to back Nov 19. D3 fallback removal not started. |
+| Step D - Parity + removal | ✅ D1 + D2 done | D1 parity suite: Playwright, green twice back to back. D2 one-time import: admin-only `/school/import` + `/import/preview`, store-key split, pre-bootstrap capture, receipt; suite is now 13 API + 1 demo, green twice back to back Nov 19. Plan and reports archived to `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`. D3 fallback removal not started. |
 
 ## Rule-gap checklist (B0.2)
 
@@ -227,6 +227,7 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 18, 2026 | Step C: API uploads/downloads with 5 MB + MIME validation, activity-backed bell merged with the role derivation, per-user `notification_state` (read ids + muted categories), cancellation evidence by attachment id, bounded notification ids, smoke `uploads`/`notifications` domains. | `backend/src/{db/schema.ts,lib/notifications.ts,routes/notifications.ts,routes/uploads.ts,app.ts}`, `backend/src/db/migrations/0002_notification_state.sql`, `backend/scripts/smoke.ts`, `backend/tests/contract.test.ts`, `frontend/app/lib/{api/client.ts,hooks/useNotifications.ts,school/notifications.ts,school/attachment-download.ts,school/api/{uploads,notifications}.ts,school/services/{uploads,teaching,curriculum}.ts,school/views.ts,types.ts,school/index.ts}`, `frontend/app/components/{manager/ManagerApprovals.tsx,manager/ManagerCurriculum.tsx,manager/ManagerSettings.tsx,teacher/TeacherLessons.tsx}` |
 | Nov 18, 2026 | Step D1: Playwright parity suite for API mode (auth, uploads, notifications, booking, cancellation/refund, homework) and a demo-mode regression, with mode-specific configs, an env-injecting dev-server launcher, API state assertions, restore-on-exit notification state, and loud preconditions. | `frontend/{playwright.config.ts,playwright.demo.config.ts,eslint.config.mjs,package.json}`, `frontend/e2e/**`, `package.json`, `.gitignore` |
 | Nov 19, 2026 | Step D2: one-time import from the browser store into Postgres. API mode's offline cache moved to `lumina-school:api-cache` so `v1` is never overwritten; the local school is captured to `lumina-school:pending-import` before the first bootstrap; `POST /school/import` + `/import/preview` (admin only) map slug ids to UUIDs and write every collection in one transaction, adopting users by email, uploading attachment bytes through `POST /uploads`, and marking the run with `school.imported` (409 on repeat unless forced); admin Import tab with preview, seed/settings toggles, and a receipt download; new specs plus a profile/user id collision fix. | `backend/src/{lib/school-import.ts,routes/school-import.ts,routes/index.ts,lib/activity.ts}`, `backend/tests/school-import.test.ts`, `frontend/app/lib/school/{store.ts,index.ts,api/bootstrap.ts,api/import.ts,import/*}`, `frontend/app/components/{LuminaApp.tsx,admin/AdminSettings.tsx}`, `frontend/e2e/{api/import.spec.ts,api/cache-keys.spec.ts,support/local-school.ts}`, `frontend/{PROGRESS.md,CUTOVER_PROGRESS.md,CUTOVER_PLAN.md}`, `process/context/{all-context.md,tests/all-tests.md}` |
+| Nov 19, 2026 | Step D2 closeout: plan, research, and both reports archived to `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`; board, progress summary, umbrella, context router, and test router repointed; the two cosmetic findings (bell title/nav for `school.imported`, `next/image` blob warning) backlogged. | `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/*`, `process/features/backend-cutover/backlog/import-followups_NOTE_19-11-26.md`, `process/context/{all-context.md,tests/all-tests.md}`, `frontend/{PROGRESS.md,CUTOVER_PROGRESS.md,CUTOVER_PLAN.md}` |
 
 ## Open decisions / blockers
 
@@ -274,8 +275,11 @@ Live status for the frontend/backend integration. The plan is in
 
 ## Next action
 
-Step D continues with D2 (one-time local → Postgres import) and D3 (remove the local
-fallback) as separate approved plans. D1 is closed: `npm run e2e` is the parity gate for
-both modes and leaves no processes behind. CI wiring for the suite is a backlog note
+Step D continues with D3 (remove the local fallback from the production path) as a separate
+approved plan. D2 is closed and archived to
+`process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`; D3 keeps
+`NEXT_PUBLIC_DATA_SOURCE=local` as the documented rollback flag for one release. D1 is closed:
+`npm run e2e` is the parity gate for both modes and leaves no processes behind. CI wiring for the
+suite is a backlog note
 (`process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`) because the repo
 has no CI.

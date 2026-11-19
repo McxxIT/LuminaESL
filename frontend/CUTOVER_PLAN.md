@@ -174,7 +174,8 @@ and student. Add a Playwright case for the user-visible flow before moving on.
   API mode caches to `lumina-school:api-cache` so the local key is never overwritten.
   Attachment bytes are uploaded through `POST /uploads` between preview and import;
   idempotency is a `school.imported` activity marker (409 on repeat unless forced);
-  rollback is the receipt JSON, with no schema change.
+  rollback is the receipt JSON, with no schema change. Archived to
+  `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`.
 - [ ] D3 - Delete duplicated seed data and the browser-store fallback from the
   production path; keep a documented rollback flag
   (`NEXT_PUBLIC_DATA_SOURCE=local`) for one release.

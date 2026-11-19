@@ -3,7 +3,7 @@ phase: d2-one-time-import-execute
 date: 2026-11-19
 status: COMPLETE
 feature: backend-cutover
-plan: process/features/backend-cutover/active/d2-one-time-import_19-11-26/d2-one-time-import_PLAN_19-11-26.md
+plan: process/features/backend-cutover/completed/d2-one-time-import_19-11-26/d2-one-time-import_PLAN_19-11-26.md
 ---
 
 # D2 - One-Time Import - EXECUTE Report
@@ -18,8 +18,8 @@ pass, including two consecutive full `npm run e2e` runs (13 API + 1 demo each), 
 (13/13 domains, 343 checks), backend tests (30/30), and the receipt gate, which downloads the receipt
 in the browser and proves it matches the response. One real data-integrity bug was found by the new
 spec and fixed: profile ids collide with user ids in the browser store, so the flat id map pointed
-`enrollments.student_id` at a profile row and the first real import failed its foreign key. Nothing is
-committed yet.
+`enrollments.student_id` at a profile row and the first real import failed its foreign key. The work is
+committed in five self-contained commits (`1f52ba7` → `2869049`).
 
 ## What Was Done
 
@@ -193,9 +193,10 @@ A disposable test database is still the only real fix; the smoke suite has the s
 
 ## Handoff
 
-- Plan: this folder, all P1-P4 boxes ticked.
+- Plan: this folder (`completed/d2-one-time-import_19-11-26/`), all P1-P4 boxes ticked.
 - Report: this file.
-- Next: UPDATE PROCESS (archive this folder to `completed/`), then D3 (remove the browser-store
-  fallback from the production path, keeping `NEXT_PUBLIC_DATA_SOURCE=local` for one release).
-- Not committed: all D2 code, tests, e2e specs, and doc edits are in the working tree on
-  `developing`.
+- Update-process record: `d2-one-time-import_REPORT_19-11-26.md` in this folder.
+- Next: **D3** (remove the browser-store fallback from the production path, keeping
+  `NEXT_PUBLIC_DATA_SOURCE=local` for one release). Start it with a fresh PLAN.
+- Committed: five self-contained commits on `developing` (`1f52ba7` store-key split, `c1adaf1`
+  import core, `473e751` admin tab, `9070995` e2e proof, `2869049` docs).
