@@ -14,8 +14,8 @@ Last updated: 2026-11-18
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** The backend has automated tests (vitest, 17 tests, 4 files, no DB needed). The frontend has a
-committed browser parity suite (`@playwright/test`, 10 tests: 9 API mode + 1 demo regression) run by
+**BLUF:** The backend has automated tests (vitest, 30 tests, 5 files, no DB needed). The frontend has a
+committed browser parity suite (`@playwright/test`, 14 tests: 13 API mode + 1 demo regression) run by
 `npm run e2e`. `npm run smoke` is a separate hybrid per-domain API smoke. There is no frontend
 unit/component runner and no CI; authenticated business rules outside the parity suite are verified by
 `npm run smoke` or by hand against seeded local Postgres.
@@ -111,11 +111,11 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
-## Parity Suite (`frontend/e2e`, 10 tests)
+## Parity Suite (`frontend/e2e`, 14 tests)
 
 - Command: `npm run e2e` (root alias) = `e2e:api` then `e2e:demo`. Needs local Postgres, the backend
   env file, and a seeded DB; ports 3000, 3100, and 4000 must be free (the API config reuses an
-  existing backend on 4000 unless `CI` is set). About 50 s total; last green: 2026-11-18, twice back
+  existing backend on 4000 unless `CI` is set). About 70 s total; last green: 2026-11-19, twice back
   to back.
 - Two configs, not two projects: `frontend/playwright.config.ts` runs the app on :3000 with
   `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`; `frontend/playwright.demo.config.ts`
@@ -132,6 +132,8 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | `e2e/api/booking.spec.ts` | 1 | Teacher opens a fresh future slot, student books it, credit balance delta is exactly `-1`, lesson reads `scheduled` for the right teacher |
 | `e2e/api/cancellation-refund.spec.ts` | 1 | Manager books on behalf, teacher files a cancellation with PNG evidence, manager sees the evidence as a blob URL, approves, credit delta is exactly `+1`, lesson reads `cancelled` |
 | `e2e/api/homework.spec.ts` | 1 | Teacher assigns homework, student submits it, teacher reviews it (status `Reviewed`, no Review button left) |
+| `e2e/api/cache-keys.spec.ts` | 2 | An API sign-in leaves `lumina-school:v1` byte-identical, caches to `lumina-school:api-cache`, and captures the local school into `lumina-school:pending-import` before the bootstrap (a second boot does not replace it); a UUID-only payload is treated as an API cache, not local data, and is not captured |
+| `e2e/api/import.spec.ts` | 2 | Seeds a synthetic local school, previews it (no writes, no marker), imports it, and asserts through `/school/bootstrap`: created student with hex avatar and recorded `createdAt`, lesson `endTime`/`createdAt`/`createdBy`, approved request with its reviewed state and attachment, credit sign/amount, byte-identical attachment download, marker row, `v1` untouched; a repeat is 409 and a forced run is 201. Second test: anonymous 401, manager/teacher/student 403 |
 | `e2e/demo/regression.spec.ts` | 1 | Demo login with any password, local snapshot present, IndexedDB upload + byte-identical download, bell read state and mute survive reload, zero `/api/v1/` requests |
 
 - Safety: the suite never migrates, seeds, resets, truncates, or pushes. `e2e/support/preconditions.ts`
@@ -139,8 +141,11 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   collection, then fails loudly with the command a human should run (probe: point `E2E_API_URL` at a
   dead port and the `beforeAll` fails every test in the file).
 - Residue per run (unavoidable without a disposable DB): one uploaded plan file per upload spec, one
-  booked lesson, one booked+cancelled lesson with an approved request, one reviewed assignment, and
-  `notification_state` churn that is restored. Unique `runId` markers keep rows attributable.
+  booked lesson, one booked+cancelled lesson with an approved request, one reviewed assignment,
+  `notification_state` churn that is restored, and - from `import.spec.ts` - one imported student with
+  profile, a course/unit/plan chain, an enrollment, one completed lesson dated 2031-03-05, an approved
+  cancellation request, an uploaded PDF, one `school.imported` marker plus a second marker from the
+  forced run. Unique `runId` markers keep rows attributable; the D2 execute report lists the residue.
 - Failure artifacts: `frontend/test-results/{api,demo}/<test>/` gets `test-failed-1.png`, `video.webm`,
   `trace.zip` (`npx playwright show-trace <zip>`), and `error-context.md`; the HTML report goes to
   `frontend/playwright-report/`. All three folders are gitignored and excluded from ESLint.

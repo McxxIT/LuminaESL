@@ -108,10 +108,11 @@ LuminaApp mount
 AdminSettings → Import tab
   └─ readPendingSnapshot()
   └─ diffAgainstSeed()  ──▶ exclude map + counts
-  └─ for each pending attachment with bytes:
-       dataUrl → File → POST /uploads ──▶ { id, storageKey }
-  └─ POST /school/import/preview  ──▶ counts, drops, warnings   (no writes)
-  └─ POST /school/import          ──▶ transaction:
+  └─ POST /school/import/preview  ──▶ counts, drops, warnings   (no writes, no uploads)
+  └─ POST /school/import:
+       for each pending attachment with bytes:
+         dataUrl → File → POST /uploads ──▶ { id, storageKey }   (map localId → serverId)
+       then one transaction:
                                          1. marker check (school.imported)
                                          2. plan: local slug → UUID, topo order
                                          3. insert users (adopt by email) / profiles
@@ -186,36 +187,36 @@ Read-only references: `frontend/app/lib/school/{types,seed,repositories,files}.t
 ## Implementation Checklist
 
 ### P1 Store-key split and capture (frontend only)
-- [ ] P1.1 `store.ts`: export `API_CACHE_KEY = "lumina-school:api-cache"`; keep `SCHOOL_STORAGE_KEY` for local mode; make `hydrateSchool` save to `api-cache` when `dataSource === "api"` and to `v1` otherwise; add a comment naming the destroyed-data bug this closes.
-- [ ] P1.2 `api/bootstrap.ts`: build the cache adapter on `API_CACHE_KEY`, import the constant from `store.ts`, update the file comment.
-- [ ] P1.3 `import/capture.ts`: key constants, `looksLikeLocalSnapshot(raw)` (version 3, `seededAt` present, ≥1 record, ≥1 non-UUID id), `captureLocalSnapshot()` (idempotent, never overwrites an existing pending copy, wrapped in try/catch so storage errors never break boot), `readPendingSnapshot()`, `archivePendingSnapshot()`, `clearPendingSnapshot()`.
-- [ ] P1.4 `LuminaApp.tsx`: call `captureLocalSnapshot()` synchronously in the API bootstrap effect before `loadSchoolFromApi`; also call it defensively at the top of `loadSchoolFromApi` (both are idempotent).
-- [ ] P1.5 `school/index.ts`: export the new capture helpers that the UI needs.
-- [ ] P1.6 Assert the guarantee: extend `frontend/e2e/api/auth.spec.ts` (or add `api/cache-keys.spec.ts`) so an API login proves `lumina-school:v1` is byte-identical before/after and `lumina-school:api-cache` now exists.
-- [ ] P1.7 `npm run typecheck`, `npm run lint`, `npm run e2e` — demo regression must stay green.
+- [x] P1.1 `store.ts`: export `API_CACHE_KEY = "lumina-school:api-cache"`; keep `SCHOOL_STORAGE_KEY` for local mode; make `hydrateSchool` save to `api-cache` when `dataSource === "api"` and to `v1` otherwise; add a comment naming the destroyed-data bug this closes.
+- [x] P1.2 `api/bootstrap.ts`: build the cache adapter on `API_CACHE_KEY`, import the constant from `store.ts`, update the file comment.
+- [x] P1.3 `import/capture.ts`: key constants, `looksLikeLocalSnapshot(raw)` (version 3, `seededAt` present, ≥1 record, ≥1 non-UUID id), `captureLocalSnapshot()` (idempotent, never overwrites an existing pending copy, wrapped in try/catch so storage errors never break boot), `readPendingSnapshot()`, `archivePendingSnapshot()`, `clearPendingSnapshot()`.
+- [x] P1.4 `LuminaApp.tsx`: call `captureLocalSnapshot()` synchronously in the API bootstrap effect before `loadSchoolFromApi`; also call it defensively at the top of `loadSchoolFromApi` (both are idempotent).
+- [x] P1.5 `school/index.ts`: export the new capture helpers that the UI needs.
+- [x] P1.6 Assert the guarantee: extend `frontend/e2e/api/auth.spec.ts` (or add `api/cache-keys.spec.ts`) so an API login proves `lumina-school:v1` is byte-identical before/after and `lumina-school:api-cache` now exists.
+- [x] P1.7 `npm run typecheck`, `npm run lint`, `npm run e2e` — demo regression must stay green.
 
 ### P2 Backend import core
-- [ ] P2.1 `backend/src/lib/school-import.ts`: zod schema mirroring `SchoolData` v3 (all 16 collections, `version: 3` literal, ISO timestamps, `exclude` map, `options`), `buildImportPlan(payload, existing)` (pure: id map, adopt-by-email, seed exclusions, FK topological order, drop/null warnings), `applyImportPlan(tx, plan)` (batched inserts, `hashPassword` for new users, avatar map, marker write).
-- [ ] P2.2 `backend/src/routes/school-import.ts`: `POST /import/preview` and `POST /import` with `preHandler: app.requireRole("admin")`, `bodyLimit: 8 * 1024 * 1024`, 409 on marker conflict unless `force`, 422 with the warning list when validation fails.
-- [ ] P2.3 `backend/src/routes/index.ts`: register with `prefix: "/school"` next to `schoolRoutes`; confirm no route collision with `GET /school/bootstrap`.
-- [ ] P2.4 `backend/src/lib/activity.ts`: add `"school.imported"` to `ActivityAction`; confirm `AdminSettings` category matching already routes `school.*` to "Settings" (`AdminSettings.tsx:18`).
-- [ ] P2.5 `backend/tests/school-import.test.ts`: pure planner tests only, no database — id remap, adopt-by-email, seed exclusion on/off, optional-ref nulling vs required-parent drop, avatar mapping, credit sign preservation, timestamp passthrough, marker detection.
-- [ ] P2.6 `npm run test --workspace @lumina/backend` green.
+- [x] P2.1 `backend/src/lib/school-import.ts`: zod schema mirroring `SchoolData` v3 (all 16 collections, `version: 3` literal, ISO timestamps, `exclude` map, `options`), `buildImportPlan(payload, existing)` (pure: id map, adopt-by-email, seed exclusions, FK topological order, drop/null warnings), `applyImportPlan(tx, plan)` (batched inserts, `hashPassword` for new users, avatar map, marker write).
+- [x] P2.2 `backend/src/routes/school-import.ts`: `POST /import/preview` and `POST /import` with `preHandler: app.requireRole("admin")`, `bodyLimit: 8 * 1024 * 1024`, 409 on marker conflict unless `force`, 422 with the warning list when validation fails.
+- [x] P2.3 `backend/src/routes/index.ts`: register with `prefix: "/school"` next to `schoolRoutes`; confirm no route collision with `GET /school/bootstrap`.
+- [x] P2.4 `backend/src/lib/activity.ts`: add `"school.imported"` to `ActivityAction`; confirm `AdminSettings` category matching already routes `school.*` to "Settings" (`AdminSettings.tsx:18`).
+- [x] P2.5 `backend/tests/school-import.test.ts`: pure planner tests only, no database — id remap, adopt-by-email, seed exclusion on/off, optional-ref nulling vs required-parent drop, avatar mapping, credit sign preservation, timestamp passthrough, marker detection.
+- [x] P2.6 `npm run test --workspace @lumina/backend` green.
 
 ### P3 Admin import UI
-- [ ] P3.1 `api/import.ts`: `previewImport(payload)` / `runImport(payload)` typed wrappers over `request()`.
-- [ ] P3.2 `import/run.ts`: read pending snapshot, diff against `createSeedSchool()` with a stable `canonicalJson`, convert pending attachment data URLs (`readFileAsync` over `idb:` and `lumina-school-file:`) to `File`s, upload them, build the payload with `exclude` + `attachments`, and call preview/import.
-- [ ] P3.3 `AdminSettings.tsx`: third tab "Import", rendered only when `isApiDataMode()` and the user is an admin. Shows captured-at, record counts, excluded seed counts, per-item warnings, `includeSeedRecords` + `importSettings` checkboxes, a "Refresh capture from local store" action, and a `Preview` → `Import` flow.
-- [ ] P3.4 On success: archive `pending` to `lumina-school:imported:<seededAt>`, clear `pending`, offer the receipt download, surface the server counts, and point at the Activity tab (the marker row).
-- [ ] P3.5 Empty state ("No pending local data on this browser") and failure state (shows the server error, keeps `pending` intact so the import can be retried).
+- [x] P3.1 `api/import.ts`: `previewImport(payload)` / `runImport(payload)` typed wrappers over `request()`.
+- [x] P3.2 `import/run.ts`: read pending snapshot, diff against `createSeedSchool()` with a stable `canonicalJson`, convert pending attachment data URLs (`readFileAsync` over `idb:` and `lumina-school-file:`) to `File`s, upload them, build the payload with `exclude` + `attachments`, and call preview/import.
+- [x] P3.3 `AdminSettings.tsx`: third tab "Import", rendered only when `isApiDataMode()` and the user is an admin. Shows captured-at, record counts, excluded seed counts, per-item warnings, `includeSeedRecords` + `importSettings` checkboxes, a "Refresh capture from local store" action, and a `Preview` → `Import` flow.
+- [x] P3.4 On success: archive `pending` to `lumina-school:imported:<seededAt>`, clear `pending`, offer the receipt download, surface the server counts, and point at the Activity tab (the marker row).
+- [x] P3.5 Empty state ("No pending local data on this browser") and failure state (shows the server error, keeps `pending` intact so the import can be retried).
 
 ### P4 Verification and docs
-- [ ] V1 `frontend/e2e/api/import.spec.ts`: inject a synthetic local snapshot via `addInitScript` before any app code runs, sign in as admin, preview (asserts "no writes" by comparing bootstrap counts), import, then assert through `/school/bootstrap` that appointments/timestamps/actors survive, the marker row exists, and a second import is refused.
-- [ ] V2 `npm run e2e` twice consecutively; capture timings and artifact paths.
-- [ ] V3 `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run smoke`.
-- [ ] V4 Safety gates: grep changed files for `db:reset`, `reset`, `truncate`, `push`; confirm no `.env` / `.env.local` / `backend/.env` change in `git diff --stat`.
-- [ ] V5 Docs: `frontend/PROGRESS.md`, `frontend/CUTOVER_PROGRESS.md` (D2 row + verification rows), `frontend/CUTOVER_PLAN.md` (Step D item 2 note incl. the key split), `process/context/all-context.md` (storage keys + import contract), `process/context/tests/all-tests.md` (new spec, command, last green).
-- [ ] V6 Report in this folder: per-phase results, the residual rows the spec leaves in the dev database, and any product bug found (reported, not fixed).
+- [x] V1 `frontend/e2e/api/import.spec.ts`: inject a synthetic local snapshot via `addInitScript` before any app code runs, sign in as admin, preview (asserts "no writes" by comparing bootstrap counts), import, then assert through `/school/bootstrap` that appointments/timestamps/actors survive, the marker row exists, and a second import is refused.
+- [x] V2 `npm run e2e` twice consecutively; capture timings and artifact paths.
+- [x] V3 `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run smoke`.
+- [x] V4 Safety gates: grep changed files for `db:reset`, `reset`, `truncate`, `push`; confirm no `.env` / `.env.local` / `backend/.env` change in `git diff --stat`.
+- [x] V5 Docs: `frontend/PROGRESS.md`, `frontend/CUTOVER_PROGRESS.md` (D2 row + verification rows), `frontend/CUTOVER_PLAN.md` (Step D item 2 note incl. the key split), `process/context/all-context.md` (storage keys + import contract), `process/context/tests/all-tests.md` (new spec, command, last green).
+- [x] V6 Report in this folder: per-phase results, the residual rows the spec leaves in the dev database, and any product bug found (reported, not fixed).
 
 ## Acceptance Criteria
 

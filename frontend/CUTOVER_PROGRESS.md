@@ -3,8 +3,8 @@
 Live status for the frontend/backend integration. The plan is in
 `CUTOVER_PLAN.md`; app-wide state stays in `PROGRESS.md`.
 
-**Current step:** Step C - uploads and notifications complete (API uploads/downloads, activity-backed bell, per-user read/mute state); Step D next.
-**Last updated:** November 18, 2026.
+**Current step:** Step D2 - one-time import complete (admin-only `/school/import` + preview, store-key split, capture before first bootstrap); D3 next.
+**Last updated:** November 19, 2026.
 
 ## Board
 
@@ -19,7 +19,7 @@ Live status for the frontend/backend integration. The plan is in
 | B2 - Write path | ✅ Done | All current school write services use typed API/local branches with async UI call sites and post-write refresh. |
 | B3 - Domain slices | ✅ Done | Course ownership, activity log, `npm run smoke` (11 domains, 306 checks), parity fixes, numeric credits, 1 credit per lesson. Independent EVL rerun green (Nov 18). Plan archived to `process/features/backend-cutover/completed/b3-domain-smoke_18-11-26/`. |
 | Step C - Uploads + notifications | ✅ Done | API uploads/downloads (5 MB + MIME allowlist), activity-backed bell merged with the role derivation, `notification_state` read/mute per user. Browser + smoke evidence Nov 18. |
-| Step D - Parity + removal | 🟨 D1 done | D1 parity suite: Playwright, 10 tests (9 API + 1 demo), green twice back to back. D2 one-time import and D3 fallback removal not started. |
+| Step D - Parity + removal | ✅ D1 + D2 done | D1 parity suite: Playwright, green twice back to back. D2 one-time import: admin-only `/school/import` + `/import/preview`, store-key split, pre-bootstrap capture, receipt; suite is now 13 API + 1 demo, green twice back to back Nov 19. D3 fallback removal not started. |
 
 ## Rule-gap checklist (B0.2)
 
@@ -42,8 +42,10 @@ Live status for the frontend/backend integration. The plan is in
 - [x] API mode (`NEXT_PUBLIC_DATA_SOURCE=api` + `NEXT_PUBLIC_DEMO_MODE=false`) starts from an empty
   store, never the demo seed, and hydrates only after the API session is known.
 - [x] Shell shows "Loading your school" while bootstrapping and a retry/logout card on failure.
-- [x] Last good payload is cached in `lumina-school:v1` with `lumina-school:cache-owner`; the cache
-  is only used for the same account. Local/demo mode keeps the old seed path.
+- [x] Last good payload is cached in `lumina-school:api-cache` (`API_CACHE_KEY`) with
+  `lumina-school:cache-owner`; the cache is only used for the same account. API mode never
+  writes `lumina-school:v1`, which stays local/demo only (D2 split; the old shared key is what
+  destroyed local-only data on the first API sign-in).
 - [x] Window focus / tab visibility re-reads the snapshot in API mode (15 s throttle). Cross-tab
   storage events stay local-mode only.
 - [x] Refresh after every API mutation: all migrated commands refresh the role-scoped snapshot.
@@ -147,6 +149,39 @@ Live status for the frontend/backend integration. The plan is in
 - [x] Backend `webServer` uses `npm run start` (no `--watch`) so a failed boot cannot leave a
   detached `tsx watch` child holding port 4000.
 
+## Step D2 checklist (one-time import)
+
+- [x] Store-key split: `API_CACHE_KEY = "lumina-school:api-cache"` in `store.ts`; `hydrateSchool()`
+  routes API saves there and `api/bootstrap.ts` reads/writes it. `lumina-school:v1` is local/demo only,
+  so an API sign-in can no longer overwrite the local school before it is imported.
+- [x] Capture before the first bootstrap: `LuminaApp` calls `captureLocalSnapshot()` before
+  `loadSchoolFromApi` (and `bootstrap.ts` repeats it defensively). The snapshot lands in
+  `lumina-school:pending-import`; only payloads with at least one non-UUID id count as local data.
+- [x] `POST /school/import` + `POST /school/import/preview` (`backend/src/routes/school-import.ts`),
+  admin only via `requireRole("admin")`, route-scoped `bodyLimit` 8 MiB, zod payload pinned to
+  `version: 3`.
+- [x] `backend/src/lib/school-import.ts`: pure `buildImportPlan` (slug -> UUID, adopt users by email,
+  seed-row exclusion, drop records with a missing required parent, null optional FKs, avatar palette to
+  hex, warning list capped at 200) and `applyImportPlan` writing every collection in one
+  `app.db.transaction`. Profile ids are receipted but kept out of the flat `idMap` because the browser
+  store keys profiles by their user.
+- [x] Attachments: bytes go through the existing `POST /uploads` between preview and import; the payload
+  carries `localId -> serverId`. The planner never inserts attachment rows, drops a file with no bytes,
+  and records a `missing-bytes` warning.
+- [x] Idempotency: one `activity` row `school.imported` / `targetType: "school"` /
+  `targetId: source.seededAt`; a repeat is 409 unless `options.force`. `school.imported` is part of the
+  backend `ActivityAction` union.
+- [x] Admin UI: `AdminSettings` "Import local data" tab (API mode only) with capture refresh, seed and
+  settings toggles, Preview, Import, receipt download, and warning/empty/error states.
+- [x] Client modules: `school/import/capture.ts`, `school/import/plan.ts` (canonical-JSON seed diff,
+  data-URL -> `File`), `school/import/run.ts` (preview/import orchestration, archive + clear, receipt
+  JSON), `school/api/import.ts`.
+- [x] Tests: `backend/tests/school-import.test.ts` (13 planner/schema tests, including the profile/user
+  id collision) and `frontend/e2e/api/{import,cache-keys}.spec.ts` (4 tests) proving no writes on preview,
+  history/end time/request state/credit sign/byte parity, the marker row, 409 then forced 201,
+  admin-only 403s, `v1` untouched by an API login, and UUID-only payloads not captured.
+- [x] No schema change and no migration: rollback is the receipt JSON (`createdIds` per collection).
+
 ## Verification log
 
 | Date | Slice | What was checked | Result |
@@ -171,6 +206,10 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 18, 2026 | C smoke | `npm run smoke`: 13/13 domains, 343 checks (`uploads` 16, `notifications` 21), settings restored; deliberate red run (301-item feed cap) failed `notifications` with exit 1, then reverted. Root `typecheck`, `lint`, backend `npm test` (17/17), `git diff --check`, grep gate (no reset/push/truncate) | Pass |
 | Nov 18, 2026 | D1 suite | `npm run e2e` twice back to back on a seeded DB: run 1 API 9/9 (41.0 s) + demo 1/1 (10.0 s), run 2 API 9/9 (40.6 s) + demo 1/1 (10.0 s), both exit 0, no manual cleanup between runs. API specs cover auth (3), uploads byte parity, notification read/mute, student booking (-1 credit), manager book-on-behalf + teacher evidence + manager approve (+1 credit), and teacher→student→teacher homework; the demo spec proves IndexedDB upload/download, localStorage read/mute, and zero `/api/v1/` requests | Pass |
 | Nov 18, 2026 | D1 safety | Deliberate red run (`POST /auth/login` expected 201): exit 1 with `test-failed-1.png`, `video.webm`, `trace.zip`, `error-context.md` under `frontend/test-results/api/`, then reverted to 200. Precondition probe with `E2E_API_URL=http://localhost:4999/api/v1`: beforeAll failed all three auth tests with "backend is not reachable … start it with `npm run dev:api`" and nothing was seeded or repaired. Grep gate over `frontend/e2e/**` clean (only in-memory `.push()` and prose). `git diff --check` exit 0; no `frontend/app/**` change. Root `typecheck`, `lint`, backend `npm test` (17/17) | Pass |
+| Nov 19, 2026 | D2 backend | Planner/schema tests `backend/tests/school-import.test.ts` (13) and the full suite (30/30); `POST /school/import/preview` 200 with `pendingUploads: 1` and `totals.created: 10`; import 409 on a repeated marker; 401 anonymous / 403 for manager, teacher, student; backend `typecheck` + `lint` | Pass |
+| Nov 19, 2026 | D2 defect | First real import returned 500 `enrollments_student_id_users_id_fk`: profiles are keyed by their user in the browser store, so the profile id overwrote the user id in the flat import map. Fixed with `createdProfile()` (receipts profile ids, never touches `idMap`) plus a regression test; repro re-run returned 201 | Pass (fixed) |
+| Nov 19, 2026 | D2 suite | `npm run e2e` twice back to back on the final code: run 1 API 13/13 (49.2 s) + demo 1/1 (9.2 s), run 2 API 13/13 (50.3 s) + demo 1/1 (9.2 s), both exit 0, no cleanup between runs. `cache-keys` proves `v1` byte-identical after an API login and the pre-bootstrap capture; `import` proves read-only preview, faithful history (end time, actors, review state, credit sign, byte parity), marker row, receipt matching the response, 409 then forced 201, and admin-only 401/403 | Pass |
+| Nov 19, 2026 | D2 gates | `npm run smoke` 13/13 domains, 343 checks, settings restored; root `typecheck` + `lint`; backend tests 30/30; `git diff --check` 0; grep gate over the changed files clean (only `warningsTruncated` matches `truncate`); no `.env*` edit. Residue counted: 6 imported schools, 7 attachments, 12 `school.imported` rows | Pass |
 
 ## Change log
 
@@ -187,6 +226,7 @@ Live status for the frontend/backend integration. The plan is in
 | Nov 18, 2026 | B3 activity parity: activity writes on course, people, enrollment, settings, homework, credit, and request routes; new admin-only paginated `GET /activity`; action names aligned with the browser store's `recordActivity` vocabulary. | `backend/src/routes/activity.ts`, `backend/src/routes/index.ts`, `backend/src/routes/{courses,users,teachers,students,enrollments,settings,assignments,credits,requests}.ts`, `backend/tests/contract.test.ts` |
 | Nov 18, 2026 | Step C: API uploads/downloads with 5 MB + MIME validation, activity-backed bell merged with the role derivation, per-user `notification_state` (read ids + muted categories), cancellation evidence by attachment id, bounded notification ids, smoke `uploads`/`notifications` domains. | `backend/src/{db/schema.ts,lib/notifications.ts,routes/notifications.ts,routes/uploads.ts,app.ts}`, `backend/src/db/migrations/0002_notification_state.sql`, `backend/scripts/smoke.ts`, `backend/tests/contract.test.ts`, `frontend/app/lib/{api/client.ts,hooks/useNotifications.ts,school/notifications.ts,school/attachment-download.ts,school/api/{uploads,notifications}.ts,school/services/{uploads,teaching,curriculum}.ts,school/views.ts,types.ts,school/index.ts}`, `frontend/app/components/{manager/ManagerApprovals.tsx,manager/ManagerCurriculum.tsx,manager/ManagerSettings.tsx,teacher/TeacherLessons.tsx}` |
 | Nov 18, 2026 | Step D1: Playwright parity suite for API mode (auth, uploads, notifications, booking, cancellation/refund, homework) and a demo-mode regression, with mode-specific configs, an env-injecting dev-server launcher, API state assertions, restore-on-exit notification state, and loud preconditions. | `frontend/{playwright.config.ts,playwright.demo.config.ts,eslint.config.mjs,package.json}`, `frontend/e2e/**`, `package.json`, `.gitignore` |
+| Nov 19, 2026 | Step D2: one-time import from the browser store into Postgres. API mode's offline cache moved to `lumina-school:api-cache` so `v1` is never overwritten; the local school is captured to `lumina-school:pending-import` before the first bootstrap; `POST /school/import` + `/import/preview` (admin only) map slug ids to UUIDs and write every collection in one transaction, adopting users by email, uploading attachment bytes through `POST /uploads`, and marking the run with `school.imported` (409 on repeat unless forced); admin Import tab with preview, seed/settings toggles, and a receipt download; new specs plus a profile/user id collision fix. | `backend/src/{lib/school-import.ts,routes/school-import.ts,routes/index.ts,lib/activity.ts}`, `backend/tests/school-import.test.ts`, `frontend/app/lib/school/{store.ts,index.ts,api/bootstrap.ts,api/import.ts,import/*}`, `frontend/app/components/{LuminaApp.tsx,admin/AdminSettings.tsx}`, `frontend/e2e/{api/import.spec.ts,api/cache-keys.spec.ts,support/local-school.ts}`, `frontend/{PROGRESS.md,CUTOVER_PROGRESS.md,CUTOVER_PLAN.md}`, `process/context/{all-context.md,tests/all-tests.md}` |
 
 ## Open decisions / blockers
 
@@ -204,9 +244,10 @@ Live status for the frontend/backend integration. The plan is in
 - **Data-source flags.** `NEXT_PUBLIC_DATA_SOURCE=api` only takes effect with API
   auth (`NEXT_PUBLIC_DEMO_MODE=false`); demo sign-in keeps the browser store so the
   offline demo stays intact. `NEXT_PUBLIC_DATA_SOURCE` defaults to `local`.
-- **Offline cache.** API mode writes the last good bootstrap to `lumina-school:v1`
-  and the account email to `lumina-school:cache-owner`. It is only read back for the
-  same account, and only when bootstrap fails after a valid session.
+- **Offline cache.** API mode writes the last good bootstrap to
+  `lumina-school:api-cache` (`API_CACHE_KEY`) and the account email to
+  `lumina-school:cache-owner`. It is only read back for the same account, and only when
+  bootstrap fails after a valid session. `lumina-school:v1` stays local/demo only.
 - **Writes in API mode.** All current school service writes use the API and refresh
   the role-scoped snapshot. Local/demo writes remain synchronous and local.
 - **B3 contract notes (Nov 18).** `GET /credits/balance/:studentId` returns `balance` as a number (was a

@@ -1,7 +1,7 @@
 # Lumina ESL - Progress and Next Plan
 
-Last updated: November 16, 2026
-Last verified: Step D1 (parity suite) done Nov 18, 2026. `npm run e2e` runs the Playwright API-mode suite (9 specs) and the demo-mode regression (1 spec), green twice back to back with no leftover processes; `npm run typecheck`, `npm run lint`, and backend tests (17/17) pass. Steps A–C and B0–B3 are closed with their evidence in `CUTOVER_PROGRESS.md`; D2 (one-time import) and D3 (fallback removal) are not started.
+Last updated: November 19, 2026
+Last verified: Step D2 (one-time import) done Nov 19, 2026. `npm run e2e` runs the Playwright API-mode suite (13 tests across 9 specs) and the demo-mode regression (1 spec), green twice back to back with no leftover processes; `npm run typecheck`, `npm run lint`, backend tests (30/30), and `npm run smoke` pass. Steps A–C and B0–B3 are closed with their evidence in `CUTOVER_PROGRESS.md`; D3 (fallback removal) is not started.
 
 ## Status at a glance
 

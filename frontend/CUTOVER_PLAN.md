@@ -92,8 +92,9 @@ for their required commands.
 - [x] **B1.1** Add `app/lib/school/api/bootstrap.ts` that fetches and validates
   `/school/bootstrap` as `SchoolData`.
 - [x] **B1.2** Hydrate the existing store from it on load when
-  `NEXT_PUBLIC_DATA_SOURCE=api`; keep `lumina-school:v1` only as offline
-  cache/demo fallback.
+  `NEXT_PUBLIC_DATA_SOURCE=api`; the offline cache moved to `lumina-school:api-cache`
+  in D2, so `lumina-school:v1` stays local/demo only and an API sign-in can no
+  longer overwrite it.
 - [x] **B1.3** Refresh on window focus and keep cross-tab sync for local mode only.
   Mutation refresh is implemented for the migrated B2 settings and self-name
   commands.
@@ -165,8 +166,15 @@ and student. Add a Playwright case for the user-visible flow before moving on.
   to CI. **D1 done November 18, 2026:** `npm run e2e` runs all six flows in API
   mode plus a demo regression. CI wiring is deferred because the repo has no
   pipeline: `process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`.
-- [ ] D2 - Provide a one-time import from `lumina-school:v1` and IndexedDB into
-  PostgreSQL.
+- [x] D2 - Provide a one-time import from `lumina-school:v1` and IndexedDB into
+  PostgreSQL. **D2 done November 19, 2026:** admin-only `POST /school/import` +
+  `POST /school/import/preview` (`backend/src/{lib,routes}/school-import.ts`) map local
+  slug ids to UUIDs and write every collection in one transaction; the browser captures
+  `lumina-school:v1` into `lumina-school:pending-import` before the first bootstrap, and
+  API mode caches to `lumina-school:api-cache` so the local key is never overwritten.
+  Attachment bytes are uploaded through `POST /uploads` between preview and import;
+  idempotency is a `school.imported` activity marker (409 on repeat unless forced);
+  rollback is the receipt JSON, with no schema change.
 - [ ] D3 - Delete duplicated seed data and the browser-store fallback from the
   production path; keep a documented rollback flag
   (`NEXT_PUBLIC_DATA_SOURCE=local`) for one release.
