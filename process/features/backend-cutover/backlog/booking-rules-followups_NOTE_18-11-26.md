@@ -7,9 +7,18 @@ feature: backend-cutover
 
 # Booking and billing rule follow-ups
 
-status: done-with-gap
+status: 1-2-done (20-11-26); 3-open
 item: B3-GAP-RULES (known gaps from b3-domain-smoke_PLAN_18-11-26 plus one new finding)
 reason: These need product decisions or billing work outside B3; the smoke asserts current behavior so any change is visible.
+
+## Resolution
+
+1. **Fixed 20-11-26.** `POST /lessons` now debits 1 credit inside the create transaction
+   (`credit_entries` `reason: "booking"`), refuses a balance under 1, and the student cancel refunds
+   only a lesson that has that debit row. Smoke asserts the debit delta.
+2. **Fixed 20-11-26.** `resolveLessonDefaults` reads the enrollment `FOR UPDATE` (`.for("update")`), so
+   plan selection is serialized per student.
+3. **Open.** Student self-purchase (up to 100) still has no payment check.
 
 ## Gaps
 
@@ -19,4 +28,5 @@ reason: These need product decisions or billing work outside B3; the smoke asser
 
 ## Next step
 
-NEW PLAN REQUIRED: decide whether `POST /lessons` should debit (and refund only debited lessons); lock plan selection with the booking-concurrency work; gate student purchases behind a payment provider.
+item 3 only: gate student purchases behind a payment provider (or cap self-purchase). Items 1 and 2
+are done; keep the smoke debit assertions as the regression gate.

@@ -48,7 +48,8 @@ export async function resolveLessonDefaults(
       ),
     )
     .orderBy(asc(enrollments.startedAt))
-    .limit(1);
+    .limit(1)
+    .for("update");
   if (!enrollment) {
     return {
       enrollmentId: null,

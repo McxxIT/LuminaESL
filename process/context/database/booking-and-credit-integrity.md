@@ -8,7 +8,7 @@ date: 18-11-26
 
 # Booking and Credit Integrity
 
-BLUF: Double-booking is prevented by deleting the `slot_openings` row inside a DB transaction (`DELETE ... RETURNING`); credits are an append-only ledger in `credit_entries`. This is a user-flagged care area. Risks below are observed but NOT fixed — do not assume they are handled.
+BLUF: Double-booking is prevented by deleting the `slot_openings` row inside a DB transaction (`DELETE ... RETURNING`); credits are an append-only ledger in `credit_entries`. This is a user-flagged care area. Some risks below are still open — read each line's status, do not assume they are handled.
 
 ## Booking flow — `POST /bookings` (`backend/src/routes/bookings.ts`, transaction at ~L175)
 
@@ -29,14 +29,22 @@ Managers may only book for students on their team (`managerOwnsStudent`, `backen
 
 ## Refunds (`backend/src/routes/lessons.ts`)
 
-- Student cancel (~L638): refunded when `hoursUntil(date,time) >= settings.studentLateCancellationHours` (default 24); otherwise "Late cancellation, no refund". Refund row at ~L651.
+- Student cancel (`/:id/cancel`, ~L720): refunded only when the lesson has a `booking` debit row and
+  `hoursUntil(date,time) >= settings.studentLateCancellationHours` (default 24); otherwise "Late
+  cancellation, no refund". A `POST /lessons`-created lesson that was never debited is cancelled
+  without a refund.
 - Teacher absence (~L720-752): refunds when `settings.refundTeacherCancellations` (default true) and the lesson is not already cancelled.
 - Frontend local-mode mirror uses `LESSON_CREDIT_HOURS` in `frontend/app/lib/school/services/common.ts`; keep rules identical in both branches.
 
-## Known risks (observed, not fixed)
+## Known risks (observed)
 
-1. (Resolved in B3: the `::int` truncation is gone.) Backend `POST /lessons` does not debit a credit while demo add-lesson debits 1; an early student cancel refunds +1, so credits can be minted (`booking-rules-followups_NOTE_18-11-26.md`). Plan selection is also unlocked, and student self-purchase (up to 100) has no payment check.
-2. The balance read and the debit are not row-locked: two concurrent bookings by one student could both pass the balance check.
+1. Resolved in B3: the `::int` truncation is gone. Resolved Nov 20, 2026: `POST /lessons` debits 1
+   credit (`credit_entries` `reason: "booking"`) and a cancellation refunds only a lesson that has
+   that debit row; `resolveLessonDefaults` locks plan selection with `.for("update")`. Still open:
+   student self-purchase (up to 100) has no payment check
+   (`booking-rules-followups_NOTE_18-11-26.md`).
+2. The balance read and the debit are not row-locked: two concurrent bookings by one student could
+   both pass the balance check.
 3. No unique constraint on `lessons (teacherId, date, time)`; only `slot_openings` unique index protects slots, so teacher-created lessons (`createLesson` path) rely on app checks.
 
 Any fix needs a migration (see `migrations-workflow.md`) and a mirrored change in the frontend local branch.

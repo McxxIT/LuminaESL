@@ -293,9 +293,13 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden("This student is not on your team");
       }
 
-      const lesson = await app.db.transaction(async (tx) => {
-        // Omitted enrichment fields are filled like a booking; explicit values win.
-        const defaults = await resolveLessonDefaults(tx, {
+       const lesson = await app.db.transaction(async (tx) => {
+         // Debit one credit like the browser scheduling paths, so a cancellation only refunds
+         // a lesson that was actually paid for.
+         const balance = await getCreditBalance(tx, body.studentId);
+         if (balance < 1) throw badRequest("The student does not have enough credits");
+         // Omitted enrichment fields are filled like a booking; explicit values win.
+         const defaults = await resolveLessonDefaults(tx, {
           teacherId,
           studentId: body.studentId,
           actorId: request.user.sub,
@@ -333,9 +337,18 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
             createdBy: request.user.sub,
           })
           .returning();
-        if (!row) throw new Error("Failed to create lesson");
+         if (!row) throw new Error("Failed to create lesson");
 
-        await logActivity(tx, {
+         await tx.insert(creditEntries).values({
+           studentId: body.studentId,
+           hours: -1,
+           reason: "booking",
+           description: `${row.title} lesson`,
+           lessonId: row.id,
+           actorId: request.user.sub,
+         });
+
+         await logActivity(tx, {
           actorId: request.user.sub,
           action: "lesson.booked",
           targetType: "lesson",
@@ -736,8 +749,14 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .from(settings)
         .where(eq(settings.id, 1))
         .limit(1);
-      const lateHours = prefs?.lateHours ?? 24;
-      const refunded = hoursUntil(lesson.date, lesson.time) >= lateHours;
+       const lateHours = prefs?.lateHours ?? 24;
+       const [debit] = await app.db
+         .select({ id: creditEntries.id })
+         .from(creditEntries)
+         .where(and(eq(creditEntries.lessonId, id), eq(creditEntries.reason, "booking")))
+         .limit(1);
+       const debited = !!debit;
+       const refunded = debited && hoursUntil(lesson.date, lesson.time) >= lateHours;
 
       const updated = await app.db.transaction(async (tx) => {
         const [row] = await tx

@@ -460,7 +460,7 @@ async function onBehalfScenario(): Promise<void> {
 }
 
 async function rebookScenario(): Promise<void> {
-  await addCredits("studentR", 1.5);
+  await addCredits("studentR", 2.5);
   const original = await scheduleLesson(tok("teacherA"), uid("teacherA"), uid("studentR"), nextSlot(6));
   check(near(await balance("studentR"), 1.5), "rebook fixture balance should be 1.5");
   const slot = nextSlot(6);
@@ -485,7 +485,7 @@ async function lessonsScenario(): Promise<void> {
   expectStatus(await call(tok("managerB"), "POST", "/lessons", { teacherId: uid("teacherA"), studentId: uid("studentA"), ...nextSlot(7), title: "x" }), 403, "cross-team manager schedules");
   const before = await balance("studentA");
   const lessonId = await scheduleLesson(tok("teacherA"), uid("teacherA"), uid("studentA"), nextSlot(7));
-  check(near(await balance("studentA"), before), "POST /lessons does not change credits");
+  check(near(await balance("studentA"), before - 1), "POST /lessons debits one credit");
   await expectOneActivity("lesson", lessonId, "lesson.booked");
   const scheduled = await getLesson(lessonId);
   check(scheduled.enrollmentId === enrollmentId && typeof scheduled.lessonPlanId === "string", "scheduled lesson not enriched");
