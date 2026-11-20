@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultTeacherProfile, defaultTeacherSettings, teacherStudentsSeed, teacherTasksSeed } from "../../lib/data";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useSchool } from "../../lib/hooks/useSchool";
+import { isApiDataMode } from "../../lib/auth/mode";
 import { assignmentsForTeacher, findUserByEmail, getSchoolSnapshot, resetSchool, studentProfile, studentsForUser, teacherProfile, teacherScheduleView, toTeacherHomeworkView, type SchoolData, type SchoolUser } from "../../lib/school";
 import {
   assignHomework as assignHomeworkService,
@@ -262,6 +263,8 @@ export default function useTeacherWorkspace(account: Account) {
 
   /** Demo reset: re-seeds the shared school (every role) and this teacher's personal data. */
   const resetWorkspace = useCallback(() => {
+    // API mode owns the data; a leftover button must not resurrect the demo school.
+    if (isApiDataMode()) return;
     resetSchool();
     setPersonal(createPersonalState(account));
   }, [account]);

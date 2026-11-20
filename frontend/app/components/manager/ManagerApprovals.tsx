@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Image from "next/image";
+
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
 import { formatTimestamp, slotEnd } from "../../lib/scheduling";

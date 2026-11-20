@@ -67,8 +67,14 @@ function upgrade(data: SchoolData | null): SchoolData | null {
     // Fill collections/settings added after this data was saved.
     const empty = createEmptySchool();
     const collections = { ...empty.collections, ...data.collections };
-    // Collections added after this data was saved start from the demo seed (e.g. shared homework).
-    if (!data.collections.assignments) collections.assignments = createSeedSchool().collections.assignments;
+    // A collection added after this data was saved is filled from the demo seed only for the
+    // local school (e.g. shared homework kept from an older local snapshot). An API cache must
+    // never gain demo homework, so it starts empty and waits for the next bootstrap.
+    if (!data.collections.assignments) {
+      collections.assignments = dataSource === "api"
+        ? empty.collections.assignments
+        : createSeedSchool().collections.assignments;
+    }
     return { ...data, settings: { ...empty.settings, ...data.settings }, collections };
   }
   return null;
@@ -162,13 +168,22 @@ export function clearSchoolSnapshot() {
   emit();
 }
 
-/** Wipe and re-seed the demo school (used by "Reset demo" actions and tests). */
-export function resetSchool(seed: SchoolData = createSeedSchool()) {
+/**
+ * Wipe and re-seed the demo school (used by "Reset demo" actions and tests).
+ * API mode is inert: the server owns that data, and re-seeding the browser store would show
+ * demo records until the next bootstrap. The guard is here so a stale call site cannot leak
+ * the demo school into an API session either.
+ */
+export function resetSchool(seed?: SchoolData): SchoolData {
+  if (dataSource === "api") {
+    console.warn("Lumina: demo reset ignored in API mode.");
+    return ensureLoaded();
+  }
   ensureLoaded();
-  snapshot = seed;
-  if (dataSource === "local") adapter.save(seed);
+  snapshot = seed ?? createSeedSchool();
+  if (dataSource === "local") adapter.save(snapshot);
   emit();
-  return seed;
+  return snapshot;
 }
 
 /** Swap the persistence layer (tests, or a future API adapter). Drops the cached snapshot. */

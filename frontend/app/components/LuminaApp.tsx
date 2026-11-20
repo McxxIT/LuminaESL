@@ -147,12 +147,13 @@ export default function LuminaApp() {
     setStudentCredits(24);
     setOpenPopover(null);
     setModal(null);
-    window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
+    // `lumina-account` is the demo session blob; API mode gets its session from the JWT cookie.
+    if (isDemoMode()) window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
   }
 
   function updateAccount(nextAccount: Account) {
     setAccount(nextAccount);
-    window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
+    if (isDemoMode()) window.localStorage.setItem("lumina-account", JSON.stringify(nextAccount));
   }
 
   function logout() {

@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { createSeedSchool } from "../../app/lib/school/seed";
 import {
   assertNoPageErrors,
   collectPageErrors,
   downloadBytes,
+  expectNotice,
   nav,
   pdfBuffer,
   runId,
@@ -99,5 +101,75 @@ test.describe("Demo mode regression", () => {
 
     expect(apiCalls, "demo mode must not call the API").toEqual([]);
     assertNoPageErrors(pageErrors);
+  });
+
+  /**
+   * D3 keeps the legacy local upgrade: a snapshot saved before `assignments` existed still gains the
+   * demo homework in local mode (the API cache must never, so `upgrade()` branches on `dataSource`).
+   */
+  test("fills the shared homework into an older local snapshot", async ({ page }) => {
+    const older = createSeedSchool("2026-01-01T00:00:00.000Z");
+    const collections: Record<string, unknown> = { ...older.collections };
+    delete collections.assignments;
+    const payload = JSON.stringify({ ...older, collections });
+
+    await page.addInitScript((raw) => {
+      window.localStorage.setItem("lumina-school:v1", raw);
+    }, payload);
+
+    await page.goto("/");
+    await page.locator('input[type="email"]').fill("student@lumina.school");
+    await page.locator('input[type="password"]').fill("demo-pass");
+    await page.locator('button[type="submit"]').click();
+
+    await nav(page, "Assignments");
+    const cards = page.locator(".student-assignment-card");
+    await expect(cards.first()).toBeVisible();
+    await expect(
+      cards.filter({ hasText: "Audio recording: 2-minute elevator pitch" }),
+      "the missing collection is filled from the demo seed in local mode",
+    ).toHaveCount(1);
+  });
+
+  /** D3 hides the reset control in API mode only; local mode must still reseed on demand. */
+  test("resets the demo school from settings", async ({ page }) => {
+    const sentinel = `sentinel-${runId()}`;
+    const seeded = createSeedSchool("2026-01-01T00:00:00.000Z");
+    const withSentinel = JSON.parse(JSON.stringify(seeded)) as typeof seeded;
+    withSentinel.collections.courses[sentinel] = {
+      id: sentinel,
+      title: `Local edit ${sentinel}`,
+      level: "A2-C1",
+      summary: "A course only this browser knows about",
+      objectives: [],
+      status: "published",
+      ownerId: sentinel,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    await page.addInitScript((raw) => {
+      window.localStorage.setItem("lumina-school:v1", raw);
+    }, JSON.stringify(withSentinel));
+
+    await page.goto("/");
+    await page.locator('input[type="email"]').fill("admin@lumina.school");
+    await page.locator('input[type="password"]').fill("demo-pass");
+    await page.locator('button[type="submit"]').click();
+
+    await nav(page, "Settings");
+    const reset = page.locator('button:has-text("Reset demo")');
+    await expect(reset, "local mode keeps the reset control").toBeVisible();
+    await reset.click();
+    await page.locator('.inline-confirm button:has-text("Reset now")').click();
+    await expectNotice(page, "The demo school was reset.");
+
+    const after = await page.evaluate(() =>
+      JSON.parse(window.localStorage.getItem("lumina-school:v1") ?? "{}"),
+    ) as { seededAt: string; collections: { courses: Record<string, unknown>; assignments: Record<string, unknown> } };
+    expect(Object.keys(after.collections.courses), "the local edit is gone").not.toContain(sentinel);
+    expect(after.collections.courses, "the demo school is back").toHaveProperty("course-core-1to1");
+    expect(Object.keys(after.collections.assignments).length, "homework is re-seeded").toBeGreaterThan(0);
+    expect(after.seededAt, "the snapshot was re-created").not.toBe("2026-01-01T00:00:00.000Z");
   });
 });

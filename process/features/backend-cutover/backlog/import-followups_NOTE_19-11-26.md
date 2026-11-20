@@ -7,9 +7,16 @@ feature: backend-cutover
 
 # Import follow-ups (cosmetic)
 
-status: done-with-gap
+status: item-1-done (D3 pass, 20-11-26); item-2 open
 item: D2-GAP-FOLLOWUPS (reported during D2, deferred as out of scope)
 reason: Both are cosmetic, pre-existing or additive, and unrelated to import correctness; D2 was scoped to the import and its gates. Fixing them inside D2 would have widened the blast radius without a proving gate.
+
+## Resolution
+
+1. **Bell title and navigation (done 20-11-26).** `frontend/app/lib/school/notifications.ts` now maps
+   `school.imported` to "School imported" in `ACTION_TITLES` and routes the `school` family to
+   `Settings` (admin) or `Overview` (other roles) in `navFor`, so the bell matches the activity filter.
+2. **`next/image` blob warning (open).** Still logged by the manager cancellation modal; cosmetic.
 
 ## Gap
 
@@ -26,7 +33,7 @@ Two findings did not block D2 and were reported rather than fixed:
 
 ## Next step
 
-Either fold both into the D3 (fallback removal) pass - the bell fix is a one-line map entry plus a
-navigation rule - or take them as a single small cleanup plan. No research needed. The blast radius is
-`frontend/app/components` plus the notification derivation; verify by opening the bell as an admin
-after a forced import re-run and confirming the entry points at Settings.
+Item 1 is closed (D3 pass). Item 2 (`next/image` blob warning) remains open and cosmetic; fix it with
+the next `ManagerApprovals.tsx` touch (give the evidence image an explicit `width`/`height` or a
+`style` with both auto) rather than a dedicated plan. Verify by opening the manager cancellation
+review modal and confirming the console stays clean.

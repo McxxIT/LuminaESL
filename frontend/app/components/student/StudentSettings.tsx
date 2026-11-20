@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Icon from "../Icon";
 import Toggle from "./Toggle";
+import { isApiDataMode } from "../../lib/auth/mode";
 import { downloadTextFile } from "../../lib/student";
 import type { StudentProfile, StudentSettings } from "../../lib/types";
 
@@ -90,10 +91,10 @@ export default function StudentSettings({ profile, settings, onSaveSettings, onR
           <button type="button" className="danger-outline-button" onClick={onRequestLogout}><Icon name="logout" size={15} /> Sign out of Lumina</button>
         </section>
 
-        <section className="panel student-panel danger-zone">
+        {!isApiDataMode() && <section className="panel student-panel danger-zone">
           <div><span className="eyebrow">SESSION</span><h2>Reset demo workspace</h2><p>Restore the demo school for everyone (lessons, slots, requests, credits) and reset this account&apos;s notes and preferences.</p></div>
           {resetOpen ? <div className="inline-confirm"><span>Reset the demo school for every account?</span><button type="button" className="cancel-button" onClick={() => setResetOpen(false)}>Keep my data</button><button type="button" className="danger-button" onClick={() => { setResetOpen(false); onResetWorkspace(); onNotice("Workspace reset to defaults."); }}>Reset</button></div> : <button type="button" className="danger-outline-button" onClick={() => setResetOpen(true)}><Icon name="trash" size={15} /> Reset data</button>}
-        </section>
+        </section>}
       </div>
 
       <aside className="student-settings-side">

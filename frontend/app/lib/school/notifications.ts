@@ -159,7 +159,7 @@ const ACTION_TITLES: Record<string, string> = {
   "request.created": "New request",
   "request.rejected": "Request declined",
   "request.withdrawn": "Request withdrawn",
-  "settings.updated": "School settings updated",
+  "school.imported": "School imported",
   "slot.closed": "Slot closed",
   "slot.opened": "Slot opened",
   "student.created": "Student added",
@@ -220,6 +220,7 @@ function navFor(action: string, role: UserRole): string {
   if (family === "manager") return "Managers";
   if (family === "teacher") return role === "admin" || role === "manager" ? "Teachers" : "Students";
   if (family === "user" || family === "student") return role === "student" ? "Profile" : "Students";
+  if (family === "school") return role === "admin" ? "Settings" : "Overview";
   return "Overview";
 }
 

@@ -73,7 +73,7 @@ export default function ManagerSettings({ user, onNavigate, onRequestLogout, onN
           <button type="button" className="danger-outline-button" onClick={onRequestLogout}><Icon name="logout" size={15} /> Sign out</button>
         </section>
 
-        {isAdmin && <section className="panel student-panel danger-zone">
+        {isAdmin && !isApiDataMode() && <section className="panel student-panel danger-zone">
           <div><span className="eyebrow">DEMO DATA</span><h2>Reset the demo school</h2><p>Restore every account&apos;s lessons, people, courses, and credits to the original demo. Personal preferences are kept.</p></div>
           {resetOpen
             ? <div className="inline-confirm"><span>Reset the demo school for every account?</span><button type="button" className="cancel-button" onClick={() => setResetOpen(false)}>Keep data</button><button type="button" className="danger-button" onClick={() => { resetSchool(); setResetOpen(false); onNotice("The demo school was reset."); }}>Reset now</button></div>

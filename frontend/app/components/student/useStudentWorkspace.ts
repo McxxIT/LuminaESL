@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultStudentProfile, defaultStudentSettings, studentAssignments } from "../../lib/data";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useSchool } from "../../lib/hooks/useSchool";
+import { isApiDataMode } from "../../lib/auth/mode";
 import {
   activeCourseProgress,
   assignmentsForStudent,
@@ -224,6 +225,8 @@ export default function useStudentWorkspace(account: Account) {
 
   /** Demo reset: re-seeds the shared school (every role) and this student's personal data. */
   const resetWorkspace = useCallback(() => {
+    // API mode owns the data; a leftover button must not resurrect the demo school.
+    if (isApiDataMode()) return;
     resetSchool();
     setPersonal(createPersonalState(account));
   }, [account]);
