@@ -7,7 +7,7 @@ feature: backend-cutover
 
 # Import follow-ups (cosmetic)
 
-status: item-1-done (D3 pass, 20-11-26); item-2 open
+status: done (item 1 in the D3 pass, item 2 on 20-11-26)
 item: D2-GAP-FOLLOWUPS (reported during D2, deferred as out of scope)
 reason: Both are cosmetic, pre-existing or additive, and unrelated to import correctness; D2 was scoped to the import and its gates. Fixing them inside D2 would have widened the blast radius without a proving gate.
 
@@ -16,7 +16,12 @@ reason: Both are cosmetic, pre-existing or additive, and unrelated to import cor
 1. **Bell title and navigation (done 20-11-26).** `frontend/app/lib/school/notifications.ts` now maps
    `school.imported` to "School imported" in `ACTION_TITLES` and routes the `school` family to
    `Settings` (admin) or `Overview` (other roles) in `navFor`, so the bell matches the activity filter.
-2. **`next/image` blob warning (open).** Still logged by the manager cancellation modal; cosmetic.
+2. **`next/image` blob warning (done 20-11-26).** The cause was a fixed `width`/`height` pair with
+   `height: "auto"` (and `maxWidth`), so Next saw one dimension modified without the other whenever the
+   attachment's aspect ratio differed from 3:2. `ManagerApprovals.tsx` and `TeacherLessons.tsx` now use
+   explicit CSS width/height equal to the attributes plus `objectFit: "contain"`, which renders exactly
+   the declared box and keeps the preview undistorted. Verified with `api/cancellation-refund.spec.ts`:
+   the evidence still renders as a blob URL, downloads on click, and the console warning is gone.
 
 ## Gap
 
@@ -33,7 +38,5 @@ Two findings did not block D2 and were reported rather than fixed:
 
 ## Next step
 
-Item 1 is closed (D3 pass). Item 2 (`next/image` blob warning) remains open and cosmetic; fix it with
-the next `ManagerApprovals.tsx` touch (give the evidence image an explicit `width`/`height` or a
-`style` with both auto) rather than a dedicated plan. Verify by opening the manager cancellation
-review modal and confirming the console stays clean.
+Nothing left in this note. Both findings are closed; keep the cancellation spec as the regression
+gate for the evidence preview (it asserts visibility, the blob URL, and a working download).

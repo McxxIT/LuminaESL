@@ -38,7 +38,7 @@ function CancellationAttachment({ attachment, onNotice }: {
     {href
       ? <a href={href} target="_blank" rel="noreferrer" download={attachment.name}>
         {isImage
-          ? <Image src={href} alt={attachment.name} width={240} height={160} unoptimized style={{ width: "100%", height: "auto", maxWidth: 240, borderRadius: 8 }} />
+          ? <Image src={href} alt={attachment.name} width={240} height={160} unoptimized style={{ width: 240, height: 160, objectFit: "contain", borderRadius: 8 }} />
           : <><Icon name="file" size={14} /> {attachment.name}</>}
       </a>
       : <button type="button" className="icon-text-button" onClick={download}><Icon name="file" size={14} /> {attachment.name}</button>}

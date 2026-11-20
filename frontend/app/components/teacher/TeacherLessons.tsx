@@ -312,7 +312,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
     return <div className="lesson-detail-section">
       <span className="eyebrow">ATTACHMENT</span>
       {isImage
-        ? <a href={attachment.dataUrl} target="_blank" rel="noreferrer"><Image src={attachment.dataUrl} alt={attachment.name} width={220} height={150} unoptimized style={{ maxWidth: "100%", height: "auto", borderRadius: 8 }} /></a>
+        ? <a href={attachment.dataUrl} target="_blank" rel="noreferrer"><Image src={attachment.dataUrl} alt={attachment.name} width={220} height={150} unoptimized style={{ width: 220, height: 150, objectFit: "contain", borderRadius: 8 }} /></a>
         : <a href={attachment.dataUrl} download={attachment.name}><Icon name="file" size={14} /> {attachment.name}</a>}
     </div>;
   }
