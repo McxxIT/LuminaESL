@@ -24,7 +24,7 @@ Other frontend env: `NEXT_PUBLIC_API_URL`. Env names only — see `frontend/.env
 
 - `frontend/app/components/LuminaApp.tsx`: `booting` state, `effectiveAccount` (demo account vs `accountForUser(authUser)`), demo-only local state. Known wart: `studentCredits` is local state seeded at `24` (matches the demo seed); real balance should come from the credits service/ledger. `SCHOOL_SCHEMA_VERSION` 3: stale demo stores re-seed.
 - `frontend/app/lib/school/services/*`: each service branches on `isApiDataMode()`; API branch calls `lib/school/api/*`, local branch calls `updateSchool(draft => ...)`.
-- `frontend/app/lib/school/store.ts`: `dataSource` `"local" | "api"`.
+- `frontend/app/lib/school/store.ts`: `dataSource` `"local" | "api"`; `upgrade()` fills a missing collection from the seed only in local mode, and `resetSchool()` is inert in API mode.
 
 ## Rules to keep mock data out of production calls
 
@@ -37,4 +37,4 @@ Other frontend env: `NEXT_PUBLIC_API_URL`. Env names only — see `frontend/.env
 
 admin@ (Jamie Smith), manager@ (Priya Raman), manager2@ (Marco Bianchi), teacher@ (Alex Johnson), student@ (Mia Chen). Demo UI accepts any non-empty password; API mode password `Password123!` (seeded by `npm run db:seed`). "Reset demo workspace" in Settings only reseeds the browser store.
 
-Progress of the cutover: `frontend/CUTOVER_PROGRESS.md` (Steps A-C and D1 done; D2 one-time import and D3 fallback removal next).
+Progress of the cutover: `frontend/CUTOVER_PROGRESS.md` (Steps A-D done; D2 one-time import and D3 demo-data removal archived under `process/features/backend-cutover/completed/`).

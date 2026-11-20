@@ -176,9 +176,18 @@ and student. Add a Playwright case for the user-visible flow before moving on.
   idempotency is a `school.imported` activity marker (409 on repeat unless forced);
   rollback is the receipt JSON, with no schema change. Archived to
   `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`.
-- [ ] D3 - Delete duplicated seed data and the browser-store fallback from the
+- [x] D3 - Delete duplicated seed data and the browser-store fallback from the
   production path; keep a documented rollback flag
-  (`NEXT_PUBLIC_DATA_SOURCE=local`) for one release.
+  (`NEXT_PUBLIC_DATA_SOURCE=local`) for one release. **D3 done November 19, 2026:**
+  reconnaissance showed the production read path already branches on `isApiDataMode`,
+  so D3 removed demo *leakage* instead of the store. `store.ts` `upgrade()` fills a
+  missing collection from the seed only in local mode (an API cache starts empty);
+  `resetSchool()` is inert in API mode with a console warning; the manager/student/
+  teacher reset controls are hidden and their handlers guarded; `lumina-account` is
+  written only in demo mode. The offline cache, `lumina-school:v1`, the import lane,
+  and the `NEXT_PUBLIC_DATA_SOURCE=local` rollback all stay. Proven by
+  `e2e/api/no-demo-seed.spec.ts` (2) and two new demo regression tests. Archived to
+  `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`.
 
 ## Risks and mitigations
 

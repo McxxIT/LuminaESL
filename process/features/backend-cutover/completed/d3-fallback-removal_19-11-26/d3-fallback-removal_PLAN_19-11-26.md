@@ -3,13 +3,13 @@ name: plan:d3-fallback-removal
 description: "D3: remove demo-seed leakage and demo-only actions from the API-mode production path while keeping the local store, the import lane, and the rollback flag for one release"
 date: 19-11-26
 feature: backend-cutover
-status: PLANNED (awaiting explicit ENTER EXECUTE MODE)
+status: COMPLETE (P1-P4 done, all gates green)
 ---
 
 # D3 - Demo Data and Fallback Removal from the Production Path
 
 **Date**: 19-11-26
-**Status**: PLANNED - reconnaissance complete inside this file; no code written.
+**Status**: COMPLETE - P1-P4 executed; gates recorded in `d3-fallback-removal_EXECUTE_19-11-26.md`.
 **Complexity**: SIMPLE-MEDIUM (four frontend files plus one store guard and two test files; no schema, API, or dependency change)
 **Branch**: developing
 **Umbrella**: `frontend/CUTOVER_PLAN.md` §Step D item 3 and the D2 handoff.
@@ -140,39 +140,55 @@ Read-only references: `frontend/app/lib/auth/mode.ts`, `frontend/app/lib/school/
 ## Implementation Checklist
 
 ### P1 Store guards
-- [ ] P1.1 `upgrade()`: read `dataSource`; when `"api"`, initialize a missing collection from
+- [x] P1.1 `upgrade()`: read `dataSource`; when `"api"`, initialize a missing collection from
       `createEmptySchool()`; when `"local"`, keep the current `createSeedSchool()` fill for
       `assignments`. Comment the reason (an API cache must never gain demo homework).
-- [ ] P1.2 `resetSchool()`: return early with `console.warn("Lumina: demo reset ignored in API mode.")`
+- [x] P1.2 `resetSchool()`: return early with `console.warn("Lumina: demo reset ignored in API mode.")`
       when `dataSource === "api"`; keep the demo behavior identical for local.
-- [ ] P1.3 `npm run typecheck` and `npm run lint`.
+- [x] P1.3 `npm run typecheck` and `npm run lint` (both exit 0 from `frontend`, 2026-11-19).
+
+  Note: the P1 working-tree edits were inherited uncommitted from an interrupted EXECUTE attempt
+  (they match this plan verbatim); they were re-verified line by line, not rewritten.
 
 ### P2 UI gating
-- [ ] P2.1 `ManagerSettings.tsx`: render the reset block only when `!isApiDataMode()`.
-- [ ] P2.2 `StudentSettings.tsx` / `TeacherSettings.tsx`: same gate on the "Reset demo workspace" card.
-- [ ] P2.3 `useStudentWorkspace.ts` / `useTeacherWorkspace.ts`: guard the reset handler with
+- [x] P2.1 `ManagerSettings.tsx`: render the reset block only when `!isApiDataMode()`.
+- [x] P2.2 `StudentSettings.tsx` / `TeacherSettings.tsx`: same gate on the "Reset demo workspace" card.
+- [x] P2.3 `useStudentWorkspace.ts` / `useTeacherWorkspace.ts`: guard the reset handler with
       `isApiDataMode()` so a stale callback cannot reset even if a button remains.
-- [ ] P2.4 `LuminaApp.tsx`: wrap the two `lumina-account` writes in `isDemoMode()`.
-- [ ] P2.5 `npm run typecheck` and `npm run lint`.
+- [x] P2.4 `LuminaApp.tsx`: wrap the two `lumina-account` writes in `isDemoMode()`.
+- [x] P2.5 `npm run typecheck` and `npm run lint` (both exit 0 from `frontend`, 2026-11-19).
 
 ### P3 Tests
-- [ ] P3.1 New `frontend/e2e/api/no-demo-seed.spec.ts` (or an added case in `cache-keys.spec.ts`):
+- [x] P3.1 New `frontend/e2e/api/no-demo-seed.spec.ts` (or an added case in `cache-keys.spec.ts`):
       seed an API cache payload that omits `assignments`, boot as a real account, and assert
       `assignments` stays empty, no demo course/user title appears, the reset control is absent, and
       `lumina-school:v1` is untouched.
-- [ ] P3.2 Extend `frontend/e2e/demo/demo.spec.ts`: local reset still restores the demo school, and an
+- [x] P3.2 Extend `frontend/e2e/demo/demo.spec.ts`: local reset still restores the demo school, and an
       older local snapshot still gains seeded `assignments`.
-- [ ] P3.3 Re-run the existing `api/import.spec.ts` and `api/cache-keys.spec.ts` unchanged - D3 must
+- [x] P3.3 Re-run the existing `api/import.spec.ts` and `api/cache-keys.spec.ts` unchanged - D3 must
       not disturb the capture/import lane.
 
+  Implementation note: P3.1 landed as `frontend/e2e/api/no-demo-seed.spec.ts` with two tests: the
+  browser boot (admin/student/teacher settings, stale cache, `v1` byte-identical) and a store probe
+  (`configureSchoolDataSource("api")` + `resetSchool()` inert with the warning logged). The live demo
+  spec file is `frontend/e2e/demo/regression.spec.ts`; P3.2 added two tests there.
+  C1 limit: `parseSchoolData` rejects a cache payload that omits a collection, so the API cache can
+  never reach `upgrade()` - the browser test proves the observable contract instead (see Deviations).
+
 ### P4 Verification and docs
-- [ ] V1 `npm run e2e` twice back to back (expect 14 API + 1 demo tests, or 15 if a new spec file is added).
-- [ ] V2 `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run smoke`.
-- [ ] V3 Safety: no `db:reset`/`push`/`truncate` added, no `.env*` edit, `git diff --check`.
-- [ ] V4 Docs: `CUTOVER_PROGRESS.md` (D3 row + verification rows), `CUTOVER_PLAN.md` (Step D item 3),
-      `PROGRESS.md`, `process/context/all-context.md` (Open Questions), `process/context/uxui/school-data-layer.md`.
-- [ ] V5 Report: `d3-fallback-removal_EXECUTE_19-11-26.md` in this folder, with the residue delta
-      against the D2 baseline (6 imported schools / 7 attachments / 12 markers).
+- [x] V1 `npm run e2e` twice back to back (2026-11-20): run 1 API 15/15 (58.0 s) + demo 3/3 (13.5 s),
+      run 2 API 15/15 (53.9 s) + demo 3/3 (11.8 s); exit 0 both times, no cleanup between runs.
+- [x] V2 `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend` (30/30),
+      `npm run smoke` (13/13 domains, 353 checks, settings restored) - all exit 0 on 2026-11-20.
+- [x] V3 Safety: no `db:reset`/`push`/`truncate` added (grep gate shows only the intentional
+      `.for("update")`), no `.env*` edit, `git diff --check` exit 0.
+- [x] V4 Docs: `CUTOVER_PROGRESS.md` (board row + verification/change log), `CUTOVER_PLAN.md` (Step D
+      item 3), `PROGRESS.md`, `process/context/all-context.md` (board row, open questions, store
+      gotcha, gate counts), `process/context/tests/all-tests.md` (spec table, suite size, last run),
+      `process/context/uxui/school-data-layer.md`, plus `planning/all-planning.md`,
+      `auth/demo-vs-api-mode.md`, `database/booking-and-credit-integrity.md`.
+- [x] V5 Report: `d3-fallback-removal_EXECUTE_19-11-26.md` in this folder, with the residue delta
+      against the D2 baseline (6 imported schools / 7 attachments / 12 markers -> 12 / 13 / 24).
 
 ## Acceptance Criteria
 
@@ -233,7 +249,7 @@ Read-only references: `frontend/app/lib/auth/mode.ts`, `frontend/app/lib/school/
 
 ## Resume and Execution Handoff
 
-Status: PLANNED. Reconnaissance is in the Overview table (no separate research document). Code untouched.
+Status: COMPLETE (P1-P4 done; all Validate Contract rows green on 2026-11-20).
 
 - Execute in order: P1 → P2 → P3 → P4. P3 depends on P1's behavior, not on P2's markup.
 - Read first: `process/context/all-context.md`, `process/context/tests/all-tests.md`,

@@ -1,7 +1,7 @@
 # Lumina ESL - Progress and Next Plan
 
-Last updated: November 19, 2026
-Last verified: Step D2 (one-time import) done Nov 19, 2026. `npm run e2e` runs the Playwright API-mode suite (13 tests across 9 specs) and the demo-mode regression (1 spec), green twice back to back with no leftover processes; `npm run typecheck`, `npm run lint`, backend tests (30/30), and `npm run smoke` pass. Steps A–C and B0–B3 are closed with their evidence in `CUTOVER_PROGRESS.md`; D3 (fallback removal) is not started.
+Last updated: November 20, 2026
+Last verified: Step D closed Nov 20, 2026. `npm run e2e` runs the Playwright API-mode suite (15 tests across 10 specs) and the demo-mode regression (3 tests), green twice back to back with no leftover processes; `npm run typecheck`, `npm run lint`, backend tests (30/30), and `npm run smoke` (13/13 domains, 353 checks) pass. Steps A–C, B0–B3 and D1–D3 are closed with their evidence in `CUTOVER_PROGRESS.md`; D3 (demo-data removal) is archived in `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`; booking debit + plan-selection lock landed Nov 20, 2026.
 
 ## Status at a glance
 
@@ -13,7 +13,7 @@ Last verified: Step D2 (one-time import) done Nov 19, 2026. `npm run e2e` runs t
 | Admin role | Complete, including Profile and Settings pages | Shared store `lumina-school:v1` + personal staff preferences |
 | Manager role | Complete, including Profile and Settings pages | Shared store `lumina-school:v1` + personal staff preferences |
 | Backend API | Running locally | PostgreSQL 17 database `lumina` |
-| Frontend -> API | Auth only, shared accounts | Login/logout/refresh use the API behind `NEXT_PUBLIC_DEMO_MODE`; school data still reads/writes `lumina-school:v1` in the browser. API and browser seeds use the same `.school` identities and profile links |
+| Frontend -> API | Complete (Steps A-D) | Login/logout/refresh use the API behind `NEXT_PUBLIC_DEMO_MODE`; with `NEXT_PUBLIC_DATA_SOURCE=api` the school data reads/writes PostgreSQL through `lib/school/api/*` and boots from `/school/bootstrap` (offline cache `lumina-school:api-cache`). Demo/local mode keeps `lumina-school:v1` |
 
 ## Repository layout
 
@@ -380,15 +380,17 @@ and open decisions live in `CUTOVER_PROGRESS.md`.
   the guarded local reset.
 - **Step B - Data adapter cutover:** done, and Step C - uploads and
   notifications - is done too. See `CUTOVER_PROGRESS.md`.
-- **Step D1 - Parity suite:** done November 18, 2026. `npm run e2e` runs 9
-  API-mode specs plus 1 demo-mode regression.
+- **Step D1 - Parity suite:** done November 18, 2026. `npm run e2e` runs the API-mode suite plus the
+  demo-mode regression.
 - **Step D2 - One-time import:** done November 19, 2026, archived to
   `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`.
   Admin-only `/school/import` plus preview, store-key split, pre-bootstrap
-  capture, receipt. The suite is now 13 API-mode tests plus the demo regression.
-- **Step D3 - Fallback removal:** not started. Remove the browser-store fallback
-  from the production path and keep `NEXT_PUBLIC_DATA_SOURCE=local` as the
-  rollback flag for one release.
+  capture, receipt.
+- **Step D3 - Demo-data removal:** done November 19-20, 2026, archived to
+  `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`.
+  `upgrade()` is data-source aware, `resetSchool()` is inert in API mode, the reset controls are
+  hidden, and `lumina-account` is demo-only. The suite is now 15 API-mode tests plus 3 demo tests.
+  `NEXT_PUBLIC_DATA_SOURCE=local` stays as the rollback flag for one release.
 
 Keep this summary and the two files in sync when a step lands; do not re-grow the
 detail here.

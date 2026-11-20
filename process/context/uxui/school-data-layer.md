@@ -35,6 +35,9 @@ return run(() => updateSchool(draft => { assertCan(...); ...mutate draft... }));
 ## Rules
 
 - New service: implement both branches, call `assertCan` in the local branch, return `ServiceResult`.
+- Demo data stays out of API mode: `upgrade()` seeds a missing collection only when
+  `dataSource === "local"`, and `resetSchool()` logs a warning and returns the current snapshot in API
+  mode. Do not re-seed an API cache; refresh from `/school/bootstrap` instead.
 - Credit and refund math in the local branch must mirror the backend (`database/booking-and-credit-integrity.md`).
 - API branch must never touch seed/local data (`auth/demo-vs-api-mode.md`).
 - Legacy helpers still present: `lib/data.ts`, `student.ts`, `scheduling.ts`, `teacherPerformance.ts`. Migration status: `frontend/CUTOVER_PROGRESS.md`.

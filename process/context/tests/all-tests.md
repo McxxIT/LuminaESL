@@ -15,7 +15,7 @@ Last updated: 2026-11-18
 Attach this file first when the task involves testing, verification, or test debugging.
 
 **BLUF:** The backend has automated tests (vitest, 30 tests, 5 files, no DB needed). The frontend has a
-committed browser parity suite (`@playwright/test`, 14 tests: 13 API mode + 1 demo regression) run by
+committed browser parity suite (`@playwright/test`, 18 tests: 15 API mode + 3 demo) run by
 `npm run e2e`. `npm run smoke` is a separate hybrid per-domain API smoke. There is no frontend
 unit/component runner and no CI; authenticated business rules outside the parity suite are verified by
 `npm run smoke` or by hand against seeded local Postgres.
@@ -107,15 +107,15 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 ## Smoke Gate (`npm run smoke`)
 
 - Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
-- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 13 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, upload 5 MB/MIME rules, notification feed scoping and state roundtrip. 343 checks per run; last green: 2026-11-18.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 13 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, upload 5 MB/MIME rules, notification feed scoping and state roundtrip. 353 checks per run; last green: 2026-11-20.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
-## Parity Suite (`frontend/e2e`, 14 tests)
+## Parity Suite (`frontend/e2e`, 18 tests)
 
 - Command: `npm run e2e` (root alias) = `e2e:api` then `e2e:demo`. Needs local Postgres, the backend
   env file, and a seeded DB; ports 3000, 3100, and 4000 must be free (the API config reuses an
-  existing backend on 4000 unless `CI` is set). About 70 s total; last green: 2026-11-19, twice back
+  existing backend on 4000 unless `CI` is set). About 75 s total; last green: 2026-11-20, twice back
   to back.
 - Two configs, not two projects: `frontend/playwright.config.ts` runs the app on :3000 with
   `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`; `frontend/playwright.demo.config.ts`
@@ -134,7 +134,8 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | `e2e/api/homework.spec.ts` | 1 | Teacher assigns homework, student submits it, teacher reviews it (status `Reviewed`, no Review button left) |
 | `e2e/api/cache-keys.spec.ts` | 2 | An API sign-in leaves `lumina-school:v1` byte-identical, caches to `lumina-school:api-cache`, and captures the local school into `lumina-school:pending-import` before the bootstrap (a second boot does not replace it); a UUID-only payload is treated as an API cache, not local data, and is not captured |
 | `e2e/api/import.spec.ts` | 2 | Seeds a synthetic local school, previews it (no writes, no marker), imports it, and asserts through `/school/bootstrap`: created student with hex avatar and recorded `createdAt`, lesson `endTime`/`createdAt`/`createdBy`, approved request with its reviewed state and attachment, credit sign/amount, byte-identical attachment download, marker row, `v1` untouched; a repeat is 409 and a forced run is 201. Second test: anonymous 401, manager/teacher/student 403 |
-| `e2e/demo/regression.spec.ts` | 1 | Demo login with any password, local snapshot present, IndexedDB upload + byte-identical download, bell read state and mute survive reload, zero `/api/v1/` requests |
+| `e2e/api/no-demo-seed.spec.ts` | 2 | D3: an API account boots over a stale offline cache (no `assignments`) plus a real `lumina-school:v1`; no demo homework/course title renders, the stale marker row is replaced, `v1` stays byte-identical, and no "Reset demo" control exists in admin/student/teacher settings. Second test is a Node store probe: `configureSchoolDataSource("api")` + `resetSchool()` leaves the snapshot untouched and logs the warning |
+| `e2e/demo/regression.spec.ts` | 3 | Demo login with any password, local snapshot present, IndexedDB upload + byte-identical download, bell read state and mute survive reload, zero `/api/v1/` requests; an older local snapshot still gains the seeded `assignments`; Settings still resets the demo school and re-seeds `v1` |
 
 - Safety: the suite never migrates, seeds, resets, truncates, or pushes. `e2e/support/preconditions.ts`
   verifies `/health`, the seeded admin login, the four seeded accounts, and a non-empty lesson
@@ -168,11 +169,15 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 ## Known Gaps
 
-- No frontend unit or component tests; browser coverage is the Playwright parity suite (10 tests
-  across auth, uploads, notifications, booking, cancellation/refund, homework, and demo mode).
+- No frontend unit or component tests; browser coverage is the Playwright parity suite (18 tests
+  across auth, uploads, notifications, booking, cancellation/refund, homework, API boot with no demo
+  data, and demo mode).
 - Authenticated business rules not in the parity suite (course ownership, publish/archive, absences,
   ratings, rebook) are covered by `npm run smoke` and by hand only.
-- No concurrency test for double-booking; booking balance read and debit are not row-locked, (backlog: `booking-credit-concurrency_NOTE_18-11-26.md`); backend `POST /lessons` does not debit while demo does (smoke asserts current behavior). Observed, not fixed.
+- No concurrency test for double-booking; the booking balance read and debit are still not row-locked
+  (backlog: `booking-credit-concurrency_NOTE_18-11-26.md`). `POST /lessons` now debits 1 credit and
+  refunds only debited lessons, and plan selection is row-locked (`.for("update")`); smoke asserts the
+  debit delta. Observed, not fixed: the balance read itself.
 - No unique constraint on lessons (teacher, date, time); the slot-row claim is the only guard.
 - No CI; backend "build" is typecheck only. The parity suite has no CI job either
   (backlog: `e2e-ci-wiring_NOTE_18-11-26.md` — needs a Postgres service, `db:migrate`, `db:seed`).
@@ -181,7 +186,13 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 ## Last Verified Test Run
 
-2026-11-18: `npm run e2e` twice back to back: API 9/9 (41.0 s, then 40.6 s) + demo 1/1 (10.0 s each),
+2026-11-20 (D3 closeout): `npm run e2e` twice back to back on the final code: run 1 API 15/15 (58.0 s) +
+demo 3/3 (13.5 s), run 2 API 15/15 (53.9 s) + demo 3/3 (11.8 s), exit 0 both times, no cleanup between
+runs. `npm run typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 5 files,
+30 tests passed; `npm run smoke`: 13/13 domains, 353 checks, settings restored, exit 0; `git diff
+--check` exit 0.
+
+2026-11-18 (D1): `npm run e2e` twice back to back: API 9/9 (41.0 s, then 40.6 s) + demo 1/1 (10.0 s each),
 exit 0 both times, no leftover node processes or bound ports afterwards. Same day: deliberate red run
 (screenshot/video/trace written, exit 1, reverted); precondition probe against a dead API base failed
 every test in the file with an actionable message and repaired nothing; `npm run test --workspace

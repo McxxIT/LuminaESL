@@ -217,7 +217,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 17 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 9 API-mode tests + 1 demo regression, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 30 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 15 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -252,14 +252,14 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | 2 | Scheduling and credits | Booking must be atomic (no double-booking); credit deductions and refunds on cancellation must be exact |
 | 3 | DB migrations | Keep Drizzle migrations in `backend/` synced with `schema.ts` and the frontend/API types |
 
-**Observed booking risks (not fixed):**
+**Observed booking risks (status per line):**
 
 - (Resolved in B3: the balance is now the numeric `getCreditBalance`; postgres `numeric` is parsed to a JS number in `plugins/db.ts`.)
-- Backend `POST /lessons` (teacher/manager/admin schedules a lesson) does NOT debit a credit, while the demo add-lesson paths debit 1; an early student cancel of such a lesson then refunds +1, so credits can be minted. Smoke asserts the current no-debit behavior. Backlog: `process/features/backend-cutover/backlog/booking-rules-followups_NOTE_18-11-26.md`.
-- Plan selection (`resolveLessonDefaults`) is not locked; a student can self-purchase up to 100 credits with no payment check.
+- Backend `POST /lessons` (teacher/manager/admin schedules a lesson) now debits 1 credit like the demo add-lesson paths, and a cancellation refunds only a lesson that was actually debited (Nov 20, 2026). Plan selection is row-locked with `.for("update")` in `resolveLessonDefaults`, so concurrent bookings cannot claim the same plan. Backlog: `process/features/backend-cutover/backlog/booking-rules-followups_NOTE_18-11-26.md`.
+- A student can self-purchase up to 100 credits with no payment check.
 - Balance read and debit are not row-locked; concurrent bookings by one student could both pass.
 - No unique constraint on `lessons` (teacher, date, time); only the `slot_openings` row claim (`DELETE ... RETURNING`) prevents double-booking.
-- Refund paths: student cancel refunds only if hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and lesson not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
+- Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson is not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
 
 **Other gotchas:**
 
@@ -272,6 +272,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - Storage keys are split by mode: `lumina-school:v1` is local/demo only, `lumina-school:api-cache` is API mode's offline cache (`API_CACHE_KEY` in `frontend/app/lib/school/store.ts`), and API mode never writes `v1`. `hydrateSchool()` routes API saves to the cache key; writing the bootstrap over `v1` is what used to destroy local-only data before it could be imported.
 - One-time import (D2): `POST /school/import` + `POST /school/import/preview`, admin only, `backend/src/lib/school-import.ts` (zod payload, pure `buildImportPlan`, `applyImportPlan`, one transaction). The browser captures `lumina-school:v1` into `lumina-school:pending-import` before the first bootstrap (`frontend/app/lib/school/import/capture.ts`), archives it to `lumina-school:imported:<seededAt>` after a run, and uploads attachment bytes through `POST /uploads` before the import (preview uploads nothing). Idempotency is one `activity` row `school.imported` / `targetId: source.seededAt`; a repeat is 409 unless `options.force`. Profiles are keyed by their user in the browser store, so profile ids are receipted but kept out of the flat `idMap`.
 - Demo mode is the DEFAULT (`isDemoMode()` true unless `NEXT_PUBLIC_DEMO_MODE === "false"`). `LuminaApp.tsx` seeds `studentCredits` local state at 24 (matches the demo seed).
+- Demo data is fenced out of API mode (D3): `store.ts` `upgrade()` fills a missing collection from the seed only when `dataSource === "local"` (an API cache starts empty), `resetSchool()` returns early with a console warning in API mode, the three Settings screens hide the reset control, and the two `lumina-account` writes in `LuminaApp.tsx` are demo-only. The local store, the `lumina-school:api-cache` outage path, and the import lane are intentionally untouched.
 - Cutover work lands in committed slices, one per step; check `git status` before assuming a clean base.
 
 ## Environment and Configuration
@@ -303,14 +304,14 @@ These stay in place and remain the source of truth for cutover status.
 |---|---|
 | `frontend/ADMIN_PLAN.md` | Admin/manager product plan; all phases done |
 | `frontend/CUTOVER_PLAN.md` | File-level plan for local-store to API cutover |
-| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, C, D1 (parity suite), and D2 (one-time import, archived in `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`) done; D3 (fallback removal) next |
+| `frontend/CUTOVER_PROGRESS.md` | Live board: Steps A, B0.1-B0.4, B1, B2, B3, C, D1 (parity suite), D2 (one-time import) and D3 (demo-data removal) done; D2/D3 archived in `process/features/backend-cutover/completed/` |
 | `frontend/PROGRESS.md` | App-wide state and verification commands |
 
 ## Workflow
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 343 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 13 API tests on :3000 + backend :4000, then 1 demo regression on :3100; ~70 s; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 353 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 15 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
@@ -337,7 +338,7 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 ## Open Questions / Outstanding Work
 
-- Cutover D1 (parity suite) and D2 (one-time import, archived in `process/features/backend-cutover/completed/d2-one-time-import_19-11-26/`) are done. D3 (remove the browser-store fallback) is not started; `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
+- Cutover D1 (parity suite), D2 (one-time import) and D3 (demo-data removal, archived in `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`) are done. D3 removed demo *leakage* rather than the store: `upgrade()` no longer seeds an API cache, `resetSchool()` is inert in API mode, the reset controls are hidden, and `lumina-account` is written only in demo mode. `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
 - No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
 - Booking concurrency/precision risks above are unresolved.
 - Curriculum Library not built; no frontend unit or component tests; no CI.
