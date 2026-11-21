@@ -25,6 +25,7 @@ export type ApiLesson = {
   title: string;
   status: string;
   cancelReason?: string;
+  createdAt: string;
 };
 
 export type ApiRequest = {
@@ -118,6 +119,29 @@ export async function creditBalance(token: string, studentId: string): Promise<n
   return body.balance;
 }
 
+/**
+ * Moves a student's ledger to `target` with one `adjustment` entry and returns
+ * the balance it replaced. Specs that spend credits use this in `finally` so a
+ * repeated run never drains the seeded account.
+ */
+export async function setCreditBalance(
+  token: string,
+  studentId: string,
+  target: number,
+): Promise<number> {
+  const current = await creditBalance(token, studentId);
+  const delta = Number((target - current).toFixed(2));
+  if (delta !== 0) {
+    await apiPost("/credits", token, {
+      studentId,
+      hours: delta,
+      reason: "adjustment",
+      description: "e2e balance restore",
+    });
+  }
+  return current;
+}
+
 export function notificationState(token: string): Promise<NotificationState> {
   return apiGet<NotificationState>("/notifications/state", token);
 }
@@ -129,23 +153,27 @@ export function saveNotificationState(
   return apiPatch<NotificationState>("/notifications/state", token, patch);
 }
 
-/** The single lesson a spec created, identified by the slot it booked. */
+/**
+ * The lesson a spec created, identified by the slot it booked. The shared dev DB
+ * keeps residue from earlier runs at the same student/date/time key, so when
+ * several rows match, the newest (`createdAt`) is the one this run created.
+ */
 export function lessonAt(
   data: Bootstrap,
   match: { studentId: string; date: string; time: string },
 ): ApiLesson {
-  const lesson = Object.values(data.collections.lessons).find(
+  const matches = Object.values(data.collections.lessons).filter(
     (candidate) =>
       candidate.studentId === match.studentId &&
       candidate.date === match.date &&
       candidate.time === match.time,
   );
-  if (!lesson) {
+  if (matches.length === 0) {
     throw new Error(
       `No lesson found for student ${match.studentId} on ${match.date} at ${match.time}`,
     );
   }
-  return lesson;
+  return matches.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
 /** Cancellation request whose comment carries this run's unique marker. */

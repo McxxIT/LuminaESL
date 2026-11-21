@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { alias } from "drizzle-orm/pg-core";
-import { and, asc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   absences,
@@ -15,12 +15,13 @@ import {
   users,
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
-import { getCreditBalance } from "../lib/credits";
+import { getCreditBalance, lockStudentCredits } from "../lib/credits";
 import { resolveLessonDefaults } from "../lib/lesson-defaults";
 import {
   badRequest,
   conflict,
   forbidden,
+  isUniqueViolation,
   notFound,
 } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
@@ -294,6 +295,7 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       }
 
        const lesson = await app.db.transaction(async (tx) => {
+         await lockStudentCredits(tx, body.studentId);
          // Debit one credit like the browser scheduling paths, so a cancellation only refunds
          // a lesson that was actually paid for.
          const balance = await getCreditBalance(tx, body.studentId);
@@ -515,6 +517,7 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       if (original.status !== "scheduled") throw badRequest("Only scheduled lessons can be rebooked");
 
       const result = await app.db.transaction(async (tx) => {
+        await lockStudentCredits(tx, original.studentId);
         const [slot] = await tx.select().from(slotOpenings).where(and(eq(slotOpenings.teacherId, original.teacherId), eq(slotOpenings.date, body.date), eq(slotOpenings.time, body.time))).limit(1);
         if (!slot) throw badRequest("That time is not open for booking");
         const balance = await getCreditBalance(tx, original.studentId);
@@ -738,9 +741,9 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       if (!lesson) throw notFound("Lesson not found");
       if (lesson.studentId !== request.user.sub) throw forbidden();
-      if (lesson.status !== "scheduled") {
-        throw badRequest("Only upcoming lessons can be cancelled");
-      }
+      // No status pre-check: the update below is status-predicated, so a lesson
+      // that is already cancelled resolves to one deterministic 409 instead of a
+      // 400/409 split depending on timing.
 
       const [prefs] = await app.db
         .select({
@@ -750,15 +753,13 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(settings.id, 1))
         .limit(1);
        const lateHours = prefs?.lateHours ?? 24;
-       const [debit] = await app.db
-         .select({ id: creditEntries.id })
-         .from(creditEntries)
-         .where(and(eq(creditEntries.lessonId, id), eq(creditEntries.reason, "booking")))
-         .limit(1);
-       const debited = !!debit;
-       const refunded = debited && hoursUntil(lesson.date, lesson.time) >= lateHours;
 
-      const updated = await app.db.transaction(async (tx) => {
+      // The authoritative decision lives inside the transaction: the update is
+      // status-predicated, so a concurrent cancel gets 409 instead of a second
+      // refund, and the refund evidence (the `booking` debit) is re-read under
+      // the student lock.
+      const { lesson: updated, refunded } = await app.db.transaction(async (tx) => {
+        await lockStudentCredits(tx, lesson.studentId);
         const [row] = await tx
           .update(lessons)
           .set({
@@ -766,12 +767,23 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
             cancelReason: body.reason?.trim() || "Cancelled by student",
             updatedAt: new Date(),
           })
-          .where(eq(lessons.id, id))
+          .where(and(eq(lessons.id, id), eq(lessons.status, "scheduled")))
           .returning();
-        if (!row) throw notFound("Lesson not found");
-        if (refunded) {
+        if (!row) throw conflict("This lesson has already been cancelled");
+        const [debit] = await tx
+          .select({ id: creditEntries.id })
+          .from(creditEntries)
+          .where(
+            and(
+              eq(creditEntries.lessonId, id),
+              eq(creditEntries.reason, "booking"),
+            ),
+          )
+          .limit(1);
+        const refund = !!debit && hoursUntil(row.date, row.time) >= lateHours;
+        if (refund) {
           await tx.insert(creditEntries).values({
-            studentId: lesson.studentId,
+            studentId: row.studentId,
             hours: 1,
             reason: "refund",
             description: "Cancelled lesson credit return",
@@ -779,7 +791,7 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
             actorId: request.user.sub,
           });
         }
-        return row;
+        return { lesson: row, refunded: refund };
       });
 
       await logActivity(app.db, {
@@ -842,49 +854,73 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         .from(settings)
         .where(eq(settings.id, 1))
         .limit(1);
-      const shouldRefund = (prefs?.refund ?? true) && lesson.status !== "cancelled";
+      const refundEnabled = prefs?.refund ?? true;
 
-      const created = await app.db.transaction(async (tx) => {
-        const [absence] = await tx
-          .insert(absences)
-          .values({
-            lessonId: id,
-            teacherId: lesson.teacherId,
-            note,
-            reportedBy: request.user.sub,
-          })
-          .returning();
-        if (!absence) throw new Error("Failed to record absence");
+      // Re-check and decide inside the lock: the pre-check above only fast-fails,
+      // the transaction is what makes "one absence, one refund" true under race.
+      const { absence: created, refunded } = await app.db.transaction(
+        async (tx) => {
+          await lockStudentCredits(tx, lesson.studentId);
+          const [duplicate] = await tx
+            .select({ id: absences.id })
+            .from(absences)
+            .where(eq(absences.lessonId, id))
+            .limit(1);
+          if (duplicate) {
+            throw conflict("An absence is already recorded for this lesson");
+          }
 
-        await tx
-          .update(lessons)
-          .set({
-            status: "cancelled",
-            cancelReason: "Teacher absent; the student was present.",
-            updatedAt: new Date(),
-          })
-          .where(eq(lessons.id, id));
+          let absence: typeof absences.$inferSelect | undefined;
+          try {
+            [absence] = await tx
+              .insert(absences)
+              .values({
+                lessonId: id,
+                teacherId: lesson.teacherId,
+                note,
+                reportedBy: request.user.sub,
+              })
+              .returning();
+          } catch (error) {
+            if (isUniqueViolation(error)) {
+              throw conflict("An absence is already recorded for this lesson");
+            }
+            throw error;
+          }
+          if (!absence) throw new Error("Failed to record absence");
 
-        if (shouldRefund) {
-          await tx.insert(creditEntries).values({
-            studentId: lesson.studentId,
-            hours: 1,
-            reason: "refund",
-            description: "Teacher absence refund",
-            lessonId: id,
-            actorId: request.user.sub,
-          });
-        }
+          const [cancelled] = await tx
+            .update(lessons)
+            .set({
+              status: "cancelled",
+              cancelReason: "Teacher absent; the student was present.",
+              updatedAt: new Date(),
+            })
+            .where(and(eq(lessons.id, id), ne(lessons.status, "cancelled")))
+            .returning({ id: lessons.id });
 
-        return absence;
-      });
+          const refund = refundEnabled && !!cancelled;
+          if (refund) {
+            await tx.insert(creditEntries).values({
+              studentId: lesson.studentId,
+              hours: 1,
+              reason: "refund",
+              description: "Teacher absence refund",
+              lessonId: id,
+              actorId: request.user.sub,
+            });
+          }
+
+          return { absence, refunded: refund };
+        },
+      );
 
       await logActivity(app.db, {
         actorId: request.user.sub,
         action: "absence.recorded",
         targetType: "lesson",
         targetId: id,
-        summary: note,
+        summary: refunded ? `${note} (credit refunded)` : note,
       });
 
       reply.status(201);

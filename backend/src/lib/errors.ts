@@ -40,3 +40,13 @@ export function conflict(message: string): AppError {
 export function unprocessable(message: string, details?: unknown): AppError {
   return new AppError(422, "UNPROCESSABLE_ENTITY", message, details);
 }
+
+/** True for a Postgres unique-constraint violation (SQLSTATE 23505). */
+export function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505"
+  );
+}

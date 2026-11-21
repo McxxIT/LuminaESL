@@ -379,6 +379,7 @@ export const absences = pgTable("absences", {
   id: uuid("id").primaryKey().defaultRandom(),
   lessonId: uuid("lesson_id")
     .notNull()
+    .unique()
     .references(() => lessons.id, { onDelete: "cascade" }),
   teacherId: uuid("teacher_id")
     .notNull()

@@ -9,6 +9,7 @@ import {
   slotOpenings,
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
+import { lockStudentCredits } from "../lib/credits";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { managerOwnsTeacher, managerTeam } from "../lib/scope";
@@ -198,6 +199,20 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
       const shouldRefund = prefs?.refund ?? true;
 
       const reviewed = await app.db.transaction(async (tx) => {
+        // Resolve the student before locking the ledger. The lesson's studentId is
+        // immutable, and every credit path takes the student lock first, so this
+        // keeps one global lock order (student -> request/lesson/slot).
+        let studentId: string | null = null;
+        if (existing.type === "lesson-cancellation" && existing.lessonId) {
+          const [lessonOwner] = await tx
+            .select({ studentId: lessons.studentId })
+            .from(lessons)
+            .where(eq(lessons.id, existing.lessonId))
+            .limit(1);
+          studentId = lessonOwner?.studentId ?? null;
+        }
+        if (studentId) await lockStudentCredits(tx, studentId);
+
         const [updated] = await tx
           .update(requests)
           .set({

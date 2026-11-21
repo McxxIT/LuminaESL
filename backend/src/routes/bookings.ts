@@ -15,7 +15,7 @@ import {
   unprocessable,
 } from "../lib/errors";
 import { logActivity } from "../lib/activity";
-import { getCreditBalance } from "../lib/credits";
+import { getCreditBalance, lockStudentCredits } from "../lib/credits";
 import { resolveLessonDefaults } from "../lib/lesson-defaults";
 import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
 import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time";
@@ -198,6 +198,9 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const result = await app.db.transaction(async (tx) => {
+        // Lock the student's ledger first (single lock order across every credit path).
+        await lockStudentCredits(tx, studentId);
+
         const [slot] = await tx
           .select()
           .from(slotOpenings)
