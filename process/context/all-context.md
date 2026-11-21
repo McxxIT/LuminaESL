@@ -257,9 +257,13 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - (Resolved in B3: the balance is now the numeric `getCreditBalance`; postgres `numeric` is parsed to a JS number in `plugins/db.ts`.)
 - Backend `POST /lessons` (teacher/manager/admin schedules a lesson) now debits 1 credit like the demo add-lesson paths, and a cancellation refunds only a lesson that was actually debited (Nov 20, 2026). Plan selection is row-locked with `.for("update")` in `resolveLessonDefaults`, so concurrent bookings cannot claim the same plan. Backlog: `process/features/backend-cutover/backlog/booking-rules-followups_NOTE_18-11-26.md`.
 - A student can self-purchase up to 100 credits with no payment check.
-- Balance read and debit are not row-locked; concurrent bookings by one student could both pass.
-- No unique constraint on `lessons` (teacher, date, time); only the `slot_openings` row claim (`DELETE ... RETURNING`) prevents double-booking.
-- Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson is not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
+- Resolved Nov 20, 2026: credit balance reads and debits are serialized per student by a
+  transaction-scoped advisory lock (`lockStudentCredits` in `backend/src/lib/credits.ts`), taken first by
+  all seven credit-mutating paths. Student cancel and teacher absence decide refunds inside the same
+  transaction (`WHERE status = 'scheduled'`, `absences.lesson_id` unique, migration `0003`), so concurrent
+  requests cannot double-refund or double-record. Gate: `frontend/e2e/api/credit-concurrency.spec.ts`.
+- No unique constraint on `lessons` (teacher, date, time); only the `slot_openings` row claim (`DELETE ... RETURNING`) prevents double-booking. The dev DB has 2 active duplicate groups (13 scheduled rows, all `credit-concurrency.spec.ts` residue), so the index needs a disposable DB or a reviewed cleanup; see `process/features/lessons-scheduling/active/booking-collision-refund-policy_20-11-26/`.
+- Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson was not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
 
 **Other gotchas:**
 
@@ -340,7 +344,9 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 - Cutover D1 (parity suite), D2 (one-time import) and D3 (demo-data removal, archived in `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`) are done. D3 removed demo *leakage* rather than the store: `upgrade()` no longer seeds an API cache, `resetSchool()` is inert in API mode, the reset controls are hidden, and `lumina-account` is written only in demo mode. `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
 - No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
-- Booking concurrency/precision risks above are unresolved.
+- Booking credit races are closed (per-student advisory lock, Nov 20, 2026); what remains is the unique
+  `lessons (teacherId, date, time)` constraint (blocked by dev-DB duplicates) and the self-purchase payment
+  gate.
 - Curriculum Library not built; no frontend unit or component tests; no CI.
 
 ## Scan Metadata

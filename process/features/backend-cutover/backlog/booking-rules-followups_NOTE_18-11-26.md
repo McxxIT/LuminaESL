@@ -17,7 +17,9 @@ reason: These need product decisions or billing work outside B3; the smoke asser
    (`credit_entries` `reason: "booking"`), refuses a balance under 1, and the student cancel refunds
    only a lesson that has that debit row. Smoke asserts the debit delta.
 2. **Fixed 20-11-26.** `resolveLessonDefaults` reads the enrollment `FOR UPDATE` (`.for("update")`), so
-   plan selection is serialized per student.
+   plan selection is serialized per student. The ledger itself is now serialized too: all seven
+   credit-mutating paths take `lockStudentCredits` first (see
+   `process/features/people-billing/completed/credit-ledger-serialization_20-11-26/`).
 3. **Open.** Student self-purchase (up to 100) still has no payment check.
 
 ## Gaps

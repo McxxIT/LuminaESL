@@ -43,9 +43,12 @@ Booking, teaching, homework, request withdrawal, and rebooking write paths are A
 
 - High-risk class: billing/credits (refunds) and scheduling atomicity.
 - POST /bookings runs in one transaction; the slot claim (`DELETE slot_openings ... RETURNING`) prevents double-booking of the same slot.
-- Balance check casts `sum(hours)::int`, truncating fractional credits.
-- Balance read and debit are not row-locked: concurrent bookings by one student could both pass.
-- No unique constraint on lessons (teacher, date, time).
+- Balance check is a numeric sum (`getCreditBalance`); fractional hours are exact.
+- Balance read and debit are serialized per student by `lockStudentCredits` (advisory transaction lock) and
+  cancel/absence decide refunds inside the transaction (Nov 20, 2026). Gate: `e2e/api/credit-concurrency.spec.ts`.
+- No unique constraint on lessons (teacher, date, time). Planned in
+  `active/booking-collision-refund-policy_20-11-26/`; the dev DB's active duplicates block the migration
+  (inventory in that folder).
 - Refund rules: student cancel refunds only if hoursUntil >= `studentLateCancellationHours`; teacher absence refunds when `refundTeacherCancellations` and lesson not already cancelled. Frontend local mode mirrors via `LESSON_CREDIT_HOURS`; keep both paths aligned.
 - Authenticated business rules lack automated tests.
 
