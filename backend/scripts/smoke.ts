@@ -658,6 +658,11 @@ async function requestsScenario(): Promise<void> {
   const readBack = await call(tok("managerA"), "GET", `/uploads/${attachmentId}`);
   expectStatus(readBack, 200, "read attachment back");
   check(str(readBack.body, "name") === "smoke-note.pdf", "attachment name read-back");
+  expectStatus(await call(tok("admin"), "GET", `/uploads/${attachmentId}`), 200, "admin reads request attachment");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${attachmentId}`), 403, "cross-team manager reads request attachment");
+  check((await download(tok("managerB"), attachmentId)).status === 403, "cross-team manager downloads request attachment");
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${attachmentId}`), 403, "student reads teacher request attachment");
+  check((await download(tok("studentA"), attachmentId)).status === 403, "student downloads teacher request attachment");
   const before = await balance("studentA");
   expectStatus(await call(tok("managerA"), "POST", `/requests/${cancelId}/review`, { status: "approved" }), 200, "approve cancellation");
   check(near(await balance("studentA"), before + 1), "approve-cancel must refund exactly 1");
@@ -698,16 +703,19 @@ async function requestsScenario(): Promise<void> {
 
 async function creditsScenario(): Promise<void> {
   const before = await balance("studentA");
-  const purchase = await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 2, reason: "purchase", description: "Smoke purchase" });
-  expectStatus(purchase, 201, "student purchases own credits");
-  check(typeof obj(purchase.body, "credit").hours === "number", "POST /credits hours must be a number");
-  check(near(await balance("studentA"), before + 2), "purchase must add exactly 2");
-  await expectOneActivity("credit", str(purchase.body, "id"), "credits.purchased");
+  // Staff-managed credits policy (Phase 02): students cannot self-purchase in API mode.
+  expectStatus(await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 2, reason: "purchase", description: "Smoke self-purchase blocked" }), 403, "student self-purchase refused");
+  check(near(await balance("studentA"), before), "refused student purchase must not change balance");
   expectStatus(await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentB"), hours: 1, reason: "purchase", description: "x" }), 403, "student buys for another");
   expectStatus(await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 1, reason: "adjustment", description: "x" }), 403, "student adjusts own credits");
   expectStatus(await call(tok("teacherA"), "POST", "/credits", { studentId: uid("studentA"), hours: 1, reason: "adjustment", description: "x" }), 403, "teacher adjusts credits");
-  // Known gap, asserted as current behavior: a student may self-purchase up to 100 with no payment check.
-  const cap = await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 101, reason: "purchase", description: "x" });
+
+  const purchase = await call(tok("admin"), "POST", "/credits", { studentId: uid("studentA"), hours: 2, reason: "purchase", description: "Smoke admin purchase" });
+  expectStatus(purchase, 201, "admin records purchase credits");
+  check(typeof obj(purchase.body, "credit").hours === "number", "POST /credits hours must be a number");
+  check(near(await balance("studentA"), before + 2), "purchase must add exactly 2");
+  await expectOneActivity("credit", str(purchase.body, "id"), "credits.purchased");
+  const cap = await call(tok("admin"), "POST", "/credits", { studentId: uid("studentA"), hours: 101, reason: "purchase", description: "x" });
   expectStatus(cap, 400, "purchase above the 100 cap");
 
   const beforeB = await balance("studentB");
@@ -854,6 +862,11 @@ async function uploadsScenario(): Promise<void> {
   check(num(uploaded.body, "size") === content.length, "upload reports the exact byte size");
 
   expectStatus(await call(tok("managerA"), "GET", `/uploads/${id}`), 200, "read attachment metadata");
+  expectStatus(await call(tok("admin"), "GET", `/uploads/${id}`), 200, "admin reads unattached upload");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${id}`), 403, "other manager blocked from unattached upload");
+  check((await download(tok("managerB"), id)).status === 403, "other manager download blocked before attach");
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${id}`), 403, "student blocked from unattached upload");
+  check((await download(tok("studentA"), id)).status === 403, "student download blocked before attach");
   const bytes = await download(tok("managerA"), id);
   check(bytes.status === 200, `download expected 200, got ${bytes.status}`);
   check(bytes.bytes.length === content.length, `download length ${bytes.bytes.length} != ${content.length}`);
@@ -863,6 +876,36 @@ async function uploadsScenario(): Promise<void> {
     id, name: "smoke-plan.pdf", type: "application/pdf", size: content.length, storageKey: "smoke",
   });
   expectStatus(attach, 200, "attach upload to a plan");
+
+  // Published course plan attachment: enrolled student/teacher and any manager allowed; unrelated student/teacher denied.
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${id}`), 200, "enrolled student reads plan attachment");
+  const studentBytes = await download(tok("studentA"), id);
+  check(studentBytes.status === 200 && Buffer.compare(Buffer.from(studentBytes.bytes), Buffer.from(content)) === 0, "enrolled student downloads identical plan bytes");
+  expectStatus(await call(tok("teacherA"), "GET", `/uploads/${id}`), 200, "enrolled teacher reads plan attachment");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${id}`), 200, "other manager reads published course plan attachment");
+  expectStatus(await call(tok("studentB"), "GET", `/uploads/${id}`), 403, "unrelated student blocked from plan attachment");
+  check((await download(tok("studentB"), id)).status === 403, "unrelated student download blocked");
+  expectStatus(await call(tok("teacherB"), "GET", `/uploads/${id}`), 403, "unrelated teacher blocked from plan attachment");
+  check((await download(tok("teacherB"), id)).status === 403, "unrelated teacher download blocked");
+
+  // Draft course plan attachment: owner + admin allowed; other manager + students blocked.
+  const draftCourse = await call(tok("managerA"), "POST", "/courses", { title: `Smoke draft ${runId}`, level: "A2", status: "draft" });
+  expectStatus(draftCourse, 201, "create draft course");
+  const draftCourseId = str(draftCourse.body, "id");
+  const draftUnit = await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units`, { title: "Draft Unit 1", order: 0 });
+  expectStatus(draftUnit, 201, "create draft unit");
+  const draftPlan = await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units/${str(draftUnit.body, "id")}/plans`, { title: "Draft Plan 1", order: 0 });
+  expectStatus(draftPlan, 201, "create draft plan");
+  const draftUpload = await upload(tok("managerA"), { name: "draft-only.pdf", type: "application/pdf", bytes: content });
+  expectStatus(draftUpload, 201, "upload draft plan file");
+  const draftAttachmentId = str(draftUpload.body, "id");
+  expectStatus(await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units/${str(draftUnit.body, "id")}/plans/${str(draftPlan.body, "id")}/attachments`, {
+    id: draftAttachmentId, name: "draft-only.pdf", type: "application/pdf", size: content.length, storageKey: "smoke-draft",
+  }), 200, "attach file to draft plan");
+  expectStatus(await call(tok("admin"), "GET", `/uploads/${draftAttachmentId}`), 200, "admin reads draft course attachment");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${draftAttachmentId}`), 403, "other manager blocked from draft course attachment");
+  check((await download(tok("managerB"), draftAttachmentId)).status === 403, "other manager blocked from draft course download");
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${draftAttachmentId}`), 403, "student blocked from draft course attachment");
 
   expectStatus(await call(null, "GET", `/uploads/${id}`), 401, "anonymous reads attachment");
   check((await download(null, id)).status === 401, "anonymous download is refused");

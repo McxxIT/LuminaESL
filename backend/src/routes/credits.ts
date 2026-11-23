@@ -117,7 +117,7 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
 
   app.post(
     "/",
-    { preHandler: app.requireRole(["admin", "manager", "student"]) },
+    { preHandler: app.requireRole(["admin", "manager"]) },
     async (request, reply) => {
       const body = createCreditSchema.parse(request.body);
 
@@ -128,9 +128,6 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       if (!student || student.role !== "student") {
         throw badRequest("studentId must belong to a student");
-      }
-      if (request.user.role === "student" && (body.studentId !== request.user.sub || body.reason !== "purchase")) {
-        throw forbidden("Students may only purchase credits for their own account");
       }
       if (
         request.user.role === "manager" &&

@@ -1,10 +1,13 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "../db/schema";
 import {
   courses,
+  courseUnits,
   enrollments,
+  lessonPlans,
   lessons,
+  requests,
   studentProfiles,
   teacherProfiles,
   users,
@@ -172,4 +175,171 @@ export async function assertCanViewUser(
     if (teachers.includes(targetId)) return;
   }
   throw forbidden();
+}
+
+/**
+ * Per-record attachment read/download authorization mirroring `GET /school/bootstrap`
+ * visibility plus uploader self-access during the pre-attach window:
+ * - admins: all attachments
+ * - uploader (`uploadedBy === actor.sub`): always allowed
+ * - request evidence (`requests.attachmentId`): target/requesting teacher or their manager
+ * - lesson-plan files (`lesson_plans.attachmentIds`):
+ *   - manager: published course, owned course, or plan attached to a team teacher's lesson
+ *   - teacher: enrolled in the course or teaching a lesson with that plan
+ *   - student: enrolled in the course or taking a lesson with that plan
+ */
+export async function canAccessAttachment(
+  db: Db,
+  actor: TokenPayload,
+  attachment: { id: string; uploadedBy: string },
+): Promise<boolean> {
+  if (actor.role === "admin" || attachment.uploadedBy === actor.sub) {
+    return true;
+  }
+
+  let cachedManagerTeam: Awaited<ReturnType<typeof managerTeam>> | null = null;
+  const getTeam = async () => {
+    if (!cachedManagerTeam) {
+      cachedManagerTeam = await managerTeam(db, actor.sub);
+    }
+    return cachedManagerTeam;
+  };
+
+  // 1. Check cancellation-request evidence links (never visible to students).
+  if (actor.role === "manager" || actor.role === "teacher") {
+    const reqRows = await db
+      .select({
+        teacherId: requests.teacherId,
+        requestedBy: requests.requestedBy,
+      })
+      .from(requests)
+      .where(eq(requests.attachmentId, attachment.id));
+
+    if (reqRows.length > 0) {
+      if (
+        actor.role === "teacher" &&
+        reqRows.some(
+          (row) => row.teacherId === actor.sub || row.requestedBy === actor.sub,
+        )
+      ) {
+        return true;
+      }
+      if (actor.role === "manager") {
+        const team = await getTeam();
+        if (reqRows.some((row) => team.teacherIds.includes(row.teacherId))) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // 2. Check lesson-plan attachment links.
+  const planRows = await db
+    .select({
+      planId: lessonPlans.id,
+      courseId: courses.id,
+      courseStatus: courses.status,
+      courseOwnerId: courses.ownerId,
+    })
+    .from(lessonPlans)
+    .innerJoin(courseUnits, eq(courseUnits.id, lessonPlans.unitId))
+    .innerJoin(courses, eq(courses.id, courseUnits.courseId))
+    .where(sql`${attachment.id}::uuid = ANY(${lessonPlans.attachmentIds})`);
+
+  if (planRows.length === 0) {
+    return false;
+  }
+
+  const planIds = planRows.map((row) => row.planId);
+  const courseIds = [...new Set(planRows.map((row) => row.courseId))];
+
+  if (actor.role === "manager") {
+    if (
+      planRows.some(
+        (row) =>
+          row.courseStatus === "published" || row.courseOwnerId === actor.sub,
+      )
+    ) {
+      return true;
+    }
+    const team = await getTeam();
+    if (team.teacherIds.length > 0) {
+      const [teamLesson] = await db
+        .select({ id: lessons.id })
+        .from(lessons)
+        .where(
+          and(
+            inArray(lessons.teacherId, team.teacherIds),
+            inArray(lessons.lessonPlanId, planIds),
+          ),
+        )
+        .limit(1);
+      if (teamLesson) return true;
+    }
+    return false;
+  }
+
+  if (actor.role === "teacher") {
+    const [enrollmentMatch, lessonMatch] = await Promise.all([
+      db
+        .select({ id: enrollments.id })
+        .from(enrollments)
+        .where(
+          and(
+            eq(enrollments.teacherId, actor.sub),
+            inArray(enrollments.courseId, courseIds),
+          ),
+        )
+        .limit(1),
+      db
+        .select({ id: lessons.id })
+        .from(lessons)
+        .where(
+          and(
+            eq(lessons.teacherId, actor.sub),
+            inArray(lessons.lessonPlanId, planIds),
+          ),
+        )
+        .limit(1),
+    ]);
+    return Boolean(enrollmentMatch[0] || lessonMatch[0]);
+  }
+
+  if (actor.role === "student") {
+    const [enrollmentMatch, lessonMatch] = await Promise.all([
+      db
+        .select({ id: enrollments.id })
+        .from(enrollments)
+        .where(
+          and(
+            eq(enrollments.studentId, actor.sub),
+            inArray(enrollments.courseId, courseIds),
+          ),
+        )
+        .limit(1),
+      db
+        .select({ id: lessons.id })
+        .from(lessons)
+        .where(
+          and(
+            eq(lessons.studentId, actor.sub),
+            inArray(lessons.lessonPlanId, planIds),
+          ),
+        )
+        .limit(1),
+    ]);
+    return Boolean(enrollmentMatch[0] || lessonMatch[0]);
+  }
+
+  return false;
+}
+
+export async function assertCanAccessAttachment(
+  db: Db,
+  actor: TokenPayload,
+  attachment: { id: string; uploadedBy: string },
+): Promise<void> {
+  if (!(await canAccessAttachment(db, actor, attachment))) {
+    throw forbidden("You do not have access to this attachment");
+  }
 }

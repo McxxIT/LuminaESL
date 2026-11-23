@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { attachments } from "../db/schema";
 import { badRequest, notFound } from "../lib/errors";
+import { assertCanAccessAttachment } from "../lib/scope";
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -68,6 +69,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(attachments.id, id))
         .limit(1);
       if (!attachment) throw notFound("Attachment not found");
+      await assertCanAccessAttachment(app.db, request.user, attachment);
       return attachment;
     },
   );
@@ -83,6 +85,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(attachments.id, id))
         .limit(1);
       if (!attachment) throw notFound("Attachment not found");
+      await assertCanAccessAttachment(app.db, request.user, attachment);
 
       const filePath = join(
         resolve(app.config.UPLOAD_DIR),

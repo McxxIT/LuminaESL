@@ -140,6 +140,30 @@ describe("school contract", () => {
     expect(response.statusCode).toBe(401);
   });
 
+  it("keeps credit administration staff-managed", async () => {
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/api/v1/credits",
+      payload: { studentId: "00000000-0000-0000-0000-000000000000", hours: 1, reason: "purchase" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    // A student token passes authentication but must be rejected by the role
+    // gate before the handler touches the database (Phase 02 policy).
+    const studentToken = app.jwt.sign({
+      sub: "00000000-0000-0000-0000-000000000001",
+      role: "student",
+      email: "student@example.test",
+    });
+    const student = await app.inject({
+      method: "POST",
+      url: "/api/v1/credits",
+      headers: { authorization: `Bearer ${studentToken}` },
+      payload: { studentId: "00000000-0000-0000-0000-000000000001", hours: 1, reason: "purchase" },
+    });
+    expect(student.statusCode).toBe(403);
+  });
+
   it("exposes uploads and notification state behind authentication", async () => {
     const uploads = await app.inject({ method: "POST", url: "/api/v1/uploads" });
     expect(uploads.statusCode).toBe(401);
