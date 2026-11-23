@@ -265,9 +265,9 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
   requests cannot double-refund or double-record. Gate: `frontend/e2e/api/credit-concurrency.spec.ts`.
 - Active lesson slots are guarded by the partial unique index `lessons_active_teacher_date_time_uidx`
   (migration `0004`) on `(teacher_id, date, time)` where `status in ('scheduled','live')`; every writer maps
-  that violation to `409 CONFLICT`. Dev `lumina` still has 2 active duplicate groups (13 scheduled rows, all
-  `credit-concurrency.spec.ts` residue), so it stays unmigrated; verification runs on the disposable
-  `lumina_review` database (see `database/migrations-workflow.md`).
+  that violation to `409 CONFLICT`. Dev `lumina` was aligned on Nov 23, 2026 (user-approved cancellation of
+  13 test-residue duplicate rows after a `pg_dump` backup, followed by `npm run db:migrate`), so `smoke` and
+  `e2e` run directly against default `backend/.env` with 0 active duplicate groups.
 - Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson was not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
 
 **Other gotchas:**
@@ -351,9 +351,9 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 - No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
 - Booking credit races are closed (per-student advisory lock, Nov 20, 2026) and active-slot uniqueness
   (`lessons_active_teacher_date_time_uidx`, migration `0004`) plus debit-only refunds (`isLessonCharged`)
-  landed and passed on disposable `lumina_review` (Nov 23, 2026); what remains is an approved cleanup
-  decision before applying `0004` to dev `lumina` (13 active duplicate test-residue rows) and the
-  student self-purchase payment gate.
+  are applied and verified on default dev `lumina` (Nov 23, 2026). Active launch-readiness program:
+  `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phase 01 done; Phases 02–06 cover
+  upload scoping, staff-managed credits, auth lifecycle, Curriculum Library, polish/Vitest, CI & Docker).
 - Curriculum Library not built; no frontend unit or component tests; no CI.
 
 ## Scan Metadata

@@ -31,7 +31,7 @@ Managers may only book for students on their team (`managerOwnsStudent`, `backen
 - There is no app-level pre-check: the index is the concurrency authority, so two racing requests yield exactly one winner and one 409, with no orphan debit or slot claim.
 - `PATCH /lessons/:id` runs the lesson update and both activity writes in one transaction so a collision cannot leave a half-applied reschedule.
 - Conflict body: `{ "error": { "code": "CONFLICT", "message": "That teacher already has an active lesson at this date and time" } }`. Insufficient credit and validation errors stay distinct (`400 BAD_REQUEST` on `POST /lessons`, `422` on `POST /bookings`).
-- Dev `lumina` is still **unmigrated** because it holds pre-existing duplicate active rows; all collision verification runs against the disposable `lumina_review` database (see `migrations-workflow.md`).
+- Dev `lumina` was aligned on Nov 23, 2026 (Phase 01 of `lumina-v1-finish`: `pg_dump` backup, user-approved cancellation of 13 `credit-concurrency.spec.ts` residue rows, `npm run db:migrate`), so `0004` is now live on default `backend/.env` with 0 active duplicate groups.
 
 ## Ledger rules
 
@@ -82,9 +82,8 @@ Managers may only book for students on their team (`managerOwnsStudent`, `backen
    same transaction. Regression gate: `frontend/e2e/api/credit-concurrency.spec.ts` (three real races).
 3. Resolved Nov 23, 2026: `lessons_active_teacher_date_time_uidx` (migration `0004`) is the unique guard
    on active `(teacherId, date, time)`, and every writer maps its violation to 409 (see "Active-slot
-   collision guard"). Still open: dev `lumina` was deliberately not migrated because it holds 2 active
-   duplicate groups (13 `scheduled` rows at `2026-11-29 06:00` and `2026-11-30 06:00`, residue from
-   repeated `credit-concurrency.spec.ts` runs); the index is verified on the disposable `lumina_review`
-   database. Migrating dev requires an approved cleanup decision.
+   collision guard"). Dev `lumina` was migrated on Nov 23, 2026 after a `pg_dump` backup and user-approved
+   cancellation of the 13 `credit-concurrency.spec.ts` residue rows; `npm run smoke` and `npm run e2e` run
+   green against default `backend/.env` with 0 active duplicates.
 
 Any fix needs a migration (see `migrations-workflow.md`) and a mirrored change in the frontend local branch.

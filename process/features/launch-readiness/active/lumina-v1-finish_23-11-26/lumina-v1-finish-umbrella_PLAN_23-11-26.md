@@ -217,7 +217,7 @@ Each phase executes the canonical 7-step inner loop `R → I → P → PVL → E
 | Phase | Status |
 |---|---|
 | 0 — Pre-program (scaffold & baseline) | ✅ COMPLETE |
-| 01 — Dev DB Migration 0004 Alignment | ⏳ PLANNED |
+| 01 — Dev DB Migration 0004 Alignment | ✅ VERIFIED |
 | 02 — Security & Staff-Managed Credits | ⏳ PLANNED |
 | 03 — Auth & Account Lifecycle Hardening | ⏳ PLANNED |
 | 04 — Curriculum Library | ⏳ PLANNED |
@@ -282,12 +282,12 @@ node .claude/skills/vc-generate-context/scripts/validate-all-context.mjs
 ## Current Execution State
 
 Last updated: 23-11-26
-Completed phases: Phase 0 (Program Scaffold)
-Current phase: Phase 01 — Dev DB Migration 0004 Alignment
+Completed phases: Phase 0 (Program Scaffold), Phase 01 (Dev DB Migration 0004 Alignment)
+Current phase: Phase 02 — Security & Staff-Managed Credits
 Current loop step: RESEARCH
-Validate-contract status: pending
-Program Net Gate: PENDING
-Latest validator run: 23-11-26 — umbrella 0 failures/0 warnings; all 6 phase stubs 0 failures/0 warnings; plan-inventory 0 failures; all-context 0 failures/0 warnings
+Validate-contract status: Phase 01 PASS (verified); Phase 02 pending
+Program Net Gate: IN_PROGRESS
+Latest validator run: 23-11-26 — Phase 01 gates all green on default lumina (smoke 14/14 375, e2e 23 API + 3 demo, 0 active duplicates)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any subagent. Never spawn execute-agent when loop step is RESEARCH, INNOVATE, PLAN-SUPPLEMENT, or PVL.

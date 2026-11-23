@@ -157,9 +157,8 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   archived D2 execute report
   (`process/features/backend-cutover/completed/d2-one-time-import_19-11-26/d2-one-time-import_EXECUTE_19-11-26.md`)
   lists the residue. Migrations `0003` (`absences.lesson_id` unique) and `0004`
-  (`lessons_active_teacher_date_time_uidx`) are required before this suite goes green on an older database.
-  Dev `lumina` still cannot take `0004`, so point `DATABASE_URL` at the disposable `lumina_review` database
-  for the API run (see `database/migrations-workflow.md`).
+  (`lessons_active_teacher_date_time_uidx`) are applied on default dev `lumina` (as of Nov 23, 2026), so
+  `npm run smoke` and `npm run e2e` run directly against `backend/.env` without overrides.
 - Failure artifacts: `frontend/test-results/{api,demo}/<test>/` gets `test-failed-1.png`, `video.webm`,
   `trace.zip` (`npx playwright show-trace <zip>`), and `error-context.md`; the HTML report goes to
   `frontend/playwright-report/`. All three folders are gitignored and excluded from ESLint.
@@ -196,11 +195,9 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   student had been drained to 0.25 credits by repeated `booking.spec.ts` runs and was topped back up to 24 on
   20-11-26.
 - Active teacher/date/time uniqueness is enforced by `lessons_active_teacher_date_time_uidx` (migration
-  `0004`) and proved by `booking-collision.spec.ts` (five cases) plus a DB duplicate query after each run.
-  Dev `lumina` still holds 2 active duplicate groups (13 scheduled rows, `credit-concurrency.spec.ts`
-  residue) and stays unmigrated, so run the API suite against the disposable `lumina_review` database via a
-  `DATABASE_URL` override. Any new spec must still avoid a teacher/date/time that already has an active
-  lesson, and cancel what it books in `finally`.
+  `0004`, now applied on default dev `lumina` as of Nov 23, 2026) and proved by `booking-collision.spec.ts`
+  (five cases) plus a DB duplicate query after each run. Any new spec must still avoid a teacher/date/time
+  that already has an active lesson, and cancel what it books in `finally`.
 - No CI; backend "build" is typecheck only. The parity suite has no CI job either
   (backlog: `e2e-ci-wiring_NOTE_18-11-26.md` — needs a Postgres service, `db:migrate`, `db:seed`).
 - The parity suite runs against a shared database and leaves fixture rows behind by design; until a
@@ -208,6 +205,12 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   `lumina_review`, a disposable clone used for migration and collision work.
 
 ## Last Verified Test Run
+
+2026-11-23 (Phase 01 dev `lumina` migration `0004` alignment, default `backend/.env` with no overrides):
+`npm run db:migrate` (5 migrations, `lessons_active_teacher_date_time_uidx` live on `lumina`),
+`npm run typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 5 files, 30
+tests passed; `npm run smoke`: 14/14 domains, 375 checks, settings restored, exit 0; `npm run e2e`: 23/23
+API + 3/3 demo passed; post-run DB check: 0 active duplicate groups.
 
 2026-11-23 (booking collision + refund policy, on the disposable `lumina_review` database): `npm run
 typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 5 files, 30 tests passed;

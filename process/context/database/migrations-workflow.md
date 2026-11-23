@@ -32,11 +32,12 @@ BLUF: Edit `backend/src/db/schema.ts`, run `npm run db:generate`, review the SQL
 - No CI/CD exists; verification is local (Postgres + `backend/.env`).
 - A unique or partial-unique index migration fails on a database that already violates it. Before applying
   one, inventory the offending rows read-only and pick a target database that satisfies it.
-- **Disposable review database (Nov 23, 2026):** dev `lumina` still holds duplicate active lessons, so
-  `0004` was applied to a separate `lumina_review` database instead. Apply migrations there with
-  `$env:DATABASE_URL='postgres://lumina:<pw>@localhost:5432/lumina_review'` then `npm run db:migrate` /
-  `db:seed`, and point every DB-touching gate (`smoke`, `e2e:api`) at it the same way. Never run
-  `db:migrate` against dev `lumina` until a cleanup of its duplicates is approved. The `lumina` role has no
-  `CREATEDB`; create the review DB through the local `postgres` superuser with `OWNER lumina`.
+- **Disposable review database & dev `lumina` alignment (Nov 23, 2026):** `0004` was first verified on a
+  separate `lumina_review` clone, and then applied to dev `lumina` after a `pg_dump` backup and
+  user-approved non-destructive cancellation of its 13 test-residue duplicate rows. Default `backend/.env`
+  (`lumina`) now carries all 5 migrations (`0000`–`0004`). Keep `lumina_review` as a disposable rehearsal
+  target for risky future migrations (`$env:DATABASE_URL='postgres://lumina:<pw>@localhost:5432/lumina_review'`);
+  the `lumina` role has no `CREATEDB`, so new review DBs are created via the local `postgres` superuser with
+  `OWNER lumina`.
 - Partial index SQL is generated from the Drizzle index builder's `where(sql...)` clause; confirm the emitted
   `WHERE` predicate, not just the column list, when reviewing `db:generate` output.
