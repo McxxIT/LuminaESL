@@ -9,7 +9,7 @@ date: 18-11-26
 ---
 # lumina-esl - All Context
 
-Last updated: 2026-11-18
+Last updated: 2026-11-23
 
 **Lumina ESL is a real ESL (English as a second language) school management platform** for institution admins, managers, teachers, and students (parents act through the student account; they are not a login role). Lessons are **1:1 and 25 minutes**; each student is enrolled with one teacher in a curriculum course, and each booked lesson consumes the next lesson plan. No group classes. Billing is **credit-based**. Staff is two-level: admin creates managers and assigns teachers; each manager sees only their own teachers, students, and approvals; admin sees everything. Virtual classrooms use flexible meeting links (ClassIn / Zoom / Google Meet, no paid SDKs) stored in `lessons.roomCode`.
 
@@ -217,7 +217,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 30 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 15 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 30 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 23 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -262,7 +262,11 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
   all seven credit-mutating paths. Student cancel and teacher absence decide refunds inside the same
   transaction (`WHERE status = 'scheduled'`, `absences.lesson_id` unique, migration `0003`), so concurrent
   requests cannot double-refund or double-record. Gate: `frontend/e2e/api/credit-concurrency.spec.ts`.
-- No unique constraint on `lessons` (teacher, date, time); only the `slot_openings` row claim (`DELETE ... RETURNING`) prevents double-booking. The dev DB has 2 active duplicate groups (13 scheduled rows, all `credit-concurrency.spec.ts` residue), so the index needs a disposable DB or a reviewed cleanup; see `process/features/lessons-scheduling/active/booking-collision-refund-policy_20-11-26/`.
+- Active lesson slots are guarded by the partial unique index `lessons_active_teacher_date_time_uidx`
+  (migration `0004`) on `(teacher_id, date, time)` where `status in ('scheduled','live')`; every writer maps
+  that violation to `409 CONFLICT`. Dev `lumina` still has 2 active duplicate groups (13 scheduled rows, all
+  `credit-concurrency.spec.ts` residue), so it stays unmigrated; verification runs on the disposable
+  `lumina_review` database (see `database/migrations-workflow.md`).
 - Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson was not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
 
 **Other gotchas:**
@@ -315,7 +319,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 353 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 15 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (14 domains, 375 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 23 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
@@ -344,9 +348,11 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 - Cutover D1 (parity suite), D2 (one-time import) and D3 (demo-data removal, archived in `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`) are done. D3 removed demo *leakage* rather than the store: `upgrade()` no longer seeds an API cache, `resetSchool()` is inert in API mode, the reset controls are hidden, and `lumina-account` is written only in demo mode. `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
 - No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
-- Booking credit races are closed (per-student advisory lock, Nov 20, 2026); what remains is the unique
-  `lessons (teacherId, date, time)` constraint (blocked by dev-DB duplicates) and the self-purchase payment
-  gate.
+- Booking credit races are closed (per-student advisory lock, Nov 20, 2026) and active-slot uniqueness
+  (`lessons_active_teacher_date_time_uidx`, migration `0004`) plus debit-only refunds (`isLessonCharged`)
+  landed and passed on disposable `lumina_review` (Nov 23, 2026); what remains is an approved cleanup
+  decision before applying `0004` to dev `lumina` (13 active duplicate test-residue rows) and the
+  student self-purchase payment gate.
 - Curriculum Library not built; no frontend unit or component tests; no CI.
 
 ## Scan Metadata

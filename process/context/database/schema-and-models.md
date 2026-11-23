@@ -18,12 +18,12 @@ BLUF: All tables are defined in `backend/src/db/schema.ts` (~520 lines). Ids are
 
 - Identity: `users` (unique email, `passwordHash`, `role`), `refresh_tokens` (sha256 `tokenHash` unique, `expiresAt`, `revokedAt`, cascade on user), `teacher_profiles`, `student_profiles` (unique `userId`, `managerId` set-null; guardian fields live on student profile — parents are not a login role).
 - Curriculum: `courses`, `course_units`, `lesson_plans`, `attachments`.
-- Teaching: `enrollments` (has `nextPlanIndex`), `lessons` (status, attendance, `roomCode` max 40 chars — NOT `meeting_url`, feedback, scores), `slot_openings` (unique index teacher+date+time), `requests`, `absences`, `ratings`.
+- Teaching: `enrollments` (has `nextPlanIndex`), `lessons` (status, attendance, `roomCode` max 40 chars — NOT `meeting_url`, feedback, scores), `slot_openings` (unique index teacher+date+time), `requests`, `absences` (unique `lesson_id` since migration `0003`), `ratings`.
 - Homework: `assignments`.
 - Billing: `credit_entries` — append-only ledger, `hours numeric(8,2)` (fractional since migration 0001).
 - System: `activity` (audit feed), `notification_state` (per-user bell state: `muted_categories text[]`, `read_ids text[]`, cascade on user), `settings` (singleton row id 1: onTheSpotCancellationHours 12, studentLateCancellationHours 24, bookingDayStart/End, performanceWindowDays, refundTeacherCancellations).
 
-Indexes: `users_role_idx`, `refresh_tokens_user_idx`, `lessons_teacher_date_idx`, `lessons_student_date_idx`, `enrollments_*_idx`, `assignments_*_idx`, `credit_entries_student_idx`, etc.
+Indexes: `users_role_idx`, `refresh_tokens_user_idx`, `lessons_teacher_date_idx`, `lessons_student_date_idx`, `lessons_active_teacher_date_time_uidx` (partial unique on `(teacher_id, date, time)` where `status in ('scheduled','live')`, migration `0004`), `enrollments_*_idx`, `assignments_*_idx`, `credit_entries_student_idx`, etc.
 
 ## Runtime wiring
 

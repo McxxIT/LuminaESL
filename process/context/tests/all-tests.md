@@ -107,11 +107,11 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 ## Smoke Gate (`npm run smoke`)
 
 - Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
-- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 13 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, upload 5 MB/MIME rules, notification feed scoping and state roundtrip. 353 checks per run; last green: 2026-11-20.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 14 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules, notification feed scoping and state roundtrip. 375 checks per run; last green: 2026-11-23.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
-## Parity Suite (`frontend/e2e`, 21 tests)
+## Parity Suite (`frontend/e2e`, 26 tests: 23 API + 3 demo)
 
 - Command: `npm run e2e` (root alias) = `e2e:api` then `e2e:demo`. Needs local Postgres, the backend
   env file, and a seeded DB; ports 3000, 3100, and 4000 must be free (the API config reuses an
@@ -129,13 +129,14 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | `e2e/api/auth.spec.ts` | 3 | API login + bootstrap 200; no token/JWT in `localStorage`; wrong password keeps the form; logout then reload does not resume the session |
 | `e2e/api/uploads.spec.ts` | 1 | `POST /uploads` 201 for a unique PDF, plan row appears, authenticated download returns byte-identical content |
 | `e2e/api/notifications.spec.ts` | 2 | Mark-all-read persists to `/notifications/state` and survives reload; muting a category persists per user; original state restored in `finally` |
-| `e2e/api/booking.spec.ts` | 1 | Teacher opens a fresh future slot, student books it, credit balance delta is exactly `-1`, lesson reads `scheduled` for the right teacher; the balance is restored in `finally` so repeat runs never drain the seeded student |
+| `e2e/api/booking.spec.ts` | 1 | Teacher opens a fresh future slot, student books it, credit balance delta is exactly `-1`, lesson reads `scheduled` for the right teacher; `finally` cancels the lesson (freeing the teacher/date/time key for the next run) and restores the balance so repeat runs never drain the seeded student |
+| `e2e/api/booking-collision.spec.ts` | 5 | Occupied-key 409s with no state change: student booking on a reopened slot (balance, lesson count, slot claim unchanged), reschedule onto an occupied time (lesson keeps its old time/status), reactivating a cancelled lesson into an occupied key, two concurrent `POST /lessons` (one 201 + one 409, one active row), and collision vs validation (400 `VALIDATION_ERROR`) vs insufficient credit (400 `BAD_REQUEST`) |
 | `e2e/api/cancellation-refund.spec.ts` | 1 | Manager books on behalf, teacher files a cancellation with PNG evidence, manager sees the evidence as a blob URL, approves, credit delta is exactly `+1`, lesson reads `cancelled` |
 | `e2e/api/homework.spec.ts` | 1 | Teacher assigns homework, student submits it, teacher reviews it (status `Reviewed`, no Review button left) |
 | `e2e/api/cache-keys.spec.ts` | 2 | An API sign-in leaves `lumina-school:v1` byte-identical, caches to `lumina-school:api-cache`, and captures the local school into `lumina-school:pending-import` before the bootstrap (a second boot does not replace it); a UUID-only payload is treated as an API cache, not local data, and is not captured |
 | `e2e/api/import.spec.ts` | 2 | Seeds a synthetic local school, previews it (no writes, no marker), imports it, and asserts through `/school/bootstrap`: created student with hex avatar and recorded `createdAt`, lesson `endTime`/`createdAt`/`createdBy`, approved request with its reviewed state and attachment, credit sign/amount, byte-identical attachment download, marker row, `v1` untouched; a repeat is 409 and a forced run is 201. Second test: anonymous 401, manager/teacher/student 403 |
 | `e2e/api/no-demo-seed.spec.ts` | 2 | D3: an API account boots over a stale offline cache (no `assignments`) plus a real `lumina-school:v1`; no demo homework/course title renders, the stale marker row is replaced, `v1` stays byte-identical, and no "Reset demo" control exists in admin/student/teacher settings. Second test is a Node store probe: `configureSchoolDataSource("api")` + `resetSchool()` leaves the snapshot untouched and logs the warning |
-| `e2e/api/credit-concurrency.spec.ts` | 3 | Ledger serialization, API-only (no UI): two concurrent `POST /bookings` on a 1-credit balance -> exactly one 201 + one 422, balance 0, one lesson; two concurrent student cancels -> one 200 `refunded:true` + one 409, +1 once; two concurrent absences -> one 201 + one 409, one refund. Balance restored and leftover slots closed in `finally` |
+| `e2e/api/credit-concurrency.spec.ts` | 3 | Ledger serialization, API-only (no UI): two concurrent `POST /bookings` on a 1-credit balance -> exactly one 201 + one 422, balance 0, one lesson; two concurrent student cancels -> one 200 `refunded:true` + one 409, +1 once; two concurrent absences -> one 201 + one 409, one refund. `freeTime()` skips both open slots and keys with an active lesson; `finally` restores the balance, closes leftover slots, and cancels the lessons it booked |
 | `e2e/demo/regression.spec.ts` | 3 | Demo login with any password, local snapshot present, IndexedDB upload + byte-identical download, bell read state and mute survive reload, zero `/api/v1/` requests; an older local snapshot still gains the seeded `assignments`; Settings still resets the demo school and re-seeds `v1` |
 
 - Safety: the suite never migrates, seeds, resets, truncates, or pushes. `e2e/support/preconditions.ts`
@@ -143,23 +144,29 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   collection, then fails loudly with the command a human should run (probe: point `E2E_API_URL` at a
   dead port and the `beforeAll` fails every test in the file).
 - Residue per run (unavoidable without a disposable DB): one uploaded plan file per upload spec, one
-  booked lesson, one booked+cancelled lesson with an approved request, one reviewed assignment,
-  `notification_state` churn that is restored, and - from `import.spec.ts` - one imported student with
-  profile, a course/unit/plan chain, an enrollment, one completed lesson dated 2031-03-05, an approved
-  cancellation request, an uploaded PDF, one `school.imported` marker plus a second marker from the
-  forced run. `credit-concurrency.spec.ts` adds three probe lessons (two future dates, one past date) and
-  restores the ledger with `adjustment` entries; it closes the slot it failed to book. `booking.spec.ts`
-  now restores the credit it spends via `setCreditBalance` (`e2e/support/api.ts`), so the suite no longer
-  drains the seeded student run over run. Unique `runId` markers keep rows attributable; the archived D2
-  execute report
+  booked-then-cancelled lesson, one booked+cancelled lesson with an approved request, one reviewed
+  assignment, `notification_state` churn that is restored, and - from `import.spec.ts` - one imported
+  student with profile, a course/unit/plan chain, an enrollment, one completed lesson dated 2031-03-05, an
+  approved cancellation request, an uploaded PDF, one `school.imported` marker plus a second marker from
+  the forced run. `credit-concurrency.spec.ts` adds probe lessons (two future dates, one past date) and
+  restores the ledger with `adjustment` entries; it closes the slot it failed to book and cancels the
+  lessons it booked. `booking.spec.ts` and `booking-collision.spec.ts` cancel every lesson they create, so
+  no *active* row accumulates at a reused teacher/date/time key (cancelled history rows remain by design).
+  `booking.spec.ts` also restores the credit it spends via `setCreditBalance` (`e2e/support/api.ts`), so the
+  suite no longer drains the seeded student run over run. Unique `runId` markers keep rows attributable; the
+  archived D2 execute report
   (`process/features/backend-cutover/completed/d2-one-time-import_19-11-26/d2-one-time-import_EXECUTE_19-11-26.md`)
-  lists the residue. Applying migration `0003` (`absences.lesson_id` unique) is required before this suite
-  goes green on an older database.
+  lists the residue. Migrations `0003` (`absences.lesson_id` unique) and `0004`
+  (`lessons_active_teacher_date_time_uidx`) are required before this suite goes green on an older database.
+  Dev `lumina` still cannot take `0004`, so point `DATABASE_URL` at the disposable `lumina_review` database
+  for the API run (see `database/migrations-workflow.md`).
 - Failure artifacts: `frontend/test-results/{api,demo}/<test>/` gets `test-failed-1.png`, `video.webm`,
   `trace.zip` (`npx playwright show-trace <zip>`), and `error-context.md`; the HTML report goes to
   `frontend/playwright-report/`. All three folders are gitignored and excluded from ESLint.
 - Backend `webServer` uses `npm run start` (no `--watch`): a `tsx watch` child outlived a failed boot on
-  Windows and held port 4000. Not in CI — see `process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`.
+  Windows and held port 4000. It also runs with `RATE_LIMIT_MAX=100000` (matching `smoke.ts`); at the default
+  300/min the suite's own volume rejected later specs with `429` on `/health`. Not in CI — see
+  `process/features/backend-cutover/backlog/e2e-ci-wiring_NOTE_18-11-26.md`.
 
 ## Debugging Quick Reference
 
@@ -175,28 +182,38 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 ## Known Gaps
 
-- No frontend unit or component tests; browser coverage is the Playwright parity suite (18 tests
-  across auth, uploads, notifications, booking, cancellation/refund, homework, API boot with no demo
-  data, and demo mode).
+- No frontend unit or component tests; browser coverage is the Playwright parity suite (23 API tests
+  across auth, uploads, notifications, booking, booking collisions, cancellation/refund, credit races,
+  homework, API boot with no demo data, and import, plus 3 demo tests).
 - Authenticated business rules not in the parity suite (course ownership, publish/archive, absences,
   ratings, rebook) are covered by `npm run smoke` and by hand only.
 - Credit races are covered: `e2e/api/credit-concurrency.spec.ts` fires two concurrent bookings, cancels, and
   absences and asserts exactly one winner. The balance read and debit are serialized per student by
   `lockStudentCredits` (advisory transaction lock, Nov 20, 2026). `POST /lessons` debits 1 credit and refunds
-  only debited lessons; plan selection is row-locked (`.for("update")`); smoke asserts the debit delta.
+  only lessons that still carry a matching `booking` debit for the same student (`isLessonCharged`); plan
+  selection is row-locked (`.for("update")`); smoke asserts the debit delta and the uncharged/reversed cases.
 - Any new spec that spends credits must restore the balance with `setCreditBalance` in `finally`; the seeded
   student had been drained to 0.25 credits by repeated `booking.spec.ts` runs and was topped back up to 24 on
   20-11-26.
-- No unique constraint on lessons (teacher, date, time); the slot-row claim is the only guard. The dev DB has
-  2 active duplicate groups (13 scheduled rows, `credit-concurrency.spec.ts` residue), so adding it needs a
-  disposable DB or a reviewed cleanup; the specs must also stop reusing a teacher/date/time that already has
-  an active lesson.
+- Active teacher/date/time uniqueness is enforced by `lessons_active_teacher_date_time_uidx` (migration
+  `0004`) and proved by `booking-collision.spec.ts` (five cases) plus a DB duplicate query after each run.
+  Dev `lumina` still holds 2 active duplicate groups (13 scheduled rows, `credit-concurrency.spec.ts`
+  residue) and stays unmigrated, so run the API suite against the disposable `lumina_review` database via a
+  `DATABASE_URL` override. Any new spec must still avoid a teacher/date/time that already has an active
+  lesson, and cancel what it books in `finally`.
 - No CI; backend "build" is typecheck only. The parity suite has no CI job either
   (backlog: `e2e-ci-wiring_NOTE_18-11-26.md` — needs a Postgres service, `db:migrate`, `db:seed`).
-- The parity suite runs against the shared dev DB and leaves fixture rows behind by design; until a
-  disposable test database exists, residue is documented rather than cleaned.
+- The parity suite runs against a shared database and leaves fixture rows behind by design; until a
+  disposable test database exists, residue is documented rather than cleaned. Today the nearest thing is
+  `lumina_review`, a disposable clone used for migration and collision work.
 
 ## Last Verified Test Run
+
+2026-11-23 (booking collision + refund policy, on the disposable `lumina_review` database): `npm run
+typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 5 files, 30 tests passed;
+`npm run smoke`: 14/14 domains, 375 checks, settings restored, exit 0; `npm run e2e:api` 23/23 twice back
+to back (no cleanup between runs); `npm run e2e:demo` 3/3; `git diff --check` exit 0. DB check after both
+runs: 0 active duplicate groups. Migration `0004` applied to `lumina_review` only; dev `lumina` untouched.
 
 2026-11-20 (D3 closeout): `npm run e2e` twice back to back on the final code: run 1 API 15/15 (58.0 s) +
 demo 3/3 (13.5 s), run 2 API 15/15 (53.9 s) + demo 3/3 (11.8 s), exit 0 both times, no cleanup between
