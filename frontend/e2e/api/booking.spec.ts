@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { signIn, signOut } from "../support/auth";
-import { bootstrap, creditBalance, lessonAt, setCreditBalance } from "../support/api";
+import {
+  apiCall,
+  bootstrap,
+  creditBalance,
+  lessonAt,
+  setCreditBalance,
+} from "../support/api";
 import {
   assertNoPageErrors,
   collectPageErrors,
@@ -25,6 +31,7 @@ test.describe("API mode booking", () => {
     const pageErrors = collectPageErrors(page);
     const date = isoDaysFromNow(4);
     const balanceBefore = await creditBalance(adminToken, student.id);
+    let createdLessonId: string | undefined;
 
     try {
       await signIn(page, "teacher@lumina.school");
@@ -63,6 +70,7 @@ test.describe("API mode booking", () => {
 
       const school = await bootstrap(adminToken);
       const lesson = lessonAt(school, { studentId: student.id, date, time: slot.time });
+      createdLessonId = lesson.id;
       expect(lesson.status).toBe("scheduled");
       expect(lesson.teacherId).toBe(teacher.id);
 
@@ -72,6 +80,15 @@ test.describe("API mode booking", () => {
 
       assertNoPageErrors(pageErrors);
     } finally {
+      // Cancel the lesson so the teacher/date/time key is free for the next run:
+      // lessons_active_teacher_date_time_uidx rejects a second active lesson there.
+      if (createdLessonId) {
+        await apiCall(`/lessons/${createdLessonId}`, {
+          method: "PATCH",
+          token: adminToken,
+          body: { status: "cancelled" },
+        });
+      }
       // The lesson keeps its debit; restore the ledger so repeat runs never drain
       // the seeded student (cancellation-refund and credit-concurrency need >= 1).
       await setCreditBalance(adminToken, student.id, balanceBefore);

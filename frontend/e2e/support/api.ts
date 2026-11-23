@@ -99,6 +99,62 @@ export function apiPatch<T>(path: string, token: string, body: unknown): Promise
   return apiRequest<T>(path, { method: "PATCH", token, body });
 }
 
+export type ApiCallResult<T> = { status: number; body: T };
+
+/**
+ * Non-throwing call for expected failures. `apiRequest` throws on any non-2xx
+ * response, which hides the status a collision or credit assertion needs.
+ */
+export async function apiCall<T = unknown>(
+  path: string,
+  options: { method?: string; token?: string; body?: unknown } = {},
+): Promise<ApiCallResult<T>> {
+  const headers: Record<string, string> = {};
+  if (options.token) headers.authorization = `Bearer ${options.token}`;
+  if (options.body !== undefined) headers["content-type"] = "application/json";
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+
+  const text = await response.text().catch(() => "");
+  let body: unknown;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+  return { status: response.status, body: body as T };
+}
+
+export type ApiSlot = {
+  id: string;
+  teacherId: string;
+  date: string;
+  time: string;
+};
+
+/** Opens a booking slot through the API (admin may name any teacher). */
+export function openSlot(
+  token: string,
+  input: { teacherId?: string; date: string; time: string },
+): Promise<ApiSlot> {
+  return apiPost<ApiSlot>("/bookings/slots", token, input);
+}
+
+/** Open slots for one teacher in a date range. */
+export function slotsFor(
+  token: string,
+  input: { teacherId: string; from: string; to: string },
+): Promise<ApiSlot[]> {
+  const query = new URLSearchParams(input).toString();
+  return apiGet<ApiSlot[]>(`/bookings/slots?${query}`, token);
+}
+
 export function bootstrap(token: string): Promise<Bootstrap> {
   return apiGet<Bootstrap>("/school/bootstrap", token);
 }

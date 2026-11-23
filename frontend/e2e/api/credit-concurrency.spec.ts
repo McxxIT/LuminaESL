@@ -22,7 +22,7 @@ import { ensurePreconditions } from "../support/preconditions";
 type ApiResult<T = unknown> = { status: number; body: T };
 
 async function call<T = unknown>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PATCH",
   path: string,
   token: string,
   body?: unknown,
@@ -81,7 +81,11 @@ const CANDIDATE_TIMES = [
   "21:00",
 ];
 
-/** First candidate time with no open slot yet for this teacher on this date. */
+/**
+ * First candidate time that is free on both counts: no open slot, and no active
+ * lesson already occupying the teacher/date/time key. A closed slot alone is no
+ * longer enough — `lessons_active_teacher_date_time_uidx` rejects the booking.
+ */
 async function freeTime(
   token: string,
   teacherId: string,
@@ -92,6 +96,16 @@ async function freeTime(
     token,
   );
   const taken = new Set(open.map((slot) => slot.time));
+
+  const existing = await apiGet<{
+    items: Array<{ time: string; status: string }>;
+  }>(`/lessons?teacherId=${teacherId}&from=${date}&to=${date}`, token);
+  for (const lesson of existing.items) {
+    if (lesson.status === "scheduled" || lesson.status === "live") {
+      taken.add(lesson.time);
+    }
+  }
+
   const time = CANDIDATE_TIMES.find((candidate) => !taken.has(candidate));
   if (!time) throw new Error(`No free slot time left on ${date}`);
   return time;
@@ -171,6 +185,16 @@ test.describe("API mode credit ledger serialization", () => {
     } finally {
       await setCreditBalance(adminToken, student.id, original);
       await closeSlots(adminToken, teacher.id, slotIds, dateA, dateB);
+      // Free the keys this run booked so the next run's freeTime() can reuse them
+      // instead of accumulating one active lesson per run.
+      const settled = await bootstrap(adminToken);
+      for (const lesson of Object.values(settled.collections.lessons)) {
+        if (!knownLessonIds.has(lesson.id) && lesson.status === "scheduled") {
+          await call("PATCH", `/lessons/${lesson.id}`, adminToken, {
+            status: "cancelled",
+          });
+        }
+      }
     }
   });
 
