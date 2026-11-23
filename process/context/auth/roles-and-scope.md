@@ -17,6 +17,8 @@ BLUF: Four roles (`admin`, `manager`, `teacher`, `student`) defined in `backend/
   - `managerTeam(db, managerId)`: teachers with `teacher_profiles.managerId`, plus students on the manager roster or enrolled with those teachers.
   - `managerOwnsTeacher`, `managerOwnsStudent`, `teacherStudentIds`, `studentTeacherIds`, `adminIds`.
   - `assertCanViewUser(db, actor, targetId)`: admin or self; manager -> team; teacher -> own students; student -> enrolled teachers; else 403.
+  - `canAccessAttachment` / `assertCanAccessAttachment(db, actor, attachment)`: per-record read/download scope for `GET /uploads/:id{,/download}`. Admin and uploader (pre-attach window) always pass; request evidence is visible to the target/requesting teacher and their manager; lesson-plan files mirror `GET /school/bootstrap` (manager: published/owned course or a team lesson using the plan; teacher/student: enrolled in the course or assigned to a lesson using the plan). Unreferenced uploads by another user are 403.
+- Credit administration is staff-only: `POST /credits` uses `requireRole(["admin", "manager"])`, so student self-purchase is 403. Admin and team-scoped managers keep top-up/adjustment rights under `managerOwnsStudent` and the 100-credit cap.
 - Admin creates managers and assigns teachers to managers; role-scoped `GET /school/bootstrap` (`routes/school.ts`) returns only what the actor may see.
 - Every route that touches a student/teacher must apply the manager-team check (example: `bookings.ts` before booking on behalf).
 

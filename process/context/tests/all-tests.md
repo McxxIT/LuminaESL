@@ -10,12 +10,12 @@ date: 18-11-26
 
 # lumina-esl - All Tests
 
-Last updated: 2026-11-18
+Last updated: 2026-11-23
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** The backend has automated tests (vitest, 30 tests, 5 files, no DB needed). The frontend has a
-committed browser parity suite (`@playwright/test`, 21 tests: 18 API mode + 3 demo) run by
+**BLUF:** The backend has automated tests (vitest, 31 tests, 5 files, no DB needed). The frontend has a
+committed browser parity suite (`@playwright/test`, 27 tests: 24 API mode + 3 demo) run by
 `npm run e2e`. `npm run smoke` is a separate hybrid per-domain API smoke. There is no frontend
 unit/component runner and no CI; authenticated business rules outside the parity suite are verified by
 `npm run smoke` or by hand against seeded local Postgres.
@@ -98,7 +98,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | File | Tests | Covers |
 |---|---|---|
 | `app.test.ts` | 4 | `/health` 200; unknown route 404 `NOT_FOUND`; `/api/v1/lessons` without token 401; bad login body 400 `VALIDATION_ERROR` |
-| `contract.test.ts` | 6 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes (including `uploads` and `notifications/state`); `/school/bootstrap` 401 without token; notification state + upload routes 401 without token |
+| `contract.test.ts` | 7 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes (including `uploads` and `notifications/state`); `/school/bootstrap` 401 without token; notification state + upload routes 401 without token; `POST /credits` 401 anonymous and 403 for a student token (staff-managed policy) |
 | `password.test.ts` | 3 | scrypt hash/verify, salted uniqueness, `addMinutes` midnight wrap |
 | `db-types.test.ts` | 4 | DB-free: postgres `numeric` (OID 1700) parser registration and parsing; `RATE_LIMIT_MAX` env default 300 |
 
@@ -107,16 +107,16 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 ## Smoke Gate (`npm run smoke`)
 
 - Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
-- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 14 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules, notification feed scoping and state roundtrip. 375 checks per run; last green: 2026-11-23.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 14 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules plus the full attachment access matrix (pre-attach uploader/admin 200, cross-team/student 403; published plan enrolled roles 200, unrelated 403; draft course owner/admin 200, others 403; request evidence target teacher/manager 200, cross-team/student 403), staff-managed credits (student self-purchase 403 with unchanged balance, admin purchase 201, 101 still 400), notification feed scoping and state roundtrip. 405 checks per run; last green: 2026-11-23.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
-## Parity Suite (`frontend/e2e`, 26 tests: 23 API + 3 demo)
+## Parity Suite (`frontend/e2e`, 27 tests: 24 API + 3 demo)
 
 - Command: `npm run e2e` (root alias) = `e2e:api` then `e2e:demo`. Needs local Postgres, the backend
   env file, and a seeded DB; ports 3000, 3100, and 4000 must be free (the API config reuses an
-  existing backend on 4000 unless `CI` is set). About 75 s total; last green: 2026-11-20, twice back
-  to back.
+  existing backend on 4000 unless `CI` is set, but never reuses an existing frontend on 3000). About
+  75 s total; last green: 2026-11-23.
 - Two configs, not two projects: `frontend/playwright.config.ts` runs the app on :3000 with
   `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`; `frontend/playwright.demo.config.ts`
   runs it on :3100 with demo defaults and no backend. `e2e/serve.mjs` injects that env and spawns
@@ -127,7 +127,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | Spec | Tests | Covers |
 |---|---|---|
 | `e2e/api/auth.spec.ts` | 3 | API login + bootstrap 200; no token/JWT in `localStorage`; wrong password keeps the form; logout then reload does not resume the session |
-| `e2e/api/uploads.spec.ts` | 1 | `POST /uploads` 201 for a unique PDF, plan row appears, authenticated download returns byte-identical content |
+| `e2e/api/uploads.spec.ts` | 2 | Test 1: `POST /uploads` 201 for a unique PDF, plan row appears, authenticated download returns byte-identical content. Test 2 (Phase 02): unattached manager upload is 200 for uploader/admin and 403 for another manager/student; student `POST /credits` is 403; API-mode Student Billing shows "School-managed credits", no "Buy credits" button, and no demo VISA card |
 | `e2e/api/notifications.spec.ts` | 2 | Mark-all-read persists to `/notifications/state` and survives reload; muting a category persists per user; original state restored in `finally` |
 | `e2e/api/booking.spec.ts` | 1 | Teacher opens a fresh future slot, student books it, credit balance delta is exactly `-1`, lesson reads `scheduled` for the right teacher; `finally` cancels the lesson (freeing the teacher/date/time key for the next run) and restores the balance so repeat runs never drain the seeded student |
 | `e2e/api/booking-collision.spec.ts` | 5 | Occupied-key 409s with no state change: student booking on a reopened slot (balance, lesson count, slot claim unchanged), reschedule onto an occupied time (lesson keeps its old time/status), reactivating a cancelled lesson into an occupied key, two concurrent `POST /lessons` (one 201 + one 409, one active row), and collision vs validation (400 `VALIDATION_ERROR`) vs insufficient credit (400 `BAD_REQUEST`) |
@@ -143,7 +143,8 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   verifies `/health`, the seeded admin login, the four seeded accounts, and a non-empty lesson
   collection, then fails loudly with the command a human should run (probe: point `E2E_API_URL` at a
   dead port and the `beforeAll` fails every test in the file).
-- Residue per run (unavoidable without a disposable DB): one uploaded plan file per upload spec, one
+- Residue per run (unavoidable without a disposable DB): one uploaded plan file per upload spec (plus
+  one unattached manager upload from the Phase 02 scoping test), one
   booked-then-cancelled lesson, one booked+cancelled lesson with an approved request, one reviewed
   assignment, `notification_state` churn that is restored, and - from `import.spec.ts` - one imported
   student with profile, a course/unit/plan chain, an enrollment, one completed lesson dated 2031-03-05, an
@@ -205,6 +206,11 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   `lumina_review`, a disposable clone used for migration and collision work.
 
 ## Last Verified Test Run
+
+2026-11-23 (Phase 02 security & staff-managed credits, default `backend/.env` with no overrides):
+`npm run typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 5 files, 31
+tests passed; `npm run smoke`: 14/14 domains, 405 checks, settings restored, exit 0; `npm run e2e`: 24/24
+API + 3/3 demo passed; post-run DB check: 0 active duplicate groups.
 
 2026-11-23 (Phase 01 dev `lumina` migration `0004` alignment, default `backend/.env` with no overrides):
 `npm run db:migrate` (5 migrations, `lessons_active_teacher_date_time_uidx` live on `lumina`),

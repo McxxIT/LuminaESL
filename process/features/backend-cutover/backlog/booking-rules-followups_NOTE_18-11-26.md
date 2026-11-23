@@ -7,7 +7,7 @@ feature: backend-cutover
 
 # Booking and billing rule follow-ups
 
-status: 1-2-done (20-11-26); 3-open
+status: done (23-11-26; items 1-2 fixed 20-11-26, item 3 fixed 23-11-26)
 item: B3-GAP-RULES (known gaps from b3-domain-smoke_PLAN_18-11-26 plus one new finding)
 reason: These need product decisions or billing work outside B3; the smoke asserts current behavior so any change is visible.
 
@@ -20,7 +20,13 @@ reason: These need product decisions or billing work outside B3; the smoke asser
    plan selection is serialized per student. The ledger itself is now serialized too: all seven
    credit-mutating paths take `lockStudentCredits` first (see
    `process/features/people-billing/completed/credit-ledger-serialization_20-11-26/`).
-3. **Open.** Student self-purchase (up to 100) still has no payment check.
+3. **Fixed 23-11-26.** Staff-managed credits policy: `POST /credits` is now
+   `requireRole(["admin", "manager"])`, so a student self-purchase returns `403` with an unchanged
+   balance. Admins and team-scoped managers keep top-up/adjustment rights and the 100-credit cap.
+   API-mode `StudentBilling.tsx` hides "Buy credits", the purchase modal, and the demo VISA/auto-renew
+   card; demo mode is unchanged. Gate: `npm run smoke` (`credits`), `backend/tests/contract.test.ts`,
+   `frontend/e2e/api/uploads.spec.ts`
+   (`process/features/launch-readiness/active/lumina-v1-finish_23-11-26/`).
 
 ## Gaps
 
@@ -30,5 +36,4 @@ reason: These need product decisions or billing work outside B3; the smoke asser
 
 ## Next step
 
-item 3 only: gate student purchases behind a payment provider (or cap self-purchase). Items 1 and 2
-are done; keep the smoke debit assertions as the regression gate.
+None. Items 1-3 are done; keep the smoke debit/credit assertions as the regression gate.

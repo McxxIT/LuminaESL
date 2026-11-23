@@ -74,9 +74,13 @@ Managers may only book for students on their team (`managerOwnsStudent`, `backen
 
 1. Resolved in B3: the `::int` truncation is gone. Resolved Nov 20, 2026: `POST /lessons` debits 1
    credit (`credit_entries` `reason: "booking"`) and a cancellation refunds only a lesson that has
-   that debit row; `resolveLessonDefaults` locks plan selection with `.for("update")`. Still open:
-   student self-purchase (up to 100) has no payment check
-   (`booking-rules-followups_NOTE_18-11-26.md`).
+   that debit row; `resolveLessonDefaults` locks plan selection with `.for("update")`. Resolved Nov
+   23, 2026 (Phase 02): credits are staff-managed in API mode — `POST /credits` is
+   `requireRole(["admin", "manager"])`, so a student self-purchase is `403` and cannot change the
+   balance; admins and team-scoped managers keep the 100-per-request cap and the
+   `lockStudentCredits` path. The API-mode student billing UI hides self-purchase and the demo
+   VISA/auto-renew card. Gates: `npm run smoke` (`credits`), `frontend/e2e/api/uploads.spec.ts`,
+   `backend/tests/contract.test.ts` (`booking-rules-followups_NOTE_18-11-26.md` item 3).
 2. Resolved Nov 20, 2026: the balance read and debit are serialized per student by
    `lockStudentCredits` (advisory transaction lock); cancel and absence decisions moved inside the
    same transaction. Regression gate: `frontend/e2e/api/credit-concurrency.spec.ts` (three real races).

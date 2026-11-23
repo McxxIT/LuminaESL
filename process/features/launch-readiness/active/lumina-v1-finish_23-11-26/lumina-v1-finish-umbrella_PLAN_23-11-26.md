@@ -218,7 +218,7 @@ Each phase executes the canonical 7-step inner loop `R → I → P → PVL → E
 |---|---|
 | 0 — Pre-program (scaffold & baseline) | ✅ COMPLETE |
 | 01 — Dev DB Migration 0004 Alignment | ✅ VERIFIED |
-| 02 — Security & Staff-Managed Credits | ⏳ PLANNED |
+| 02 — Security & Staff-Managed Credits | ✅ VERIFIED |
 | 03 — Auth & Account Lifecycle Hardening | ⏳ PLANNED |
 | 04 — Curriculum Library | ⏳ PLANNED |
 | 05 — Parity Polish & Frontend Unit Tests | ⏳ PLANNED |
@@ -270,24 +270,24 @@ node .claude/skills/vc-generate-context/scripts/validate-all-context.mjs
 ## Resume and Execution Handoff
 
 - Selected plan file path: `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md`
-- Last completed phase: Phase 0 (Program scaffold created)
-- Validate-contract status: pending (vc-validate-agent writes per-phase before each EXECUTE)
-- Next step for a fresh agent: Read this umbrella plan, read `phase-01-dev-db-migration-0004_PLAN_23-11-26.md`, and run Phase 01 RESEARCH (read-only inspection of dev `lumina` duplicate rows + snapshot procedure).
-- Current phase: Phase 01 — Dev DB Migration 0004 Alignment
-- Next action: Run Phase 01 RESEARCH (Step 1 of 7-step inner loop)
-- Execute-agent start instruction: Do NOT enter EXECUTE until Phase 01 RESEARCH, INNOVATE, PLAN-SUPPLEMENT, PVL validate-contract, and explicit user row-cleanup approval are complete.
+- Last completed phase: Phase 02 (Security & Staff-Managed Credits)
+- Validate-contract status: Phase 01 PASS, Phase 02 PASS; Phase 03 pending
+- Next step for a fresh agent: Read this umbrella plan, read `phase-03-auth-lifecycle-hardening_PLAN_23-11-26.md`, and run Phase 03 RESEARCH (read-only auth lifecycle mapping).
+- Current phase: Phase 03 — Auth & Account Lifecycle Hardening
+- Next action: Run Phase 03 RESEARCH (Step 1 of 7-step inner loop)
+- Execute-agent start instruction: Do NOT enter EXECUTE until Phase 03 RESEARCH, INNOVATE, PLAN-SUPPLEMENT, PVL validate-contract, and explicit user approval are complete.
 
 ---
 
 ## Current Execution State
 
 Last updated: 23-11-26
-Completed phases: Phase 0 (Program Scaffold), Phase 01 (Dev DB Migration 0004 Alignment)
-Current phase: Phase 02 — Security & Staff-Managed Credits
+Completed phases: Phase 0 (Program Scaffold), Phase 01 (Dev DB Migration 0004 Alignment), Phase 02 (Security & Staff-Managed Credits)
+Current phase: Phase 03 — Auth & Account Lifecycle Hardening
 Current loop step: RESEARCH
-Validate-contract status: Phase 01 PASS (verified); Phase 02 pending
+Validate-contract status: Phase 01 PASS; Phase 02 PASS; Phase 03 pending
 Program Net Gate: IN_PROGRESS
-Latest validator run: 23-11-26 — Phase 01 gates all green on default lumina (smoke 14/14 375, e2e 23 API + 3 demo, 0 active duplicates)
+Latest validator run: 23-11-26 — Phase 02 gates all green on default lumina (smoke 14/14 405, e2e 24 API + 3 demo, 0 active duplicates)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any subagent. Never spawn execute-agent when loop step is RESEARCH, INNOVATE, PLAN-SUPPLEMENT, or PVL.

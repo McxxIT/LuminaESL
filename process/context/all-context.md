@@ -218,7 +218,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 30 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 23 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 31 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 24 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -229,7 +229,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Backend errors:** throw `AppError(statusCode, code, message, details)` via helpers `badRequest/unauthorized/forbidden/notFound/conflict(409)/unprocessable(422)`. Response shape `{error:{code,message,details?}}`; ZodError -> 400 `VALIDATION_ERROR`; 500 `INTERNAL_ERROR` (message hidden in production).
 
-**Manager scoping:** `backend/src/lib/scope.ts` (`managerOwnsStudent`, `managerOwnsTeacher`, `managerTeam`). A manager's team = `managerId` on teacher/student profiles. Every manager-reachable route must apply it.
+**Manager scoping:** `backend/src/lib/scope.ts` (`managerOwnsStudent`, `managerOwnsTeacher`, `managerTeam`, `canAccessAttachment`/`assertCanAccessAttachment`). A manager's team = `managerId` on teacher/student profiles. Every manager-reachable route must apply it.
 
 **Backend bootstrap:** `GET /api/v1/school/bootstrap` returns the role-scoped dataset the frontend store hydrates from.
 
@@ -257,7 +257,11 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 - (Resolved in B3: the balance is now the numeric `getCreditBalance`; postgres `numeric` is parsed to a JS number in `plugins/db.ts`.)
 - Backend `POST /lessons` (teacher/manager/admin schedules a lesson) now debits 1 credit like the demo add-lesson paths, and a cancellation refunds only a lesson that was actually debited (Nov 20, 2026). Plan selection is row-locked with `.for("update")` in `resolveLessonDefaults`, so concurrent bookings cannot claim the same plan. Backlog: `process/features/backend-cutover/backlog/booking-rules-followups_NOTE_18-11-26.md`.
-- A student can self-purchase up to 100 credits with no payment check.
+- Resolved Nov 23, 2026 (Phase 02): credits are staff-managed in API mode. `POST /credits` is
+  `requireRole(["admin", "manager"])`, so a student self-purchase returns `403`; the API-mode
+  `StudentBilling` screen hides "Buy credits", the purchase modal, and the demo VISA/auto-renew card.
+  Demo mode keeps local credit packages. Gate: `npm run smoke` (`credits` domain) +
+  `frontend/e2e/api/uploads.spec.ts`.
 - Resolved Nov 20, 2026: credit balance reads and debits are serialized per student by a
   transaction-scoped advisory lock (`lockStudentCredits` in `backend/src/lib/credits.ts`), taken first by
   all seven credit-mutating paths. Student cancel and teacher absence decide refunds inside the same
@@ -276,7 +280,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - `npm run db:reset` TRUNCATES all tables (refuses production). Destructive; never use it as a verification gate.
 - Meeting links live in `lessons.roomCode` (max 40 chars), NOT `meeting_url`.
 - Parents are not a login role: guardian fields on `student_profiles`; parent ratings go through the student account (`ratingSource: "parent"`).
-- Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`.
+- Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`. Since Nov 23, 2026, `GET /uploads/:id{,/download}` re-derives per-record scope with `canAccessAttachment` (admin, uploader pre-attach, plan/course visibility, or request evidence); unreferenced uploads by another user return `403`.
 - The bell is the activity feed merged with the role derivation (deduped by target, cap 30). Read ids and muted categories are per user in `notification_state` via `GET`/`PATCH /notifications/state`; demo mode still uses localStorage. Notification ids are stored server-side, so keep them short.
 - Storage keys are split by mode: `lumina-school:v1` is local/demo only, `lumina-school:api-cache` is API mode's offline cache (`API_CACHE_KEY` in `frontend/app/lib/school/store.ts`), and API mode never writes `v1`. `hydrateSchool()` routes API saves to the cache key; writing the bootstrap over `v1` is what used to destroy local-only data before it could be imported.
 - One-time import (D2): `POST /school/import` + `POST /school/import/preview`, admin only, `backend/src/lib/school-import.ts` (zod payload, pure `buildImportPlan`, `applyImportPlan`, one transaction). The browser captures `lumina-school:v1` into `lumina-school:pending-import` before the first bootstrap (`frontend/app/lib/school/import/capture.ts`), archives it to `lumina-school:imported:<seededAt>` after a run, and uploads attachment bytes through `POST /uploads` before the import (preview uploads nothing). Idempotency is one `activity` row `school.imported` / `targetId: source.seededAt`; a repeat is 409 unless `options.force`. Profiles are keyed by their user in the browser store, so profile ids are receipted but kept out of the flat `idMap`.
@@ -320,7 +324,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (14 domains, 375 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 23 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (14 domains, 405 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 24 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
