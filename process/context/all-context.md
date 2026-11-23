@@ -124,6 +124,7 @@ For most substantial tasks:
 |---|---|
 | `process/features/backend-cutover/` | Frontend local-store to backend API cutover (Steps A-D, B3 domain slices) |
 | `process/features/curriculum/` | Courses, units, lesson plans, attachments; planned (not built) Curriculum Library |
+| `process/features/launch-readiness/` | 6-phase v1 finish program: dev DB 0004 alignment, upload scoping & staff credits, auth hardening, Curriculum Library, polish/Vitest, CI & Docker Compose |
 | `process/features/lessons-scheduling/` | Bookings, slot openings, lessons, ratings, room codes, homework/assignments, notifications |
 | `process/features/people-billing/` | Users/roles, managers, approvals/requests, enrollments, profiles, credits/billing |
 
