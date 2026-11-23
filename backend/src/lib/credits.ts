@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { creditEntries } from "../db/schema";
 import type { DbOrTx } from "./db-handle";
 
@@ -39,4 +39,36 @@ export async function getCreditBalance(
     .from(creditEntries)
     .where(eq(creditEntries.studentId, studentId));
   return Number(row?.value ?? 0);
+}
+
+/**
+ * True when the lesson is still charged to this exact student.
+ *
+ * Two conditions, both scoped to `lesson_id + student_id`:
+ *  - a `booking` debit row exists (the lesson was charged), and
+ *  - the lesson's ledger net is still negative (the charge was not adjusted away).
+ *
+ * Adjustments, another lesson's debit, or another student's debit are not
+ * evidence, so a lesson that was never charged — or whose charge was reversed —
+ * can never mint a refund. Call it inside the same transaction (and after
+ * `lockStudentCredits`) as the refund insert.
+ */
+export async function isLessonCharged(
+  db: DbOrTx,
+  lessonId: string,
+  studentId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({
+      debits: sql<number>`count(*) filter (where ${creditEntries.reason} = 'booking')::int`,
+      net: sql<number>`coalesce(sum(${creditEntries.hours}), 0)`,
+    })
+    .from(creditEntries)
+    .where(
+      and(
+        eq(creditEntries.lessonId, lessonId),
+        eq(creditEntries.studentId, studentId),
+      ),
+    );
+  return Number(row?.debits ?? 0) > 0 && Number(row?.net ?? 0) < 0;
 }

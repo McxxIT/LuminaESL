@@ -9,7 +9,7 @@ import {
   slotOpenings,
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
-import { lockStudentCredits } from "../lib/credits";
+import { lockStudentCredits, isLessonCharged } from "../lib/credits";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { managerOwnsTeacher, managerTeam } from "../lib/scope";
@@ -278,14 +278,22 @@ export const requestRoutes: FastifyPluginAsync = async (app) => {
                 : [];
 
             if (cancelled && shouldRefund) {
-              await tx.insert(creditEntries).values({
-                studentId: cancelled.studentId,
-                hours: 1,
-                reason: "refund",
-                description: "Refund for teacher-cancelled lesson",
-                lessonId: cancelled.id,
-                actorId: request.user.sub,
-              });
+              // Only a lesson that was actually charged to this student may refund.
+              const charged = await isLessonCharged(
+                tx,
+                cancelled.id,
+                cancelled.studentId,
+              );
+              if (charged) {
+                await tx.insert(creditEntries).values({
+                  studentId: cancelled.studentId,
+                  hours: 1,
+                  reason: "refund",
+                  description: "Refund for teacher-cancelled lesson",
+                  lessonId: cancelled.id,
+                  actorId: request.user.sub,
+                });
+              }
             }
           }
         }

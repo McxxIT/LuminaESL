@@ -17,15 +17,16 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq, like } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app";
 import { loadEnv } from "../src/config/env";
 import * as schema from "../src/db/schema";
-import { settings, users } from "../src/db/schema";
+import { creditEntries, lessons, settings, users } from "../src/db/schema";
 import { hashPassword } from "../src/lib/password";
+import { addMinutes, LESSON_MINUTES } from "../src/lib/time";
 
 // ---------------------------------------------------------------- guards
 
@@ -310,6 +311,66 @@ async function addCredits(studentLabel: string, hours: number, reason: "purchase
     studentId: uid(studentLabel), hours, reason, description: "Smoke fixture credits",
   });
   expectStatus(res, 201, `credits for ${studentLabel}`);
+}
+
+/**
+ * Lesson inserted straight into the DB, with no ledger entry unless the test adds
+ * one. No API can create an uncharged lesson, and RFC-003 is exactly about that
+ * case: a cancellation must never mint credit for a lesson nobody paid for.
+ */
+async function insertProbeLesson(input: {
+  teacherLabel: string;
+  studentLabel: string;
+  days: number;
+}): Promise<string> {
+  const slot = nextSlot(input.days);
+  const [row] = await db
+    .insert(lessons)
+    .values({
+      teacherId: uid(input.teacherLabel),
+      studentId: uid(input.studentLabel),
+      enrollmentId: enrollmentId || null,
+      date: slot.date,
+      time: slot.time,
+      endTime: addMinutes(slot.time, LESSON_MINUTES),
+      title: `Smoke refund probe ${runId}`,
+      status: "scheduled",
+      createdBy: adminId!,
+    })
+    .returning({ id: lessons.id });
+  if (!row) throw new Error("could not insert a probe lesson");
+  return row.id;
+}
+
+async function insertProbeLedger(input: {
+  studentLabel: string;
+  hours: number;
+  reason: "booking" | "adjustment";
+  lessonId: string;
+  description: string;
+}): Promise<void> {
+  await db.insert(creditEntries).values({
+    studentId: uid(input.studentLabel),
+    hours: input.hours,
+    reason: input.reason,
+    description: input.description,
+    lessonId: input.lessonId,
+    actorId: adminId!,
+  });
+}
+
+/** Refund rows written against one lesson (the thing RFC-003 must control). */
+async function refundRows(lessonId: string): Promise<number> {
+  const [row] = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(creditEntries)
+    .where(
+      and(
+        eq(creditEntries.lessonId, lessonId),
+        eq(creditEntries.reason, "refund"),
+      ),
+    );
+  return Number(row?.value ?? 0);
 }
 
 let enrollmentId = "";
@@ -687,6 +748,57 @@ async function creditsScenario(): Promise<void> {
   check(near(Math.round(bootSum * 100) / 100, finalBalance), `bootstrap credit sum ${bootSum} != balance ${finalBalance}`);
 }
 
+/**
+ * RFC-003 refund evidence: a refund requires a `booking` debit for the same
+ * lesson and student, and that charge must still be net-negative. Every path
+ * (student cancel, teacher absence, manager approval) is checked against an
+ * uncharged lesson, a reversed charge, and a charged control.
+ */
+async function refundEvidenceScenario(): Promise<void> {
+  // 1. Never charged: cancellation must not mint a credit.
+  const uncharged = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 30 });
+  const balanceBefore = await balance("studentA");
+  const cancelled = await call(tok("studentA"), "POST", `/lessons/${uncharged}/cancel`, {});
+  expectStatus(cancelled, 200, "cancel an uncharged lesson");
+  check(obj(cancelled.body, "cancel").refunded === false, "an uncharged lesson must not refund");
+  check(near(await balance("studentA"), balanceBefore), "an uncharged cancellation must not move the balance");
+  check((await refundRows(uncharged)) === 0, "no refund row for an uncharged lesson");
+
+  // 2. Charge reversed by an adjustment: still not refundable.
+  const reversed = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 31 });
+  await insertProbeLedger({ studentLabel: "studentA", hours: -1, reason: "booking", lessonId: reversed, description: "Smoke refund probe charge" });
+  await insertProbeLedger({ studentLabel: "studentA", hours: 1, reason: "adjustment", lessonId: reversed, description: "Smoke refund probe reversal" });
+  const cancelledReversed = await call(tok("studentA"), "POST", `/lessons/${reversed}/cancel`, {});
+  expectStatus(cancelledReversed, 200, "cancel a reversed charge");
+  check(obj(cancelledReversed.body, "cancel").refunded === false, "a reversed charge must not refund");
+  check((await refundRows(reversed)) === 0, "no refund row for a reversed charge");
+
+  // 3. Control: a charged lesson refunds exactly once.
+  const charged = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 32 });
+  await insertProbeLedger({ studentLabel: "studentA", hours: -1, reason: "booking", lessonId: charged, description: "Smoke refund probe charge" });
+  const beforeCharged = await balance("studentA");
+  const cancelledCharged = await call(tok("studentA"), "POST", `/lessons/${charged}/cancel`, {});
+  expectStatus(cancelledCharged, 200, "cancel a charged lesson");
+  check(obj(cancelledCharged.body, "cancel").refunded === true, "a charged lesson must refund");
+  check(near(await balance("studentA"), beforeCharged + 1), "the refund must add exactly one credit");
+  check((await refundRows(charged)) === 1, "exactly one refund row for a charged lesson");
+
+  // 4. Absence on an uncharged lesson: recorded, never refunded.
+  const absent = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: -1 });
+  const absence = await call(tok("admin"), "POST", `/lessons/${absent}/absence`, { note: `Smoke uncharged absence ${runId}` });
+  expectStatus(absence, 201, "record absence on an uncharged lesson");
+  check((await refundRows(absent)) === 0, "no refund row for an uncharged absence");
+
+  // 5. Manager approval on an uncharged lesson: cancelled, never refunded.
+  const pending = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 33 });
+  const request = await call(tok("teacherA"), "POST", "/requests", { type: "lesson-cancellation", lessonId: pending, reason: "Smoke uncharged approval" });
+  expectStatus(request, 201, "teacher requests cancellation for an uncharged lesson");
+  const approved = await call(tok("managerA"), "POST", `/requests/${str(request.body, "id")}/review`, { status: "approved" });
+  expectStatus(approved, 200, "approve the uncharged cancellation");
+  check((await refundRows(pending)) === 0, "approval of an uncharged lesson must not refund");
+  check(str(await getLesson(pending), "status") === "cancelled", "approval still cancels the lesson");
+}
+
 async function homeworkScenario(): Promise<void> {
   const body = { studentId: uid("studentA"), title: "Smoke homework", type: "writing", dueLabel: "Friday" };
   expectStatus(await call(tok("studentA"), "POST", "/assignments", body), 403, "student assigns");
@@ -858,6 +970,7 @@ async function main(): Promise<number> {
   await scenario("lessons", lessonsScenario);
   await scenario("requests", requestsScenario);
   await scenario("credits", creditsScenario);
+  await scenario("refunds", refundEvidenceScenario);
   await scenario("homework", homeworkScenario);
   await scenario("quality", qualityScenario);
   await scenario("profile", profileScenario);

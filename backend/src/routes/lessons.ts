@@ -15,12 +15,14 @@ import {
   users,
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
-import { getCreditBalance, lockStudentCredits } from "../lib/credits";
+import { getCreditBalance, isLessonCharged, lockStudentCredits } from "../lib/credits";
 import { resolveLessonDefaults } from "../lib/lesson-defaults";
 import {
+  ACTIVE_LESSON_CONFLICT_MESSAGE,
   badRequest,
   conflict,
   forbidden,
+  isActiveLessonSlotConflict,
   isUniqueViolation,
   notFound,
 } from "../lib/errors";
@@ -294,71 +296,81 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden("This student is not on your team");
       }
 
-       const lesson = await app.db.transaction(async (tx) => {
-         await lockStudentCredits(tx, body.studentId);
-         // Debit one credit like the browser scheduling paths, so a cancellation only refunds
-         // a lesson that was actually paid for.
-         const balance = await getCreditBalance(tx, body.studentId);
-         if (balance < 1) throw badRequest("The student does not have enough credits");
-         // Omitted enrichment fields are filled like a booking; explicit values win.
-         const defaults = await resolveLessonDefaults(tx, {
-          teacherId,
-          studentId: body.studentId,
-          actorId: request.user.sub,
-        });
-        const planDefaulted = body.lessonPlanId === undefined;
-        const lessonPlanId = planDefaulted
-          ? defaults.lessonPlanId
-          : (body.lessonPlanId ?? null);
-        const [row] = await tx
-          .insert(lessons)
-          .values({
+      let lesson: typeof lessons.$inferSelect;
+      try {
+        lesson = await app.db.transaction(async (tx) => {
+          await lockStudentCredits(tx, body.studentId);
+          // Debit one credit like the browser scheduling paths, so a cancellation only refunds
+          // a lesson that was actually paid for.
+          const balance = await getCreditBalance(tx, body.studentId);
+          if (balance < 1) throw badRequest("The student does not have enough credits");
+          // Omitted enrichment fields are filled like a booking; explicit values win.
+          const defaults = await resolveLessonDefaults(tx, {
             teacherId,
             studentId: body.studentId,
-            enrollmentId:
-              body.enrollmentId === undefined
-                ? defaults.enrollmentId
-                : body.enrollmentId,
-            date: body.date,
-            time: body.time,
-            endTime: addMinutes(body.time, LESSON_MINUTES),
-            title: body.title,
-            focus: body.focus ?? [],
-            roomCode: body.roomCode ?? defaults.roomCode,
-            lessonPlanId,
-            planAttachedBy: planDefaulted
-              ? defaults.planAttachedBy
-              : lessonPlanId
-                ? request.user.sub
-                : null,
-            planAttachedAt: planDefaulted
-              ? defaults.planAttachedAt
-              : lessonPlanId
-                ? new Date()
-                : null,
-            createdBy: request.user.sub,
-          })
-          .returning();
-         if (!row) throw new Error("Failed to create lesson");
+            actorId: request.user.sub,
+          });
+          const planDefaulted = body.lessonPlanId === undefined;
+          const lessonPlanId = planDefaulted
+            ? defaults.lessonPlanId
+            : (body.lessonPlanId ?? null);
+          const [row] = await tx
+            .insert(lessons)
+            .values({
+              teacherId,
+              studentId: body.studentId,
+              enrollmentId:
+                body.enrollmentId === undefined
+                  ? defaults.enrollmentId
+                  : body.enrollmentId,
+              date: body.date,
+              time: body.time,
+              endTime: addMinutes(body.time, LESSON_MINUTES),
+              title: body.title,
+              focus: body.focus ?? [],
+              roomCode: body.roomCode ?? defaults.roomCode,
+              lessonPlanId,
+              planAttachedBy: planDefaulted
+                ? defaults.planAttachedBy
+                : lessonPlanId
+                  ? request.user.sub
+                  : null,
+              planAttachedAt: planDefaulted
+                ? defaults.planAttachedAt
+                : lessonPlanId
+                  ? new Date()
+                  : null,
+              createdBy: request.user.sub,
+            })
+            .returning();
+          if (!row) throw new Error("Failed to create lesson");
 
-         await tx.insert(creditEntries).values({
-           studentId: body.studentId,
-           hours: -1,
-           reason: "booking",
-           description: `${row.title} lesson`,
-           lessonId: row.id,
-           actorId: request.user.sub,
-         });
+          await tx.insert(creditEntries).values({
+            studentId: body.studentId,
+            hours: -1,
+            reason: "booking",
+            description: `${row.title} lesson`,
+            lessonId: row.id,
+            actorId: request.user.sub,
+          });
 
-         await logActivity(tx, {
-          actorId: request.user.sub,
-          action: "lesson.booked",
-          targetType: "lesson",
-          targetId: row.id,
-          summary: `Scheduled lesson "${row.title}" on ${row.date} at ${row.time}`,
+          await logActivity(tx, {
+            actorId: request.user.sub,
+            action: "lesson.booked",
+            targetType: "lesson",
+            targetId: row.id,
+            summary: `Scheduled lesson "${row.title}" on ${row.date} at ${row.time}`,
+          });
+          return row;
         });
-        return row;
-      });
+      } catch (error) {
+        // The partial unique index is the concurrency authority. Its violation rolls the
+        // lesson, booking debit, and activity back together.
+        if (isActiveLessonSlotConflict(error)) {
+          throw conflict(ACTIVE_LESSON_CONFLICT_MESSAGE);
+        }
+        throw error;
+      }
 
       reply.status(201);
       return lesson;
@@ -428,76 +440,90 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const [updated] = await app.db
-        .update(lessons)
-        .set({
-          ...(body.date !== undefined && { date: body.date }),
-          ...(body.time !== undefined && {
-            time: body.time,
-            endTime: addMinutes(body.time, LESSON_MINUTES),
-          }),
-          ...(body.title !== undefined && { title: body.title }),
-          ...(body.focus !== undefined && { focus: body.focus }),
-          ...(body.status !== undefined && { status: body.status }),
-          ...(body.roomCode !== undefined && { roomCode: body.roomCode }),
-          ...(body.notes !== undefined && { notes: body.notes }),
-          ...(body.homework !== undefined && { homework: body.homework }),
-          ...(body.attendance !== undefined && {
-            attendance: body.attendance,
-          }),
-          ...(body.feedback !== undefined && { feedback: body.feedback }),
-          ...(body.scores !== undefined && { scores: body.scores }),
-          ...(body.corrections !== undefined && {
-            corrections: body.corrections,
-          }),
-          ...(body.cancelReason !== undefined && {
-            cancelReason: body.cancelReason,
-          }),
-          ...(body.lessonPlanId !== undefined &&
-            (body.lessonPlanId
-              ? {
-                  lessonPlanId: body.lessonPlanId,
-                  planAttachedBy: request.user.sub,
-                  planAttachedAt: new Date(),
-                }
-              : {
-                  lessonPlanId: null,
-                  planAttachedBy: null,
-                  planAttachedAt: null,
-                })),
-          updatedAt: new Date(),
-        })
-        .where(eq(lessons.id, id))
-        .returning();
-      if (!updated) throw notFound("Lesson not found");
+      let updated: typeof lessons.$inferSelect;
+      try {
+        updated = await app.db.transaction(async (tx) => {
+          const [row] = await tx
+            .update(lessons)
+            .set({
+              ...(body.date !== undefined && { date: body.date }),
+              ...(body.time !== undefined && {
+                time: body.time,
+                endTime: addMinutes(body.time, LESSON_MINUTES),
+              }),
+              ...(body.title !== undefined && { title: body.title }),
+              ...(body.focus !== undefined && { focus: body.focus }),
+              ...(body.status !== undefined && { status: body.status }),
+              ...(body.roomCode !== undefined && { roomCode: body.roomCode }),
+              ...(body.notes !== undefined && { notes: body.notes }),
+              ...(body.homework !== undefined && { homework: body.homework }),
+              ...(body.attendance !== undefined && {
+                attendance: body.attendance,
+              }),
+              ...(body.feedback !== undefined && { feedback: body.feedback }),
+              ...(body.scores !== undefined && { scores: body.scores }),
+              ...(body.corrections !== undefined && {
+                corrections: body.corrections,
+              }),
+              ...(body.cancelReason !== undefined && {
+                cancelReason: body.cancelReason,
+              }),
+              ...(body.lessonPlanId !== undefined &&
+                (body.lessonPlanId
+                  ? {
+                      lessonPlanId: body.lessonPlanId,
+                      planAttachedBy: request.user.sub,
+                      planAttachedAt: new Date(),
+                    }
+                  : {
+                      lessonPlanId: null,
+                      planAttachedBy: null,
+                      planAttachedAt: null,
+                    })),
+              updatedAt: new Date(),
+            })
+            .where(eq(lessons.id, id))
+            .returning();
+          if (!row) throw notFound("Lesson not found");
 
-      if (updated.date !== existing.date || updated.time !== existing.time) {
-        await logActivity(app.db, {
-          actorId: request.user.sub,
-          action: "lesson.rescheduled",
-          targetType: "lesson",
-          targetId: updated.id,
-          summary: `Moved from ${existing.date} ${existing.time} to ${updated.date} ${updated.time}`,
+          if (row.date !== existing.date || row.time !== existing.time) {
+            await logActivity(tx, {
+              actorId: request.user.sub,
+              action: "lesson.rescheduled",
+              targetType: "lesson",
+              targetId: row.id,
+              summary: `Moved from ${existing.date} ${existing.time} to ${row.date} ${row.time}`,
+            });
+          }
+
+          if (body.lessonPlanId !== undefined) {
+            let summary = "Plan removed";
+            if (body.lessonPlanId) {
+              const [plan] = await tx
+                .select({ title: lessonPlans.title })
+                .from(lessonPlans)
+                .where(eq(lessonPlans.id, body.lessonPlanId))
+                .limit(1);
+              summary = `Plan set to ${plan?.title ?? "a lesson plan"}`;
+            }
+            await logActivity(tx, {
+              actorId: request.user.sub,
+              action: "lesson.planChanged",
+              targetType: "lesson",
+              targetId: row.id,
+              summary,
+            });
+          }
+
+          return row;
         });
-      }
-
-      if (body.lessonPlanId !== undefined) {
-        let summary = "Plan removed";
-        if (body.lessonPlanId) {
-          const [plan] = await app.db
-            .select({ title: lessonPlans.title })
-            .from(lessonPlans)
-            .where(eq(lessonPlans.id, body.lessonPlanId))
-            .limit(1);
-          summary = `Plan set to ${plan?.title ?? "a lesson plan"}`;
+      } catch (error) {
+        // Reschedule and status transitions are collision-checked by the same partial index
+        // as create, so the update and its activity rows roll back together.
+        if (isActiveLessonSlotConflict(error)) {
+          throw conflict(ACTIVE_LESSON_CONFLICT_MESSAGE);
         }
-        await logActivity(app.db, {
-          actorId: request.user.sub,
-          action: "lesson.planChanged",
-          targetType: "lesson",
-          targetId: updated.id,
-          summary,
-        });
+        throw error;
       }
 
       return updated;
@@ -516,30 +542,39 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       if (request.user.role === "manager" && !(await managerOwnsStudent(app.db, request.user.sub, original.studentId))) throw forbidden();
       if (original.status !== "scheduled") throw badRequest("Only scheduled lessons can be rebooked");
 
-      const result = await app.db.transaction(async (tx) => {
-        await lockStudentCredits(tx, original.studentId);
-        const [slot] = await tx.select().from(slotOpenings).where(and(eq(slotOpenings.teacherId, original.teacherId), eq(slotOpenings.date, body.date), eq(slotOpenings.time, body.time))).limit(1);
-        if (!slot) throw badRequest("That time is not open for booking");
-        const balance = await getCreditBalance(tx, original.studentId);
-        if (balance < 1) throw badRequest("The student does not have enough credits");
-        const [created] = await tx.insert(lessons).values({
-          teacherId: original.teacherId, studentId: original.studentId, enrollmentId: original.enrollmentId,
-          date: body.date, time: body.time, endTime: addMinutes(body.time, LESSON_MINUTES),
-          title: original.title, focus: original.focus, roomCode: original.roomCode,
-          lessonPlanId: original.lessonPlanId, createdBy: request.user.sub,
-        }).returning();
-        if (!created) throw new Error("Failed to rebook lesson");
-        await tx.delete(slotOpenings).where(eq(slotOpenings.id, slot.id));
-        await tx.insert(creditEntries).values({ studentId: original.studentId, hours: -1, reason: "booking", description: `${original.title} lesson`, lessonId: created.id, actorId: request.user.sub });
-        await logActivity(tx, {
-          actorId: request.user.sub,
-          action: "lesson.booked",
-          targetType: "lesson",
-          targetId: created.id,
-          summary: `${original.title} on ${body.date} at ${body.time}`,
+      let result: typeof lessons.$inferSelect;
+      try {
+        result = await app.db.transaction(async (tx) => {
+          await lockStudentCredits(tx, original.studentId);
+          const [slot] = await tx.select().from(slotOpenings).where(and(eq(slotOpenings.teacherId, original.teacherId), eq(slotOpenings.date, body.date), eq(slotOpenings.time, body.time))).limit(1);
+          if (!slot) throw badRequest("That time is not open for booking");
+          const balance = await getCreditBalance(tx, original.studentId);
+          if (balance < 1) throw badRequest("The student does not have enough credits");
+          const [created] = await tx.insert(lessons).values({
+            teacherId: original.teacherId, studentId: original.studentId, enrollmentId: original.enrollmentId,
+            date: body.date, time: body.time, endTime: addMinutes(body.time, LESSON_MINUTES),
+            title: original.title, focus: original.focus, roomCode: original.roomCode,
+            lessonPlanId: original.lessonPlanId, createdBy: request.user.sub,
+          }).returning();
+          if (!created) throw new Error("Failed to rebook lesson");
+          await tx.delete(slotOpenings).where(eq(slotOpenings.id, slot.id));
+          await tx.insert(creditEntries).values({ studentId: original.studentId, hours: -1, reason: "booking", description: `${original.title} lesson`, lessonId: created.id, actorId: request.user.sub });
+          await logActivity(tx, {
+            actorId: request.user.sub,
+            action: "lesson.booked",
+            targetType: "lesson",
+            targetId: created.id,
+            summary: `${original.title} on ${body.date} at ${body.time}`,
+          });
+          return created;
         });
-        return created;
-      });
+      } catch (error) {
+        // A collision must roll back the slot claim and the new debit with the lesson insert.
+        if (isActiveLessonSlotConflict(error)) {
+          throw conflict(ACTIVE_LESSON_CONFLICT_MESSAGE);
+        }
+        throw error;
+      }
       reply.status(201);
       return result;
     },
@@ -770,17 +805,11 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
           .where(and(eq(lessons.id, id), eq(lessons.status, "scheduled")))
           .returning();
         if (!row) throw conflict("This lesson has already been cancelled");
-        const [debit] = await tx
-          .select({ id: creditEntries.id })
-          .from(creditEntries)
-          .where(
-            and(
-              eq(creditEntries.lessonId, id),
-              eq(creditEntries.reason, "booking"),
-            ),
-          )
-          .limit(1);
-        const refund = !!debit && hoursUntil(row.date, row.time) >= lateHours;
+        // Refund evidence: the same lesson must carry a `booking` debit for this
+        // same student. An adjustment or another student's entry is not evidence.
+        const refund =
+          (await isLessonCharged(tx, id, row.studentId)) &&
+          hoursUntil(row.date, row.time) >= lateHours;
         if (refund) {
           await tx.insert(creditEntries).values({
             studentId: row.studentId,
@@ -899,7 +928,12 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
             .where(and(eq(lessons.id, id), ne(lessons.status, "cancelled")))
             .returning({ id: lessons.id });
 
-          const refund = refundEnabled && !!cancelled;
+          // Only a real first transition to cancelled, for a lesson that was
+          // actually charged to this student, may mint a refund.
+          const refund =
+            refundEnabled &&
+            !!cancelled &&
+            (await isLessonCharged(tx, id, lesson.studentId));
           if (refund) {
             await tx.insert(creditEntries).values({
               studentId: lesson.studentId,
