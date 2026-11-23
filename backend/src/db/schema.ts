@@ -313,6 +313,11 @@ export const lessons = pgTable(
   (table) => [
     index("lessons_teacher_date_idx").on(table.teacherId, table.date),
     index("lessons_student_date_idx").on(table.studentId, table.date),
+    // One active lesson per teacher/date/start-time. Cancelled and completed rows stay
+    // historical and must not block reuse of the same key.
+    uniqueIndex("lessons_active_teacher_date_time_uidx")
+      .on(table.teacherId, table.date, table.time)
+      .where(sql`${table.status} in ('scheduled', 'live')`),
   ],
 );
 

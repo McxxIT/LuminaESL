@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "lessons_active_teacher_date_time_uidx" ON "lessons" USING btree ("teacher_id","date","time") WHERE "lessons"."status" in ('scheduled', 'live');
