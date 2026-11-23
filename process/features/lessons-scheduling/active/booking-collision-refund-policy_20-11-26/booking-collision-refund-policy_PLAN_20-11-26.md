@@ -4,13 +4,14 @@ description: "Prevent active teacher/time collisions and enforce booking-debit-o
 date: 20-11-26
 feature: lessons-scheduling
 phase: "single-complex-plan"
-status: IN_PROGRESS
+status: COMPLETE (RFC-001..RFC-004 executed and verified 23-11-26 on the disposable `lumina_review` DB; all gates green)
 ---
 
 # Booking Collision and Refund Policy - Plan
 
 **Date**: 20-11-26  
-**Status**: 🔨 RFC-001 COMPLETE on the disposable review DB (`lumina_review`); RFC-002 not started  
+**Status**: ✅ VERIFIED - RFC-001..RFC-004 complete 23-11-26; evidence in
+`booking-collision-refund-policy_EXECUTE_23-11-26.md` and INVENTORY §9
 **Complexity**: COMPLEX (standard complex, one execution stream)
 
 ## TL;DR
@@ -213,16 +214,16 @@ Apply only after the duplicate inventory stop/gate passes. Prove the partial pre
 artifact. Exit when schema and local migration are green and no active duplicates remain in the
 review database.
 
-**RFC-002 - Collision enforcement**  
+**RFC-002 - Collision enforcement** ✅ complete 23-11-26 (evidence: EXECUTE §1, §2)
 Implement create, rebook, reschedule, and status-transition enforcement and strict 23505 mapping.
 Exit when every collision scenario rolls back lesson/debit/slot/activity work.
 
-**RFC-003 - Refund debit evidence**  
+**RFC-003 - Refund debit evidence** ✅ complete 23-11-26 (evidence: EXECUTE §1, smoke `refunds`)
 Update absence and approval paths, preserve student cancellation behavior, and prove
 refund-without-debit across all paths. Exit when no refund entry can be minted without matching
 booking evidence.
 
-**RFC-004 - End-to-end proof and handoff**  
+**RFC-004 - End-to-end proof and handoff** ✅ complete 23-11-26 (evidence: EXECUTE §2-§4)
 Run the smoke and Playwright gates, migration inventory/dry-run, static checks, and repeat runs.
 Exit only with full evidence and a handoff report.
 
@@ -248,6 +249,8 @@ Status meanings: ⏳ PLANNED, 🔨 CODE DONE, 🧪 TESTING, ✅ VERIFIED, 🚧 B
 - `backend/src/db/migrations/meta/*.json`
 - `backend/src/routes/lessons.ts`
 - `backend/src/routes/requests.ts`
+- `backend/src/routes/bookings.ts` (absorbed during RFC-002 — see Change Management)
+- `backend/src/lib/credits.ts` (`isLessonCharged` refund gate)
 - `backend/src/lib/errors.ts` only if a narrow constraint-name helper is added
 - `backend/scripts/smoke.ts`
 
@@ -257,8 +260,8 @@ Status meanings: ⏳ PLANNED, 🔨 CODE DONE, 🧪 TESTING, ✅ VERIFIED, 🚧 B
 - `frontend/e2e/api/cancellation-refund.spec.ts`
 - `frontend/e2e/api/credit-concurrency.spec.ts`
 - `frontend/e2e/api/booking-collision.spec.ts` (new)
-- `frontend/e2e/api/refund-consistency.spec.ts` (new)
 - `frontend/e2e/support/api.ts` only if fixture helpers require it
+- `frontend/playwright.config.ts` (e2e backend env only)
 - `backend/tests/contract.test.ts` only if route/public shape changes
 
 **Read-only context and prior work**
@@ -281,10 +284,11 @@ Status meanings: ⏳ PLANNED, 🔨 CODE DONE, 🧪 TESTING, ✅ VERIFIED, 🚧 B
 
 | Operation | Existing behavior retained | Changed behavior |
 |---|---|---|
-| `POST /lessons` | 422 for insufficient credit; existing booking debit | Active collision: 409 `CONFLICT` and no lesson/debit/activity |
+| `POST /lessons` | 400 `BAD_REQUEST` for insufficient credit (unchanged; the plan's earlier "422" note was inaccurate); existing booking debit | Active collision: 409 `CONFLICT` and no lesson/debit/activity |
 | `PATCH /lessons/:id` | Existing status, date, time, and field update behavior | Moving/updating to another scheduled/live teacher slot collision: 409 and transaction rollback |
 | `PATCH` status transition | Existing status transitions | Any transition that leaves a lesson scheduled/live at an occupied key: 409 |
 | `POST /lessons/:id/rebook` | Current rebook debit/original-lesson behavior stays unchanged | Collision: 409 and no new lesson, slot deletion, debit, or activity |
+| `POST /bookings` (student booking) | Existing slot claim, 422 insufficient credit, 409 taken slot | Collision on the lesson key: 409 `CONFLICT`, slot claim and debit rolled back |
 | Student cancellation | Existing timing and 200 `refunded` response | Refund only if matching lesson/student booking debit exists |
 | Teacher absence | Existing 201 and settings gate | Refund only if matching lesson/student booking debit exists |
 | Manager-approved cancellation | Existing pending/request and completed/cancelled guards | Refund only on a real transition and matching lesson/student booking debit |
@@ -298,7 +302,7 @@ The public JSON shape need not change. Collision users receive:
 
 - **Packages**: backend and Playwright API tests.
 - **Schema**: one named partial unique index and one migration.
-- **Routes**: `lessons.ts`, `requests.ts`; `bookings.ts` is read-only regression touchpoint.
+- **Routes**: `lessons.ts`, `requests.ts`, `bookings.ts` (`POST /bookings` absorbed during RFC-002).
 - **Data**: lesson, slot, and credit mutations are rollback-sensitive. Cancelled/completed history
   must remain unchanged.
 - **Test files**: at least two new Playwright specs plus updated smoke coverage.
@@ -321,7 +325,7 @@ The public JSON shape need not change. Collision users receive:
 6. Apply the migration to a disposable/review local database only; run a post-migration duplicate
    inventory and index metadata check.
 
-### RFC-002 - Collision enforcement
+### RFC-002 - Collision enforcement ✅ (items 7-11 done 23-11-26)
 
 7. In `POST /lessons`, keep the per-student lock and all debit/slot/lesson/activity work inside
    the transaction; catch only the named partial-index 23505 violation and return 409.
@@ -336,7 +340,7 @@ The public JSON shape need not change. Collision users receive:
 11. Map the named constraint 23505 to the one 409 message; leave all other unique violations under
     their existing handlers and leave 422/400/403/404 behavior unchanged.
 
-### RFC-003 - Refund evidence
+### RFC-003 - Refund evidence ✅ (items 12-16 done 23-11-26)
 
 12. In the student cancel transaction, retain the scheduled status predicate and re-read matching
     `booking` debit evidence inside the per-student lock.
@@ -348,7 +352,13 @@ The public JSON shape need not change. Collision users receive:
     or another-student entries produce no refund.
 16. Preserve repeat/repeated approval behavior: no extra absence, cancellation, or refund.
 
-### RFC-004 - Tests and verification
+### RFC-004 - Tests and verification ✅ (items 17-23 done 23-11-26)
+
+Executed as: `frontend/e2e/api/booking-collision.spec.ts` (items 17-19, plus concurrency in item 18),
+smoke `refunds` scenario (item 20 and the idempotence half of item 21), the existing
+`credit-concurrency` race tests (item 21), the full gate order (item 22), and
+`booking-collision-refund-policy_EXECUTE_23-11-26.md` (item 23). Two existing specs needed
+collision-aware cleanup — see EXECUTE §5.5.
 
 17. Add a create/reschedule/rebook active-collision Playwright scenario.
 18. Add a concurrent create or reschedule collision scenario asserting one winner and one 409.
@@ -379,6 +389,11 @@ The public JSON shape need not change. Collision users receive:
 | Existing sequential booking/cancel/absence smoke/e2e | Hybrid | AC11 and sequential preservation |
 
 Test files and exact commands:
+
+> **Actual results (23-11-26, `lumina_review`)**: typecheck ✅, lint ✅, backend Vitest 30/30 ✅,
+> smoke 14/14 domains / 375 checks ✅, `e2e:api` 23/23 twice ✅, `e2e:demo` 3/3 ✅, 0 active
+> duplicate groups after both runs. Full table in `booking-collision-refund-policy_EXECUTE_23-11-26.md`
+> §2; AC mapping in §3.
 
 - `npm run typecheck`
 - `npm run lint`
@@ -418,8 +433,9 @@ Manual/API probes:
 - **AC1**: Create or active change at an occupied scheduled/live key rejects 409 and rolls back
   lesson, slot, debit, and activity changes. `proven by: create/reschedule/rebook collision gates;
   strategy: Hybrid`
-- **AC2**: Create/rebook/reschedule conflicts use deterministic 409; insufficient credit remains 422
-  and validation remains 400/validation-shaped. `proven by: API smoke plus Playwright conflict-vs-credit
+- **AC2**: Create/rebook/reschedule conflicts use deterministic 409; insufficient credit keeps its
+  existing status (`400 BAD_REQUEST` on `POST /lessons`, `422` on `POST /bookings`) and validation
+  remains 400/validation-shaped. `proven by: API smoke plus Playwright conflict-vs-credit
   scenario; strategy: Fully-Automated`
 - **AC3**: Concurrent active create/rebook/reschedule attempts yield one winner and named-index
   conflict losers with no extra debit or slot mutation. `proven by: new concurrent Playwright
@@ -488,21 +504,21 @@ Manual/API probes:
 
 - **selected plan file**:
   `process/features/lessons-scheduling/active/booking-collision-refund-policy_20-11-26/booking-collision-refund-policy_PLAN_20-11-26.md`
-- **last completed phase or step**: RFC-001 steps 1-6 complete on 23-11-26.
-  - Steps 1-3 (inventory) on 21-11-26: `booking-collision-refund-policy_INVENTORY_21-11-26.md`
-    §1-§8 — 2 active duplicate groups / 13 scheduled rows in dev `lumina`.
-  - Steps 4-5 on 23-11-26: partial unique index added to `backend/src/db/schema.ts`,
-    `db:generate` produced `0004_gorgeous_maverick.sql` + journal entry + snapshot with the exact name
-    `lessons_active_teacher_date_time_uidx` and predicate `status in ('scheduled','live')`.
-  - Step 6 on 23-11-26: reviewer decision recorded as `disposable/review database chosen`; created
-    `lumina_review`, applied migrations `0000`-`0004`, seeded it, confirmed the index definition and
-    `0` active duplicate groups there. Dev `lumina` remains unmigrated with its 13 rows untouched.
-  - Behavioral probe on `lumina_review` (rolled back, 0 rows left): active-vs-active collision raises
-    `23505` on the named index; cancelled/completed history does not block reuse; different
-    teacher/time succeed; cancel-then-rebook succeeds. `npm run typecheck` clean.
-  - Full evidence: `booking-collision-refund-policy_INVENTORY_21-11-26.md` §9.
-- **validate-contract status**: CONDITIONAL, accepted (see below); migration and duplicate-data evidence are
-  hard execute-agent gates. The duplicate-data gate is now satisfied for `lumina_review` only.
+- **last completed phase or step**: all four RFCs complete on 23-11-26.
+  - RFC-001 (inventory + schema guard): partial unique index `lessons_active_teacher_date_time_uidx`
+    on `(teacher_id, date, time)` where `status in ('scheduled','live')`; generated migration
+    `0004_gorgeous_maverick.sql`; applied only to `lumina_review`. Evidence: INVENTORY §9.
+  - RFC-002 (collision enforcement): `POST /lessons`, `PATCH /lessons/:id`, `POST /lessons/:id/rebook`,
+    and `POST /bookings` map only the named-index `23505` to `409 CONFLICT`; the PATCH route now runs
+    its update plus both activity writes in one transaction. Evidence: EXECUTE §1.
+  - RFC-003 (refund debit evidence): `isLessonCharged()` gates student cancel, teacher absence, and
+    manager approval on a `booking` debit for the same lesson **and** student whose net is still
+    negative. Evidence: EXECUTE §1, smoke `refunds` (22 checks).
+  - RFC-004 (proof): new `booking-collision.spec.ts` (5 tests), smoke `refunds` scenario, collision-aware
+    cleanup in `booking.spec.ts` and `credit-concurrency.spec.ts`, `RATE_LIMIT_MAX=100000` on the e2e
+    backend webServer. Evidence: EXECUTE §2-§4.
+- **validate-contract status**: CONDITIONAL, accepted; every hard execute-agent gate (E1-E8) is now
+  satisfied and recorded in the EXECUTE report.
 - **supporting context files loaded**:
   `process/context/all-context.md`,
   `process/context/database/all-database.md`,
@@ -511,19 +527,28 @@ Manual/API probes:
   `process/context/database/booking-and-credit-integrity.md`,
   `process/context/tests/all-tests.md`,
   and the people-billing/credit-ledger plan plus relevant cutover backlog notes.
-- **next step for a fresh agent**: RFC-002 collision enforcement in `backend/src/routes/lessons.ts`
-  (create, rebook, reschedule, status transitions) with narrow `23505` mapping on
-  `lessons_active_teacher_date_time_uidx` only. Run every DB-touching verification against
-  `lumina_review` via `DATABASE_URL=postgres://lumina:<pw>@localhost:5432/lumina_review`.
-  Do **not** run `db:migrate` against dev `lumina`. Then RFC-003 -> RFC-004.
+- **next step for a fresh agent**: none for this plan — it is verified and ready to archive. Follow-up
+  work lives outside this plan: (a) decide whether/when to migrate dev `lumina` (still 13 duplicate
+  rows, needs an approved cleanup decision), and (b) the deferred items in EXECUTE §6 (CI migration
+  gate, production migration rehearsal).
 - **database targets**:
   - dev / residue DB: `lumina` (207 scheduled / 68 completed / 189 cancelled; 13 active duplicate rows;
-    no partial index) — do not migrate.
+    no partial index) — **never migrated by this plan**.
   - disposable review DB: `lumina_review` (migrations `0000`-`0004` applied, seeded, partial index
-    present, 0 active duplicates) — use this for RFC-002/003/004 verification.
-- **known open decision**: `npm run e2e` and `npm run smoke` read `backend/.env`, which points at
-  `lumina`. RFC-004 must either point the API test run at `lumina_review` or get an approved dev
-  cleanup; otherwise the specs keep colliding with the dev residue.
+    present, 0 active duplicates) — every gate above ran against it via a `DATABASE_URL` override.
+- **known open decision**: `backend/.env` still points `DATABASE_URL` at `lumina`, so a bare
+  `npm run e2e` / `npm run smoke` targets the unmigrated dev DB. Until the dev cleanup is approved,
+  export `DATABASE_URL=postgres://lumina:<pw>@localhost:5432/lumina_review` before those commands.
+- **verification commands (review DB)**:
+  ```powershell
+  $env:DATABASE_URL='postgres://lumina:mr6jgX6gaPhJaxQ2xT-Oadn_ifLwWF2c@localhost:5432/lumina_review'
+  npm run typecheck
+  npm run lint
+  npm run test --workspace @lumina/backend
+  npm run smoke
+  npm run e2e:api --workspace @lumina/frontend
+  npm run e2e:demo --workspace @lumina/frontend
+  ```
 
 ## Test Infra Improvement Notes
 
@@ -621,7 +646,9 @@ Autonomy rules: Work only within the approved plan blast radius. Preserve cancel
 
 Hard stops: Stop migration if active duplicates are not inventoried and reviewed. Never use destructive database commands. Never silently delete or merge duplicates. Do not expand rebook semantics or treat a collision as insufficient credit.
 
-Next phase: EXECUTE RFC-001 migration inventory and schema guard, then RFC-002 collision enforcement, RFC-003 refund evidence, and RFC-004 verification.
+Next phase: none — RFC-001 through RFC-004 are complete and verified (23-11-26). Remaining work is
+outside this plan: an approved decision on migrating dev `lumina`, plus the deferred CI migration gate
+and production migration rehearsal.
 
 Contract summary: CONDITIONAL. The design is feasible, but execution requires duplicate-inventory review, disposable/review database evidence, exact named-constraint mapping, transaction rollback proof, and no-debit refund proof.
 
@@ -646,3 +673,13 @@ Scope changes require an impact classification and plan update before implementa
 - **Refund policy change**: remove from this plan and defer; this plan only implements booking-debit
   evidence and idempotence.
 - **Public response change**: require validate-contract amendment and affected Playwright/spec updates.
+
+### Applied during execution (23-11-26)
+
+| Change | Classification | Rationale |
+|---|---|---|
+| `POST /bookings` collision guard added | Additive test/guard | The student booking path inserts a lesson; without the guard an occupied key would return an unhandled `23505` (500). Same named-index check, same 409 body, no new policy or payload shape. |
+| `frontend/playwright.config.ts` sets `RATE_LIMIT_MAX=100000` on the e2e backend | Additive test/guard | The suite outgrew the 300/min default and later specs got `429` on `/health`; `smoke.ts` already sets the same value. Production and `.env` behavior unchanged. |
+| `isLessonCharged` also requires a net-negative lesson balance | Additive guard inside the approved refund contract | BC-4 describes a `booking` row; AC12 requires an adjusted-away debit not to refund. Both hold when the row must exist *and* the lesson's ledger net stays negative. |
+| `booking.spec.ts` / `credit-concurrency.spec.ts` cleanup made collision-aware | Additive test/guard | Both specs accumulated one scheduled lesson per run at a fixed key, which the new index rejects — the self-collision predicted in INVENTORY §8. |
+| Insufficient-credit status on `POST /lessons` left at 400 `BAD_REQUEST` | No change (documentation fix) | Existing behavior preserved; the SPEC only requires collision to be distinguishable. `POST /bookings` keeps its own 422. |
