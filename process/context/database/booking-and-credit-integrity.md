@@ -53,6 +53,7 @@ Managers may only book for students on their team (`managerOwnsStudent`, `backen
   (`UPDATE ... WHERE status = 'pending'`, 0 rows -> 409), refuses a completed lesson (409), and never refunds
   a lesson that is already cancelled.
 - One credit per lesson: `LESSON_CREDIT_HOURS = 1` in the frontend local branch (`SCHOOL_SCHEMA_VERSION` 3).
+- Rebook (`POST /lessons/:id/rebook`, Phase 05): accepts any non-live original (scheduled, completed, cancelled; `live` -> 400), after the student-ownership and manager-scope checks. Inside one transaction (`lockStudentCredits`, slot lookup, balance check, `resolveLessonDefaults`, insert, slot delete, one -1 `booking` debit, `lesson.booked` activity) the new lesson gets the active enrollment, the next lesson plan, `planAttachedBy`/`planAttachedAt` and a fresh `ESL-####` room code; title and focus are kept. A rebook never refunds the original. The demo `rebookLesson` refuses a live original too. Same lock order as `POST /lessons` and `POST /bookings`.
 
 ## Refunds (`backend/src/routes/lessons.ts`, `backend/src/routes/requests.ts`)
 

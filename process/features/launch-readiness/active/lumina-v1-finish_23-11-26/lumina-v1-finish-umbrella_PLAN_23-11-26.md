@@ -270,29 +270,29 @@ node .claude/skills/vc-generate-context/scripts/validate-all-context.mjs
 ## Resume and Execution Handoff
 
 - Selected plan file path: `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md`
-- Last completed phase: Phase 04 (Curriculum Library), 24-11-26
-- Validate-contract status: Phase 01 PASS, Phase 02 PASS, Phase 03 PASS; Phase 04 PASS
-- Next step for a fresh agent: Read this umbrella plan, read `phase-05-parity-polish-and-unit-tests_PLAN_23-11-26.md` (including "Carried in from Phase 04"), and run Phase 05 Step 1 RESEARCH. Read the Phase 04 report and the `launch-readiness/backlog/` notes first.
-- Current phase: Phase 05 — Parity Polish & Frontend Unit Tests
-- Next action: Phase 05 Step 1 RESEARCH (vc-research-agent)
-- Execute-agent start instruction: Do NOT enter EXECUTE until Phase 05 PVL validate-contract and explicit user approval are complete.
+- Last completed phase: Phase 05 (Parity Polish & Frontend Unit Tests), 25-11-26
+- Validate-contract status: Phase 01 PASS, Phase 02 PASS, Phase 03 PASS; Phase 04 PASS; Phase 05 PASS
+- Next step for a fresh agent: Read this umbrella plan and the Phase 05 report, then run RESEARCH for the separate default-account-password fix (backlog note `default-account-password_NOTE_24-11-26.md`) as its own RIPER-5 pass. Do not create its plan before RESEARCH. After it, Phase 06 Step 1 RESEARCH.
+- Current phase: between Phase 05 and Phase 06 (default-account-password fix)
+- Next action: default-account-password RESEARCH (vc-research-agent)
+- Execute-agent start instruction: Do NOT enter EXECUTE for either the password fix or Phase 06 until their PVL validate-contracts and explicit user approval are complete.
 
 ---
 
 ## Current Execution State
 
-Last updated: 24-11-26
-Current phase: 4 of 6 closed (Phase 04 done; Phase 05 is next)
-Phase 4 name: Curriculum Library
-Phase 4 status: ✅ VERIFIED (with gaps) — review decision approved-with-concerns (user, 24-11-26); known gaps: AC-11 API-mode visual probe pending (demo-mode probe done), P3-13 still pending, 9 backlog notes written
-Phase 4 EVL: green 24-11-26 (independent vc-tester #2 after Step F: db:migrate no-op, typecheck, lint, vitest 7 files/61 tests, smoke 16 domains/656 checks, e2e 27 API + 4 demo, 0005 hash unchanged); results.tsv HALTED_SUCCESS
-Phase 4 report: process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-04-curriculum-library_REPORT_23-11-26.md
-Next phase: Phase 05 — Parity Polish & Frontend Unit Tests (process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-05-parity-polish-and-unit-tests_PLAN_23-11-26.md)
-Current loop step: RESEARCH (Phase 05 Step 1)
-Validate-contract status: Phase 01 PASS; Phase 02 PASS; Phase 03 PASS; Phase 04 PASS (Step F supplement PASS); Phase 05 pending
+Last updated: 25-11-26
+Current phase: 5 of 6 closed (Phase 05 done; the default-account-password fix is next, then Phase 06)
+Phase 5 name: Parity Polish & Frontend Unit Tests
+Phase 5 status: ✅ VERIFIED — review decision approved (user, 25-11-26); execution commit 5c1b4b9; no open acceptance gaps (the API-mode 390px visual probe and Phase 03 P3-13 passed); residuals are low and tracked in backlog `phase-05-review-residuals_NOTE_25-11-26.md`
+Phase 5 EVL: green 25-11-26 (independent vc-tester, first try: typecheck, lint, backend vitest 7/61, frontend vitest 10/54, root test, smoke 16 domains/705 checks (rebook 64), e2e 27 API + 4 demo, git diff --check, backend/src/db clean, lockfile only the vitest line, npm ci + typecheck + frontend tests); results.tsv rows 7-9 HALTED_SUCCESS
+Phase 5 report: process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-05-parity-polish-and-unit-tests_REPORT_23-11-26.md
+Next phase: Step 0 (user decision 24-11-26): a SEPARATE pre-Phase-06 fix for the HIGH default-account-password item (process/features/launch-readiness/backlog/default-account-password_NOTE_24-11-26.md), run as its own RIPER-5 pass with RESEARCH first; no plan exists yet. After it: Phase 06 — CI & Docker Compose (process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-06-ci-and-docker-compose_PLAN_23-11-26.md)
+Current loop step: between phases (default-account-password RESEARCH, then Phase 06 Step 1 RESEARCH)
+Validate-contract status: Phase 01 PASS; Phase 02 PASS; Phase 03 PASS; Phase 04 PASS (Step F supplement PASS); Phase 05 PASS (inner PVL, 24-11-26); Phase 06 pending
 Program Net Gate: IN_PROGRESS
-Latest validator run: 24-11-26 — Phase 04 gates all green on default lumina (smoke 16/16 656 checks, e2e 27 API + 4 demo, vitest 61, migrations 0005/0006 applied)
-Carry-ins for later phases: Phase 05 — library polish (390px chip clipping + Remove alignment, notification navigation/category, shared upload validators) and Vitest cases for services/library.ts (see backlog library-polish-followups, frontend-library-service-unit-tests); Phase 06 — default-account-password (HIGH, should-fix before launch), trust-proxy, NODE_ENV/limiter-cap, sameSite, e2e webServer startup timeout flake (see Phase 06 plan "Carried in"); unscheduled backlog — legacy storage_key audit (1 suspect row on dev, user decision), upload write-path hardening, POST /requests attachment ownership, orphaned uploads
+Latest validator run: 25-11-26 — Phase 05 gates all green on default lumina (smoke 16/16 705 checks, e2e 27 API + 4 demo, backend vitest 61, frontend vitest 54; no migration, 0007 unused)
+Carry-ins for later phases: default-account-password fix (HIGH, own pass before Phase 06); Phase 06 — trust-proxy, NODE_ENV/limiter-cap, sameSite, e2e webServer startup timeout flake (deferred from Phases 04 and 05), vitest specifier alignment (frontend 3.2.7 vs backend ^3.0.5) alongside the lockfile and `npm ci` CI work (see Phase 06 plan "Carried in" and backlog `phase-05-review-residuals_NOTE_25-11-26.md`); unscheduled backlog — frontend createLibraryItem unit test, upload write-path hardening, POST /requests attachment ownership, orphaned uploads, lesson-plan-attach items 2-4 (the suspect storage_key row was inspected and kept by user decision 25-11-26)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any subagent. Never spawn execute-agent when loop step is RESEARCH, INNOVATE, PLAN-SUPPLEMENT, or PVL.

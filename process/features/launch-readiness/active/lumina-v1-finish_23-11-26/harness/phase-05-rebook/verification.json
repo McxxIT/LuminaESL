@@ -1,0 +1,108 @@
+{
+  "task": "lumina-v1-finish Phase 05 \u00e2\u20ac\u201d rebook enrichment",
+  "result": "PASS (executor run 24-11-26; independent vc-tester EVL green 25-11-26, first try)",
+  "commands": [
+    {
+      "command": "npm run smoke (red first, old handler, new rebook checks)",
+      "result": "FAIL (expected)",
+      "notes": "rebook domain failed on 'scheduled original: rebook must get a fresh room code, got ESL-6111 again'; the other 15 domains passed"
+    },
+    {
+      "command": "npm run smoke (after the handler change)",
+      "result": "PASS",
+      "notes": "16/16 domains, 705 checks (was 656); rebook 64 checks: scheduled original (fresh code, next plan, planAttachedBy, enrollment), 0.5-credit refusal, completed and cancelled originals each -1 exactly with one lesson.booked, distinct active plans, live original 400 with balance unchanged and slot still open. No room-code collision rerun was needed."
+    },
+    {
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "7 files / 61 tests, unchanged (incl. contract.test.ts)"
+    },
+    {
+      "command": "npm run test --workspace @lumina/frontend (tests/bookings.test.ts)",
+      "result": "PASS",
+      "notes": "local rebook: next plan, fresh ESL-#### code, one LESSON_CREDIT_HOURS debit, slot must be open, live original refused; the live-refusal test was confirmed red with the Step 2.4 line removed"
+    },
+    {
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "27 API + 4 demo, incl. credit-concurrency.spec.ts"
+    },
+    {
+      "command": "npm run typecheck; npm run lint; git diff --check; git status --porcelain -- backend/src/db",
+      "result": "PASS",
+      "notes": "all exit 0; backend/src/db untouched"
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "Lock order in the rebook transaction",
+      "result": "PASS",
+      "notes": "lockStudentCredits -> slot lookup -> getCreditBalance -> resolveLessonDefaults -> insert -> slot delete -> debit -> logActivity; matches POST /lessons"
+    },
+    {
+      "check": "Ownership checks before the status gate",
+      "result": "PASS",
+      "notes": "student-owns-lesson and managerOwnsStudent unchanged and evaluated before the live refusal"
+    },
+    {
+      "check": "Null-enrollment rebook",
+      "result": "NOT EXERCISED",
+      "notes": "Behaves like POST /lessons by construction (resolveLessonDefaults returns null enrollment/plan and a fresh code); documented in a handler comment; no smoke case added"
+    },
+    {
+      "check": "API-mode visual probe at 390px incl. P3-13 (password-change card, admin reset modal)",
+      "result": "PASS",
+      "notes": "orchestrator probe 25-11-26; closes Phase 03 P3-13 and the Phase 04 API-mode visual gap; screenshots not committed"
+    }
+  ],
+  "evl": {
+    "runner": "vc-tester (independent)",
+    "date": "2026-11-25",
+    "result": "PASS",
+    "attempts": 1,
+    "commands": [
+      {
+        "command": "npm run typecheck; npm run lint",
+        "result": "PASS"
+      },
+      {
+        "command": "npm run test --workspace @lumina/backend",
+        "result": "PASS",
+        "notes": "7 files / 61 tests"
+      },
+      {
+        "command": "npm run test --workspace @lumina/frontend",
+        "result": "PASS",
+        "notes": "10 files / 54 tests"
+      },
+      {
+        "command": "npm run test (root)",
+        "result": "PASS"
+      },
+      {
+        "command": "npm run smoke",
+        "result": "PASS",
+        "notes": "16 domains / 705 checks (rebook 64)"
+      },
+      {
+        "command": "npm run e2e",
+        "result": "PASS",
+        "notes": "27 API + 4 demo, no startup timeout"
+      },
+      {
+        "command": "git diff --check; git status --porcelain -- backend/src/db",
+        "result": "PASS",
+        "notes": "clean; db untouched"
+      },
+      {
+        "command": "package-lock.json diff review",
+        "result": "PASS",
+        "notes": "only the vitest line changed"
+      },
+      {
+        "command": "npm ci then typecheck and frontend tests",
+        "result": "PASS"
+      }
+    ]
+  }
+}

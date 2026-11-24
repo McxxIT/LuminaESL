@@ -1,0 +1,13 @@
+{
+  "task": "lumina-v1-finish Phase 05 — rebook enrichment",
+  "scenarios": [
+    { "scenario": "Two concurrent rebooks by the same student spend the last credit twice", "ruled_out": true, "rationale": "lockStudentCredits is still the first statement in the transaction; the second rebook waits, re-reads the balance after the first debit, and is refused below 1. Same lock order as POST /lessons and POST /bookings." },
+    { "scenario": "Lock-order deadlock between rebook and another enrollment writer", "ruled_out": true, "rationale": "resolveLessonDefaults (enrollment FOR UPDATE) runs after lockStudentCredits, exactly as in POST /lessons and POST /bookings. Lesson completion updates the enrollment without the student lock and takes no second lock, so no cycle exists." },
+    { "scenario": "Rebooking a cancelled lesson whose credit was refunded gives a free lesson or a double charge", "ruled_out": true, "rationale": "The new lesson always gets its own -1 booking entry tied to the new lesson id in the same transaction; the earlier refund belongs to the old lesson id. Smoke: the cancelled-original rebook debits exactly 1 and logs exactly one lesson.booked." },
+    { "scenario": "Two students claim the same slot through rebook", "ruled_out": true, "rationale": "Both may reach the insert; lessons_active_teacher_date_time_uidx rejects the loser and the unchanged isActiveLessonSlotConflict catch returns 409, rolling back its slot delete and debit." },
+    { "scenario": "A student or a cross-team manager rebooks someone else's lesson", "ruled_out": true, "rationale": "The student-owns-lesson and managerOwnsStudent checks run before the status gate and were not changed; teachers are excluded by requireRole. Smoke: another student gets 403." },
+    { "scenario": "Rebook hands out a lesson plan already held by another active lesson", "ruled_out": true, "rationale": "resolveLessonDefaults counts scheduled/live lessons already holding plans and row-locks the enrollment. Smoke asserts the plans of all active studentR lessons are distinct after three rebooks." },
+    { "scenario": "Rebooking a live lesson (class in progress)", "ruled_out": true, "rationale": "The API returns 400 before the transaction; smoke asserts no debit and the target slot still open. The local branch refuses the same way (bookings.test.ts)." },
+    { "scenario": "The lesson turns live between the status read and the insert", "ruled_out": false, "rationale": "Pre-existing pattern: the status is read before the transaction. Low impact (the student is charged once for a new, valid lesson; nothing is refunded or duplicated). Accepted residual, recorded in the phase report." }
+  ]
+}

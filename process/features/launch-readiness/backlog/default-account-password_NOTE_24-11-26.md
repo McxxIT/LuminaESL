@@ -7,7 +7,7 @@ feature: launch-readiness
 
 # Shared default password for admin-created accounts
 
-status: done-with-gap (phase closed; this follow-up is still open, no fix scheduled)
+status: OPEN, NEXT (user decision 24-11-26: fixed as its own RIPER-5 pass, RESEARCH first, after Phase 05 and before Phase 06)
 reason: Pre-existing; needs a design decision (generated one-time password versus forced change) and a contract/schema plan.
 item: Phase 03 reviewer finding M1 (pre-existing, not introduced by Phase 03)
 priority: HIGH. Should-fix before launch, and before Phase 06 packages a deployable stack.

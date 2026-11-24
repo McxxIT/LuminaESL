@@ -7,7 +7,7 @@ feature: launch-readiness
 
 # e2e webServer startup timeout flake
 
-status: observation (single occurrence, not reproduced)
+status: observation (single occurrence, not reproduced; Phase 05 EVL ran e2e twice with no startup timeout; deferred to Phase 06 CI work)
 reason: Record in case it recurs, especially before Phase 06 CI.
 item: Phase 04 EVL observation
 priority: low

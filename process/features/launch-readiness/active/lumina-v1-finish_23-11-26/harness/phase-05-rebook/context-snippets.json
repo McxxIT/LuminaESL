@@ -1,0 +1,12 @@
+{
+  "task": "lumina-v1-finish Phase 05 — rebook enrichment",
+  "snippets": [
+    { "file": "backend/src/routes/lessons.ts", "lines": "533-545", "description": "Rebook entry: requireRole(admin, manager, student); original read; a student must own the lesson; a manager must own the student (managerOwnsStudent); then the status gate rejects only 'live' (400 'A lesson in progress cannot be rebooked'). The ownership checks come first and are unchanged." },
+    { "file": "backend/src/routes/lessons.ts", "lines": "547-579", "description": "Transaction order: lockStudentCredits (per-student advisory lock) -> open-slot lookup (400 if missing) -> getCreditBalance (400 if < 1) -> resolveLessonDefaults(tx, { teacherId, studentId, actorId }) -> insert (enrollmentId, lessonPlanId, planAttachedBy, planAttachedAt, roomCode from the defaults; title/focus from the original) -> slot delete -> one -1 'booking' credit entry tied to the new lesson id -> logActivity lesson.booked." },
+    { "file": "backend/src/routes/lessons.ts", "lines": "580-590", "description": "Unchanged catch: isActiveLessonSlotConflict -> 409 CONFLICT, which rolls back the slot delete and the debit with the insert." },
+    { "file": "backend/src/lib/lesson-defaults.ts", "lines": "29-90", "description": "resolveLessonDefaults (not modified): fresh ESL-#### code; the pair's active enrollment row-locked FOR UPDATE; plan = plans[nextPlanIndex + reserved scheduled/live lessons holding plans]; enrollment/plan fields null when there is no active enrollment or the plans run out." },
+    { "file": "backend/src/routes/lessons.ts", "lines": "300-312", "description": "POST /lessons uses the same lock order (lockStudentCredits, balance, resolveLessonDefaults), so rebook adds no new lock ordering." },
+    { "file": "frontend/app/lib/school/services/bookings.ts", "lines": "77-89", "description": "Local rebookLesson: one added line refuses a live original ('A lesson in progress cannot be rebooked.') after assertCan; enrichment via createLesson and the single changeCredits debit unchanged." },
+    { "file": "backend/scripts/smoke.ts", "lines": "rebookScenario", "description": "Smoke rebook domain: studentR enrollment in a local variable; scheduled-original rebook (fresh code, next plan, planAttachedBy, enrollment); 0.5-credit refusal; completed and cancelled originals each debit exactly 1 with one lesson.booked; distinct plans across active studentR lessons; live original 400 with the balance unchanged and the slot still open." }
+  ]
+}
