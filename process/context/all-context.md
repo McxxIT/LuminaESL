@@ -218,10 +218,10 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 61 tests in 7 files; frontend, `frontend/tests`, 54 tests in 10 files, node env, drives the real local services on a memory store); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 27 API-mode tests + 4 demo regression tests, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 98 tests in 12 files; frontend, `frontend/tests`, 62 tests in 11 files, node env, drives the real local services on a memory store); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 30 API-mode tests + 5 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
-| Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
+| Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. First outside service: an SMTP server for invite emails (nodemailer; real send unverified until Step F). |
 
 ## Key Patterns and Conventions
 
@@ -276,7 +276,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Other gotchas:**
 
-- Auth lifecycle (Phase 03, Nov 24, 2026): the password policy is 10-128 characters (length only); a wrong current password on `POST /auth/change-password` is `400 INVALID_CURRENT_PASSWORD`, never 401; admin reset is admin-only with no self-reset; password change/reset/pause/archive revoke refresh tokens but an issued access token lives up to 15 minutes. Known open items (all in `process/features/launch-readiness/backlog/`): every admin-created account shares one fixed default password with no forced change (HIGH, should-fix before launch), `trustProxy` is unconditional, and admin-on-admin reset has no step-up. See `auth/jwt-cookie-flow.md`.
+- Auth lifecycle (Phase 03, Nov 24, 2026): the password policy is 10-128 characters (length only); a wrong current password on `POST /auth/change-password` is `400 INVALID_CURRENT_PASSWORD`, never 401; admin reset is admin-only with no self-reset; password change/reset/pause/archive revoke refresh tokens but an issued access token lives up to 15 minutes. Known open items (all in `process/features/launch-readiness/backlog/`): `trustProxy` is unconditional, and admin-on-admin reset has no step-up. See `auth/jwt-cookie-flow.md`. Account creation (Nov 25-26, 2026): admin- and manager-created accounts are `invited` (migration `0007`) and set their own password through an emailed single-use 72 h link; no shared default password remains. Only admins ever see a copyable link; managers create and invite teachers and students on their own team only. See `auth/jwt-cookie-flow.md`.
 
 - `frontend/AGENTS.md` is auto-managed by `next dev` - do not edit or remove. Next 16 differs from training data; read `node_modules/next/dist/docs/` before writing Next code.
 - `npm run db:reset` TRUNCATES all tables (refuses production). Destructive; never use it as a verification gate.
@@ -296,7 +296,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Env var names (never values):**
 
-- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs), `AUTH_RATE_LIMIT_MAX` (optional, default 30 per minute for login/refresh/change-password; smoke and Playwright set 100000; no production cap yet). In production `CORS_ORIGIN` must be an explicit http(s) list (empty, `*`, or non-http(s) fails startup)
+- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs), `AUTH_RATE_LIMIT_MAX` (optional, default 30 per minute for login/refresh/change-password; smoke and Playwright set 100000; no production cap yet). In production `CORS_ORIGIN` must be an explicit http(s) list (empty, `*`, or non-http(s) fails startup). Mail and invite keys (names only): `MAIL_MAILER` (`smtp`|`log`|`array`), `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION` (`ssl`|`tls`), `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `APP_URL` (invite link base, never taken from request headers), `INVITE_RESEND_COOLDOWN_SECONDS` (default 30). Production refuses to start unless `MAIL_MAILER=smtp` with host, from address, and `APP_URL` set; with no mail config non-production falls back to log; `smtp` is refused under `NODE_ENV=test`
 - Frontend: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE`, `NEXT_PUBLIC_DATA_SOURCE`
 
 **Mode flag semantics (`frontend/app/lib/auth/mode.ts`):**
@@ -326,7 +326,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run test --workspace @lumina/frontend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (16 domains, 705 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 27 API tests on :3000 + backend :4000, then 4 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run test --workspace @lumina/frontend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (17 domains, 835 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 30 API tests on :3000 + backend :4000, then 5 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
@@ -359,13 +359,14 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
   (`lessons_active_teacher_date_time_uidx`, migration `0004`) plus debit-only refunds (`isLessonCharged`)
   are applied and verified on default dev `lumina` (Nov 23, 2026). Active launch-readiness program:
   `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phases 01–05 done; Phase 06 covers
-  CI & Docker, preceded by a separate default-account-password fix). Phase 05 (Nov 25, 2026) made rebook accept any
+  CI & Docker, preceded by three account-invites follow-ups). Phase 05 (Nov 25, 2026) made rebook accept any
   non-live lesson with a fresh room code and the next plan, relabelled hours to credits in the UI, fixed 390px
   material-chip overflow, and added the frontend Vitest runner. Phase 04 (Nov 24, 2026) built the Curriculum Library and closed a pre-existing
   plan-attach path-traversal file read. Phase 03 (Nov 24, 2026) added password change and admin
   reset, refresh-token revocation and pruning, named auth rate limits, and the production CORS guard. Open
-  auth gaps and a HIGH default-password item live in `process/features/launch-readiness/backlog/`.
-- Frontend unit tests exist (Vitest, 10 files / 54 tests; only the `createLibraryItem` happy path is uncovered, backlog `frontend-library-create-item-unit-test_NOTE_25-11-26.md`); no CI (Phase 06). Next step: the HIGH default-account-password fix as its own RIPER-5 pass (RESEARCH first), then Phase 06. Library follow-ups (legacy `storage_key` audit, upload write-path hardening, `POST /requests` attachment ownership, orphaned uploads) are in `process/features/launch-readiness/backlog/`.
+  auth gaps live in `process/features/launch-readiness/backlog/`.
+- Account-invites fix (Nov 25-26, 2026, commit 1940ea6): shared default password replaced by emailed single-use set-password links (`invited` status, `auth_tokens`, SMTP mailer); independent EVL green, review approved-with-concerns; real SMTP delivery (Step F) pending the user, so the task folder `process/features/launch-readiness/active/account-invites_25-11-26/` stays active. Next: three follow-ups before Phase 06 (manager edit 403, public self-register decision, per-sender invite limit), then Phase 06; production prerequisites: mail keys, no `db:seed`, first-admin bootstrap (backlog `production-first-admin-bootstrap_NOTE_25-11-26.md`).
+- Frontend unit tests exist (Vitest, 11 files / 62 tests; only the `createLibraryItem` happy path is uncovered, backlog `frontend-library-create-item-unit-test_NOTE_25-11-26.md`); no CI (Phase 06). Library follow-ups (legacy `storage_key` audit, upload write-path hardening, `POST /requests` attachment ownership, orphaned uploads) are in `process/features/launch-readiness/backlog/`.
 
 ## Scan Metadata
 

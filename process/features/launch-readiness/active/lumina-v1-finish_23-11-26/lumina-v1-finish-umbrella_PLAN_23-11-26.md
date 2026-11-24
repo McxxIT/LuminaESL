@@ -272,27 +272,28 @@ node .claude/skills/vc-generate-context/scripts/validate-all-context.mjs
 - Selected plan file path: `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md`
 - Last completed phase: Phase 05 (Parity Polish & Frontend Unit Tests), 25-11-26
 - Validate-contract status: Phase 01 PASS, Phase 02 PASS, Phase 03 PASS; Phase 04 PASS; Phase 05 PASS
-- Next step for a fresh agent: Read this umbrella plan and the Phase 05 report, then run RESEARCH for the separate default-account-password fix (backlog note `default-account-password_NOTE_24-11-26.md`) as its own RIPER-5 pass. Do not create its plan before RESEARCH. After it, Phase 06 Step 1 RESEARCH.
-- Current phase: between Phase 05 and Phase 06 (default-account-password fix)
-- Next action: default-account-password RESEARCH (vc-research-agent)
-- Execute-agent start instruction: Do NOT enter EXECUTE for either the password fix or Phase 06 until their PVL validate-contracts and explicit user approval are complete.
+- Next step for a fresh agent: Read this umbrella plan and `account-invites_REPORT_25-11-26.md`, then handle the user's three follow-ups before Phase 06 (manager edit 403, public self-register decision, per-sender invite limit; backlog notes in `process/features/launch-readiness/backlog/`), each as its own RIPER-5 pass starting with RESEARCH. Then Phase 06 Step 1 RESEARCH.
+- Current phase: between Phase 05 and Phase 06 (account-invites fix done with gaps; three follow-ups pending)
+- Next action: RESEARCH for the manager-edit-team-member-403 follow-up (vc-research-agent)
+- Execute-agent start instruction: Do NOT enter EXECUTE for any follow-up or Phase 06 until their PVL validate-contracts and explicit user approval are complete. Step F (first real SMTP send) never runs without the user's explicit OK.
 
 ---
 
 ## Current Execution State
 
-Last updated: 25-11-26
-Current phase: 5 of 6 closed (Phase 05 done; the default-account-password fix is next, then Phase 06)
+Last updated: 26-11-26
+Current phase: 5 of 6 closed (Phase 05 done; the account-invites fix is done with gaps; three follow-ups, then Phase 06)
 Phase 5 name: Parity Polish & Frontend Unit Tests
 Phase 5 status: ✅ VERIFIED — review decision approved (user, 25-11-26); execution commit 5c1b4b9; no open acceptance gaps (the API-mode 390px visual probe and Phase 03 P3-13 passed); residuals are low and tracked in backlog `phase-05-review-residuals_NOTE_25-11-26.md`
 Phase 5 EVL: green 25-11-26 (independent vc-tester, first try: typecheck, lint, backend vitest 7/61, frontend vitest 10/54, root test, smoke 16 domains/705 checks (rebook 64), e2e 27 API + 4 demo, git diff --check, backend/src/db clean, lockfile only the vitest line, npm ci + typecheck + frontend tests); results.tsv rows 7-9 HALTED_SUCCESS
 Phase 5 report: process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-05-parity-polish-and-unit-tests_REPORT_23-11-26.md
-Next phase: Step 0 (user decision 24-11-26): a SEPARATE pre-Phase-06 fix for the HIGH default-account-password item (process/features/launch-readiness/backlog/default-account-password_NOTE_24-11-26.md), run as its own RIPER-5 pass with RESEARCH first; no plan exists yet. After it: Phase 06 — CI & Docker Compose (process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-06-ci-and-docker-compose_PLAN_23-11-26.md)
-Current loop step: between phases (default-account-password RESEARCH, then Phase 06 Step 1 RESEARCH)
+Pre-06 fix status: account-invites — VERIFIED (with gaps) 26-11-26. Execution commit 1940ea6; independent EVL #1 and #2 green (backend vitest 12/98, frontend vitest 11/62, smoke 17 domains/835, e2e 30 API + 5 demo); review approved-with-concerns (user, 26-11-26). Step F (first real SMTP send, AC-19) is pending the user, so the task folder stays in active/. Plan: process/features/launch-readiness/active/account-invites_25-11-26/account-invites_PLAN_25-11-26.md; report: account-invites_REPORT_25-11-26.md in the same folder.
+Next phase: the user's three follow-ups before Phase 06, each its own RIPER-5 pass: (1) manager-edit-team-member-403, (2) public-self-register-decision, (3) per-sender-invite-limit (backlog notes in process/features/launch-readiness/backlog/). Then Phase 06 — CI & Docker Compose (process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-06-ci-and-docker-compose_PLAN_23-11-26.md)
+Current loop step: between phases (follow-up 1 RESEARCH, then Phase 06 Step 1 RESEARCH)
 Validate-contract status: Phase 01 PASS; Phase 02 PASS; Phase 03 PASS; Phase 04 PASS (Step F supplement PASS); Phase 05 PASS (inner PVL, 24-11-26); Phase 06 pending
 Program Net Gate: IN_PROGRESS
-Latest validator run: 25-11-26 — Phase 05 gates all green on default lumina (smoke 16/16 705 checks, e2e 27 API + 4 demo, backend vitest 61, frontend vitest 54; no migration, 0007 unused)
-Carry-ins for later phases: default-account-password fix (HIGH, own pass before Phase 06); Phase 06 — trust-proxy, NODE_ENV/limiter-cap, sameSite, e2e webServer startup timeout flake (deferred from Phases 04 and 05), vitest specifier alignment (frontend 3.2.7 vs backend ^3.0.5) alongside the lockfile and `npm ci` CI work (see Phase 06 plan "Carried in" and backlog `phase-05-review-residuals_NOTE_25-11-26.md`); unscheduled backlog — frontend createLibraryItem unit test, upload write-path hardening, POST /requests attachment ownership, orphaned uploads, lesson-plan-attach items 2-4 (the suspect storage_key row was inspected and kept by user decision 25-11-26)
+Latest validator run: 26-11-26 — account-invites EVL #2 all green on default lumina (smoke 17/17 835 checks, e2e 30 API + 5 demo, backend vitest 98, frontend vitest 62; migration 0007 applied, next free 0008)
+Carry-ins for later phases: Phase 06 prerequisites from account-invites (production MAIL_* and APP_URL in compose and README; never run db:seed in production; first-admin bootstrap, backlog production-first-admin-bootstrap_NOTE_25-11-26.md; CI keeps MAIL_MAILER unset or log); Step F real SMTP send pending the user (backlog account-invites-real-smtp-verification_NOTE_25-11-26.md); Phase 06 — trust-proxy, NODE_ENV/limiter-cap, sameSite, e2e webServer startup timeout flake (deferred from Phases 04 and 05), vitest specifier alignment (frontend 3.2.7 vs backend ^3.0.5) alongside the lockfile and `npm ci` CI work (see Phase 06 plan "Carried in" and backlog `phase-05-review-residuals_NOTE_25-11-26.md`); unscheduled backlog — frontend createLibraryItem unit test, upload write-path hardening, POST /requests attachment ownership, orphaned uploads, lesson-plan-attach items 2-4 (the suspect storage_key row was inspected and kept by user decision 25-11-26)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any subagent. Never spawn execute-agent when loop step is RESEARCH, INNOVATE, PLAN-SUPPLEMENT, or PVL.

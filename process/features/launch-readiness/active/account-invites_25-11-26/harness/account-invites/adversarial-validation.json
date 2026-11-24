@@ -1,0 +1,75 @@
+{
+  "task": "account-invites (pre-Phase-06 fix)",
+  "scenarios": [
+    {
+      "scenario": "Token guessing / brute force against POST /auth/set-password",
+      "ruled_out": true,
+      "rationale": "256-bit random token, only sha256 stored, single-use, 72 h, IP-limited route (AUTH_RATE_LIMIT_MAX + RATE_LIMIT_MAX ceiling), one generic 400 for unknown/expired/used/archived (smoke compares the four bodies byte for byte)."
+    },
+    {
+      "scenario": "Manager takes over a teammate's account by receiving the invite link",
+      "ruled_out": true,
+      "rationale": "shouldExposeInviteLink returns false for every non-admin actor in every mode (unit truth table); smoke asserts no link and no 'set-password' text in manager create/resend responses on success and on forced mail failure; e2e asserts no invite-link element for a manager."
+    },
+    {
+      "scenario": "Manager escalates by creating an admin/manager, sending a password, or naming another manager",
+      "ruled_out": true,
+      "rationale": "POST /users rejects each with 403 for managers and forces managerId to the actor (smoke item 5)."
+    },
+    {
+      "scenario": "Status bypass: reactivate a never-activated account via PATCH or set a password via admin reset",
+      "ruled_out": true,
+      "rationale": "PATCH active/paused on an unusable hash -> 409 ACCOUNT_NOT_ACTIVATED (detection by hash prefix, not status, so archive-then-PATCH also fails); reset-password on invited/unusable -> 409; the zod enum cannot set 'invited'. Smoke checks all three."
+    },
+    {
+      "scenario": "Mail bombing / parallel resend",
+      "ruled_out": true,
+      "rationale": "row lock serializes; cooldown from the newest invite row (429); smoke: immediate resend 429, two parallel resends -> one 200 + one 429 and exactly one open token."
+    },
+    {
+      "scenario": "Partial create (user without profile or token)",
+      "ruled_out": true,
+      "rationale": "insertAccount runs every write on one transaction; smoke forces a profile FK failure and finds no users row and no orphan token."
+    },
+    {
+      "scenario": "Double consume of one token",
+      "ruled_out": true,
+      "rationale": "conditional UPDATE ... WHERE used_at IS NULL; smoke Promise.all of two accepts -> one 204 + one 400, never 500."
+    },
+    {
+      "scenario": "Accept after the account was archived/paused",
+      "ruled_out": true,
+      "rationale": "UPDATE users ... WHERE status='invited' must hit one row, else the tx rolls back with the generic 400 and the token stays unconsumed (smoke checks used_at is null and status stays archived)."
+    },
+    {
+      "scenario": "Log leakage of token, link, body or MAIL_PASSWORD",
+      "ruled_out": true,
+      "rationale": "log mailer prints subject + masked recipient; deliverInvite warns with the error code only; Fastify does not log bodies; the token travels in a POST body and a URL fragment; logging grep gate shows no new matches; spy-logger unit tests."
+    },
+    {
+      "scenario": "Tests or e2e send real mail because backend/.env says smtp",
+      "ruled_out": true,
+      "rationale": "createMailer throws for smtp under NODE_ENV=test; smoke injects the array mailer and refuses to start otherwise; Playwright backend env forces MAIL_MAILER=log (dotenv does not override set variables); ports checked free before e2e so no foreign backend is reused."
+    },
+    {
+      "scenario": "Phishing via attacker-controlled link host",
+      "ruled_out": true,
+      "rationale": "appBaseUrl takes only the env (APP_URL, else first CORS origin, else localhost); no request header is consulted; production requires an http(s) APP_URL."
+    },
+    {
+      "scenario": "Account enumeration through invited logins or manager resend",
+      "ruled_out": true,
+      "rationale": "invited login fails with the same 'Invalid email or password' 401; manager resend on unknown/foreign ids is 403 (no 404 oracle). Accepted residual: 409 on duplicate email at create (register already exposes it)."
+    },
+    {
+      "scenario": "Production boots with a silent log mailer or plaintext SMTP",
+      "ruled_out": true,
+      "rationale": "env superRefine (separate from the CORS block) fails startup naming the key; env-mail.test.ts covers each key and the CORS-early-return case. Not proven by a booted production server (documented gap)."
+    },
+    {
+      "scenario": "Deadlock between POST /auth/set-password and resend / PATCH pause-archive-email / DELETE on the same invited user (opposite lock order)",
+      "ruled_out": true,
+      "rationale": "EVL fix cycle 1: set-password now reads the token user_id without a lock, locks the user row FOR UPDATE (lockUserForInvite), then conditionally consumes the token (user_id = locked user, unused, unexpired), then activates WHERE status=invited; same user-then-token order as every other writer. Any miss is the generic 400 and rolls back. Smoke invites 3b: 3 rounds each of set-password||resend and set-password||PATCH archived, no 500, consistent end state."
+    }
+  ]
+}

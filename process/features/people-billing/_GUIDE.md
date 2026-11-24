@@ -47,6 +47,7 @@ B2 people slice is API-backed: manager/teacher/student create and update, status
 - Scope leaks: every users/students/teachers/requests route must use `lib/scope.ts` checks; a missed check exposes another manager's team.
 - Settings is a singleton (id 1) affecting cancellation/refund policy platform-wide.
 - Demo accounts use `Password123!` in API mode only; keep demo UI auth separate from real auth.
+- Accounts created through the UI are `invited` and set their own password by emailed link (no shared default); see `process/context/auth/jwt-cookie-flow.md`.
 - Schema changes require synced Drizzle migrations.
 
 ## Folder Contents

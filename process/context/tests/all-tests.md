@@ -14,8 +14,8 @@ Last updated: 2026-11-25
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** The backend has automated tests (vitest, 61 tests, 7 files, no DB needed). The frontend has a
-Vitest unit runner (54 tests, 10 files, no DB or browser) and a committed browser parity suite (`@playwright/test`, 31 tests: 27 API mode + 4 demo) run by
+**BLUF:** The backend has automated tests (vitest, 98 tests, 12 files, no DB needed). The frontend has a
+Vitest unit runner (62 tests, 11 files, no DB or browser) and a committed browser parity suite (`@playwright/test`, 35 tests: 30 API mode + 5 demo) run by
 `npm run e2e`. `npm run smoke` is a separate hybrid per-domain API smoke. There is no CI; authenticated business rules outside the parity suite are verified by
 `npm run smoke` or by hand against seeded local Postgres.
 
@@ -70,7 +70,7 @@ the browser in both data modes. There is no jest and no CI.
 | root | `npm run dev` | Yes (backend) | web + api via concurrently |
 | backend | `npm run test --workspace @lumina/backend` | No | `vitest run` |
 | backend | `npm run test:watch --workspace @lumina/backend` | No | watch mode |
-| frontend | `npm run test --workspace @lumina/frontend` | No | `vitest run`: 10 files / 54 tests in `frontend/tests/` (node env, `@` alias, `helpers/{school,fixtures}.ts` build a seeded memory store); covers credits, bookings and rebook, approvals, homework, quality, notifications, permissions, library guards, upload validation, and `credit-copy.test.ts` (guards "hours" wording in a fixed file list; extend it with new screens) |
+| frontend | `npm run test --workspace @lumina/frontend` | No | `vitest run`: 11 files / 62 tests in `frontend/tests/` (node env, `@` alias, `helpers/{school,fixtures}.ts` build a seeded memory store); covers credits, bookings and rebook, approvals, homework, quality, notifications, permissions, library guards, upload validation, and `credit-copy.test.ts` (guards "hours" wording in a fixed file list; extend it with new screens) |
 | backend | `npm run typecheck --workspace @lumina/backend` | No | `tsc --noEmit` |
 | backend | `npm run lint --workspace @lumina/backend` | No | `eslint src tests scripts` |
 | frontend | `npm run typecheck --workspace @lumina/frontend` | No | |
@@ -93,7 +93,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | Agent-probe | Agent drives or inspects a running stack | Use `vc-agent-browser` against `npm run dev` (demo mode is default; API mode needs `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`); curl smoke against the seeded API; one-off investigations the suite does not cover |
 | Known-gap | Not verified automatically | See Known Gaps below |
 
-## Per-Test-File Coverage (backend/tests, 61 tests in 7 files)
+## Per-Test-File Coverage (backend/tests, 98 tests in 12 files)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -104,17 +104,22 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | `auth-lifecycle.test.ts` | 6 | DB-free: `refreshCookieOptions` (`secure` only in production); total limiter key generators; 429 after `AUTH_RATE_LIMIT_MAX` with per-email buckets and per-IP ceiling; change-password keyed by `user.sub`; refresh limited by cookie |
 | `school-import.test.ts` | 13 | D2 one-time import: zod payload and pure `buildImportPlan` |
 | `upload-path.test.ts` | 17 | DB-free: `resolveUploadPath` containment (traversal, absolute paths, NUL, `:` drive letters and alternate data streams, the upload directory itself), with Windows path semantics injected so they run on any OS |
+| `invites.test.ts` | new | DB-free: token generation/hash (sha256-only), invite lifecycle helpers, spy-logger assertion that tokens and links are never logged |
+| `mailer.test.ts`, `invite-email.test.ts`, `env-mail.test.ts` | new | Mailer modes (smtp/log/array, smtp refused under `NODE_ENV=test`), email content, mail env parsing and the production mail guard |
+| `seed-guard.test.ts` | new | `assertSeedAllowed` refuses `NODE_ENV=production` |
+
+(`password.test.ts`, `school-import.test.ts`, `contract.test.ts`, `db-types.test.ts` were extended: unusable-hash helpers, invited import status, new routes, production mail keys.) Per-file counts for the new files are not itemised; the total is 98 tests in 12 files.
 
 (`app.test.ts` and `contract.test.ts` hardcode an Env that includes `RATE_LIMIT_MAX` and `AUTH_RATE_LIMIT_MAX`. `backend/scripts/` is excluded from `npm test`.)
 
 ## Smoke Gate (`npm run smoke`)
 
 - Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
-- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 16 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications, auth, library): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules plus the full attachment access matrix (pre-attach uploader/admin 200, cross-team/student 403; published plan enrolled roles 200, unrelated 403; draft course owner/admin 200, others 403; request evidence target teacher/manager 200, cross-team/student 403), staff-managed credits (student self-purchase 403 with unchanged balance, admin purchase 201, 101 still 400), notification feed scoping and state roundtrip, and the `auth` domain (58 checks on a dedicated fixture user: change-password happy path with cookie rotation, wrong current -> 400 `INVALID_CURRENT_PASSWORD`, other devices' refresh 401 while the current device's new cookie refreshes, admin reset 200 without echoing the password, self-reset 400, non-admin 403, unknown 404, extra fields 400, pause/archive revoke refresh, prune keeps fresh and 1-day-old revoked rows and deletes expired and 8-day-old revoked rows). 705 checks per run (uploads 61, library 170, credits 68, auth 58, rebook 64); last green: 2026-11-25. The `rebook` domain (Phase 05) covers rebook of scheduled, completed and cancelled originals (fresh `ESL-####` room code, next lesson plan distinct from every other active lesson of the student, `planAttachedBy`, enrollment, exactly one credit debit and one `lesson.booked` activity), the 0.5-credit refusal, and a live original returning 400 with the balance unchanged and the slot still open. The room-code inequality check can collide about 1 time in 9000; rerun once before treating it as a defect. The `library` domain (Phase 04) covers staff-only create/edit/archive (creator-or-admin edit), strict bodies and limits, attach/detach on own-team versus other-team lessons, cancelled-lesson and archived-item denial, the attach race (one winner, 409 for the rest), the `canAccessAttachment` library branch (student and teacher on their own non-cancelled lessons, including completed, get 200; other students and unattached published items get 403 for students and teachers), the plan-attach strict `{attachmentId}` contract (uploader or admin; request evidence 422), download containment (a poisoned `storage_key` returns 404), and that the manager bootstrap carries `createdByName` but no other managers' user rows. Smoke archives the library items it creates in `finally`. `loadEnv` sets `AUTH_RATE_LIMIT_MAX=100000`.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 17 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications, auth, library): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules plus the full attachment access matrix (pre-attach uploader/admin 200, cross-team/student 403; published plan enrolled roles 200, unrelated 403; draft course owner/admin 200, others 403; request evidence target teacher/manager 200, cross-team/student 403), staff-managed credits (student self-purchase 403 with unchanged balance, admin purchase 201, 101 still 400), notification feed scoping and state roundtrip, and the `auth` domain (58 checks on a dedicated fixture user: change-password happy path with cookie rotation, wrong current -> 400 `INVALID_CURRENT_PASSWORD`, other devices' refresh 401 while the current device's new cookie refreshes, admin reset 200 without echoing the password, self-reset 400, non-admin 403, unknown 404, extra fields 400, pause/archive revoke refresh, prune keeps fresh and 1-day-old revoked rows and deletes expired and 8-day-old revoked rows). 835 checks per run (uploads 61, library 170, credits 68, auth 58, rebook 64, invites 130); last green: 2026-11-26. The `invites` domain (account-invites fix) uses an injected array mailer and `INVITE_RESEND_COOLDOWN_SECONDS=2` (each legitimate resend waits about 2.1 s): admin and manager create + accept, token edge cases (expired, used, unknown) and parallel accept, resend with cooldown and parallel resend, manager create and resend never returning a link, mail failure, admin-only password, status safety (invited cannot log in, reset-password 409), forced profile-insert rollback, and three rounds each of set-password racing resend and PATCH archived (no 500, consistent end state). The `rebook` domain (Phase 05) covers rebook of scheduled, completed and cancelled originals (fresh `ESL-####` room code, next lesson plan distinct from every other active lesson of the student, `planAttachedBy`, enrollment, exactly one credit debit and one `lesson.booked` activity), the 0.5-credit refusal, and a live original returning 400 with the balance unchanged and the slot still open. The room-code inequality check can collide about 1 time in 9000; rerun once before treating it as a defect. The `library` domain (Phase 04) covers staff-only create/edit/archive (creator-or-admin edit), strict bodies and limits, attach/detach on own-team versus other-team lessons, cancelled-lesson and archived-item denial, the attach race (one winner, 409 for the rest), the `canAccessAttachment` library branch (student and teacher on their own non-cancelled lessons, including completed, get 200; other students and unattached published items get 403 for students and teachers), the plan-attach strict `{attachmentId}` contract (uploader or admin; request evidence 422), download containment (a poisoned `storage_key` returns 404), and that the manager bootstrap carries `createdByName` but no other managers' user rows. Smoke archives the library items it creates in `finally`. `loadEnv` sets `AUTH_RATE_LIMIT_MAX=100000`.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
-## Parity Suite (`frontend/e2e`, 31 tests: 27 API + 4 demo)
+## Parity Suite (`frontend/e2e`, 35 tests: 30 API + 5 demo)
 
 - Command: `npm run e2e` (root alias) = `e2e:api` then `e2e:demo`. Needs local Postgres, the backend
   env file, and a seeded DB; ports 3000, 3100, and 4000 must be free (the API config reuses an
@@ -186,7 +191,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 ## Known Gaps
 
-- No frontend component tests (the Vitest suite covers services, permissions and copy guards, not rendered screens); browser coverage is the Playwright parity suite (27 API tests
+- No frontend component tests (the Vitest suite covers services, permissions and copy guards, not rendered screens); browser coverage is the Playwright parity suite (30 API tests
   across auth, uploads, notifications, booking, booking collisions, cancellation/refund, credit races,
   homework, API boot with no demo data, import, and the Curriculum Library, plus 4 demo tests).
 - Phase 05 closed the Phase 04 gaps: the library service guards are unit-tested (`frontend/tests/library.test.ts`) and the API-mode visual probe plus Phase 03 P3-13 passed at 390px. Still open: the `createLibraryItem` happy path needs a FileReader/IndexedDB shim (`backlog/frontend-library-create-item-unit-test_NOTE_25-11-26.md`); smoke has no rebook 409 or other-student 403 case (`backlog/phase-05-review-residuals_NOTE_25-11-26.md`); one e2e webServer 240 s startup timeout was seen once in Phase 04 and not reproduced (`backlog/e2e-startup-timeout-flake_NOTE_24-11-26.md`, Phase 06).
@@ -247,3 +252,12 @@ exit 0 both times, no leftover node processes or bound ports afterwards. Same da
 every test in the file with an actionable message and repaired nothing; `npm run test --workspace
 @lumina/backend`: 4 files, 17 tests passed; `npm run smoke`: 13/13 domains, 343 checks, exit 0 (plus a
 deliberate red run that exited 1).
+
+## Mail Harness Guards (account-invites fix)
+
+- Tests never send real mail. Smoke injects an array mailer and sets `MAIL_MAILER=array` with `NODE_ENV=test` (startup assertion); the Playwright backend runs `MAIL_MAILER=log`, `NODE_ENV=development`, `INVITE_RESEND_COOLDOWN_SECONDS=0`. `smtp` is refused under `NODE_ENV=test`, and CI must keep `MAIL_MAILER` unset or `log`.
+- Check ports 3000, 3100, and 4000 are free before `npm run e2e` (`netstat -ano | findstr ":3000 :3100 :4000"`).
+- A combined run (typecheck/lint in parallel with vitest) once timed out `beforeAll` hooks in app/contract/auth-lifecycle; isolated runs were green. Do not run them concurrently.
+- Real SMTP delivery (AC-19) is the only unproven acceptance item: user-gated Step F, backlog `account-invites-real-smtp-verification_NOTE_25-11-26.md`.
+
+2026-11-26 (account-invites fix, independent vc-tester EVL after review fix cycle 1, default `backend/.env`): `npm run db:migrate` no-op (`0007` applied); `npm run typecheck` and `npm run lint` exit 0; backend vitest 12 files / 98 tests; frontend vitest 11 files / 62 tests; `npm run smoke` 17/17 domains, 835 checks (invites 130, no 500s); `npm run e2e` 30 API + 5 demo; `git diff --check` clean; literal-removal and logging gates clean; `npm ci` + typecheck with a lockfile diff of only nodemailer.

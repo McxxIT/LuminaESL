@@ -1,0 +1,18 @@
+{
+  "task": "account-invites (pre-Phase-06 fix) — emailed single-use set-password links",
+  "planPath": "process/features/launch-readiness/active/account-invites_25-11-26/account-invites_PLAN_25-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": [
+    "auth or identity",
+    "schema/data migration or destructive data mutation",
+    "public API or external contract changes",
+    "permission, secret, or trust-boundary logic"
+  ],
+  "riskClass": "auth or identity",
+  "workDescription": "Additive migration 0007 (user_status gains 'invited'; new auth_tokens table with sha256-only token hashes, purpose CHECK, user index). New invited status with an unusable '!unset$' password hash; POST /users opened to managers (teacher/student on their own team, no password, managerId forced) and rewritten into one transaction with the invite token; new POST /users/:id/invite (row lock, ownership from the tx, cooldown, expire, insert); new public POST /auth/set-password (IP-limited, conditional single-use consume, activation, refresh revocation, one generic 400); D8 status guards on PATCH/reset-password/DELETE; SMTP mailer seam (nodemailer) with array/log modes, smtp refused under NODE_ENV=test, production mail guard in env; import creates invited users; seed refuses production; frontend set-password screen (URL fragment token), invite result modal (link admin-only), Resend invite actions, demo fenced.",
+  "approver": "user (review-decision approved-with-concerns, 26-11-26)",
+  "mustStopBeforeFinalize": true,
+  "stopReason": "Step F (first real SMTP send) remains a user-gated hard stop; AC-19 stays CONDITIONAL until it runs. review-decision.json is written (approved-with-concerns); mustStopBeforeFinalize stays true only for Step F.",
+  "humanApprovalRequired": true,
+  "why": "Applies a migration to the shared dev database and changes who can create accounts and how they get a password. A defect could let a manager take over a teammate account, let a never-activated account be reactivated without a password, leak a token or link into logs, or send real email from a test run."
+}

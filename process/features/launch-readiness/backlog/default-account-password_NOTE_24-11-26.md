@@ -1,35 +1,23 @@
 ---
 name: note:default-account-password
-description: "Backlog: every admin-created account gets the same fixed default password, shipped in the client bundle, with no forced change on first login"
+description: "RESOLVED 26-11-26 by commit 1940ea6 (emailed single-use set-password links); only AC-19 real SMTP delivery remains, tracked in account-invites-real-smtp-verification"
 date: 24-11-26
 feature: launch-readiness
 ---
 
 # Shared default password for admin-created accounts
 
-status: OPEN, NEXT (user decision 24-11-26: fixed as its own RIPER-5 pass, RESEARCH first, after Phase 05 and before Phase 06)
-reason: Pre-existing; needs a design decision (generated one-time password versus forced change) and a contract/schema plan.
-item: Phase 03 reviewer finding M1 (pre-existing, not introduced by Phase 03)
-priority: HIGH. Should-fix before launch, and before Phase 06 packages a deployable stack.
+status: RESOLVED by commit 1940ea6 `feat(auth): replace shared default password with emailed invite links` (account-invites fix, 25/26-11-26). Remaining gap: AC-19 real SMTP delivery, see `account-invites-real-smtp-verification_NOTE_25-11-26.md`.
+item: Phase 03 reviewer finding M1 (pre-existing)
+priority: was HIGH
 
-## Gap
+## What was fixed
 
-- The frontend school API layer (`frontend/app/lib/school/api/school.ts`, lines about 18 and 55)
-  sends one fixed default password for every account an admin or manager creates. The value is in the
-  client bundle and in seed/progress docs (it is intentionally not repeated here).
-- There is no forced change on first login, so anyone who knows the default can sign in to any
-  account whose owner has not changed it. Phase 03 added self-service change and admin reset, but
-  nothing requires their use.
+- Accounts created by an admin or manager are now `invited` with an unusable password hash and cannot sign in.
+- They receive a single-use set-password link (72 h, sha256-only token storage in `auth_tokens`) through the backend SMTP mailer. The shared default is gone from the frontend and the backend; the only remaining dev-only password is in `backend/src/db/seed.ts`, which refuses `NODE_ENV=production`.
+- Imported users are created `invited` with no email; admins can resend an invite (30 s cooldown, old link invalidated).
 
-## Options
+## What is still open
 
-1. Server-generated one-time password returned once in the create response and shown to the admin
-   (no schema change; the admin shares it out of band).
-2. A `must_change_password` flag set on create/reset and enforced after login (schema change and
-   migration, so a new plan).
-3. Both: generated password plus the flag.
-
-## Next step
-
-New plan, scheduled before launch. Option 1 is the cheapest meaningful fix; option 2 closes the
-loop. Needs frontend and backend contract updates (`types.ts`, `contract.test.ts`, smoke, e2e).
+- First real SMTP send (Step F, user-gated): `account-invites-real-smtp-verification_NOTE_25-11-26.md`.
+- Related follow-ups: `manager-edit-team-member-403_NOTE_25-11-26.md`, `public-self-register-decision_NOTE_25-11-26.md`, `per-sender-invite-limit_NOTE_25-11-26.md`, `account-invites-review-residuals_NOTE_25-11-26.md`, `production-first-admin-bootstrap_NOTE_25-11-26.md`.

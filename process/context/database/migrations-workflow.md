@@ -14,6 +14,7 @@ BLUF: Edit `backend/src/db/schema.ts`, run `npm run db:generate`, review the SQL
 
 - `backend/drizzle.config.ts`: schema `./src/db/schema.ts`, out `./src/db/migrations`, dialect postgresql, `strict: true`; reads `DATABASE_URL` from `backend/.env` via dotenv.
 - Migrations: `0000_material_jane_foster.sql` (baseline), `0001_fractional_credit_hours.sql` (`credit_entries.hours` -> `numeric(8,2)`), `0002_notification_state.sql` (bell read/mute table, additive), `0003_supreme_victor_mancha.sql` (`absences.lesson_id` unique), `0004_gorgeous_maverick.sql` (`lessons_active_teacher_date_time_uidx`, partial unique index on `(teacher_id, date, time)` where `status in ('scheduled','live')`), `0005_zippy_thunderbolt_ross.sql` (`library_items`, `lesson_library_items`, additive), `0006_large_the_hand.sql` (`library_items_status_check` CHECK, additive), plus `meta/_journal.json` and snapshots. `_journal.json` and the snapshot move with the SQL; never hand-edit them.
+- Latest migration: `0007_windy_grandmaster.sql` (account-invites, 25-11-26): additive only, `ALTER TYPE user_status ADD VALUE 'invited'` plus `CREATE TABLE auth_tokens` (unique hash, purpose CHECK, FK, user index); applied to dev `lumina`. Next free number is `0008`. Note: a new enum value cannot be used in the same transaction that adds it, so keep such migrations additive.
 - Root scripts (run from repo root): `db:generate`, `db:migrate`, `db:push` (dev shortcut, skips migration files — avoid for shared schema work), `db:seed`, `db:reset`, `db:studio`.
 
 ## Keep-in-sync checklist (every schema change)

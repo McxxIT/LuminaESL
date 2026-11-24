@@ -1,0 +1,24 @@
+{
+  "task": "account-invites (pre-Phase-06 fix)",
+  "snippets": [
+    { "file": "backend/src/db/migrations/0007_windy_grandmaster.sql", "lines": "1-14", "description": "ALTER TYPE \"public\".\"user_status\" ADD VALUE 'invited'; CREATE TABLE auth_tokens (id, user_id, token_hash UNIQUE, purpose CHECK in ('invite','reset'), expires_at, used_at, created_at); FK user_id -> users ON DELETE cascade; INDEX auth_tokens_user_idx. 'invited' is not used anywhere else in the file." },
+    { "file": "backend/src/db/schema.ts", "lines": "25-30, 125-150", "description": "userStatus enum with 'invited'; authTokens table mirroring the migration (check() call shape copied from library_items_status_check)." },
+    { "file": "backend/src/lib/password.ts", "lines": "end of file", "description": "UNUSABLE_PASSWORD_PREFIX '!unset$', unusablePasswordHash() (32 random bytes), isUnusablePasswordHash(); verifyPassword rejects anything that is not 6 '$' parts starting with scrypt, so the hash never verifies." },
+    { "file": "backend/src/lib/invites.ts", "lines": "76-87", "description": "shouldExposeInviteLink: manager -> false always; admin -> true when the send failed, or mode log/array outside production." },
+    { "file": "backend/src/lib/invites.ts", "lines": "129-178", "description": "issueInvite: SELECT ... FOR UPDATE on the user, require status invited (409), cooldown from the newest invite row (429 RATE_LIMITED), expire open invites, delete rows expired > 7 days, insert sha256(token)." },
+    { "file": "backend/src/lib/invites.ts", "lines": "183-202", "description": "consumeInvite: one conditional UPDATE ... SET used_at WHERE token_hash AND purpose='invite' AND used_at IS NULL AND expires_at > now RETURNING user_id." },
+    { "file": "backend/src/lib/invites.ts", "lines": "220-262", "description": "deliverInvite: renders and sends after commit; never throws; failure -> sent:false + fixed generic error and one warn log carrying only the error code." },
+    { "file": "backend/src/lib/mailer.ts", "lines": "176-193", "description": "createMailer: smtp refused when NODE_ENV=test; array and log mailers; log mailer logs subject and masked recipient only." },
+    { "file": "backend/src/config/env.ts", "lines": "110-133", "description": "checkProductionMail: separate from the CORS block; requires MAIL_MAILER=smtp, MAIL_HOST, MAIL_FROM_ADDRESS, http(s) APP_URL and an encrypted MAIL_ENCRYPTION; messages name the key, never the value." },
+    { "file": "backend/src/routes/users.ts", "lines": "117-170", "description": "insertAccount: duplicate check, user insert (invited/active), profile with managerId, issueInvite, logActivity — all on the caller's transaction." },
+    { "file": "backend/src/routes/users.ts", "lines": "302-375", "description": "POST /users: admin or manager; manager limited to teacher/student, no password, managerId forced to the actor; admin managerId must be a manager (400); one transaction, 23505 -> 409 inside it, mail after commit." },
+    { "file": "backend/src/routes/users.ts", "lines": "376-425", "description": "POST /users/:id/invite: row lock, manager ownership read from the same tx (403 for unknown/out-of-team, no oracle), issueInvite, activity user.invite_resent, mail after commit." },
+    { "file": "backend/src/routes/users.ts", "lines": "460-470, 565-575", "description": "PATCH status active/paused on an unusable hash -> 409 ACCOUNT_NOT_ACTIVATED; reset-password on an invited/unusable account -> 409; PATCH archived/paused, invited email change and DELETE expire open invites." },
+    { "file": "backend/src/routes/auth.ts", "lines": "282-320", "description": "POST /auth/set-password: enforceIpCeiling + IP-keyed authRateLimit; parse first (policy error never consumes), then one tx: consumeInvite, UPDATE users WHERE status='invited' (1 row), revokeUserRefreshTokens, logActivity; any miss -> generic 400 INVALID_OR_EXPIRED_TOKEN and rollback; 204, no session." },
+    { "file": "backend/src/db/seed.ts", "lines": "23-28", "description": "assertSeedAllowed(process.env.NODE_ENV) runs before loadEnv(); refuses production." },
+    { "file": "frontend/app/lib/auth/invite-hash.ts", "lines": "1-20", "description": "readSetPasswordToken accepts only #set-password=<20-128 base64url chars>; clearInviteHash uses history.replaceState." },
+    { "file": "frontend/app/components/SetPasswordScreen.tsx", "lines": "25-50", "description": "Client checks, then clearInviteHash() before the request; token kept in state for retries." },
+    { "file": "frontend/playwright.config.ts", "lines": "48-60", "description": "Backend webServer env: NODE_ENV development, MAIL_MAILER log, INVITE_RESEND_COOLDOWN_SECONDS 0 (win over the env file)." },
+    { "file": "backend/scripts/smoke.ts", "lines": "60-76, ~1700", "description": "Smoke env MAIL_MAILER array, cooldown 2; createArrayMailer injected into buildApp; startup refuses unless NODE_ENV=test and the array mailer." }
+  ]
+}
