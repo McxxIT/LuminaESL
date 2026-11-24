@@ -267,7 +267,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
     <section className="student-lessons-summary">
       <article className="student-summary-card"><span className="metric-icon blue"><Icon name="calendar" /></span><div><span>UPCOMING</span><strong>{counts.upcoming}</strong></div></article>
       <article className="student-summary-card"><span className="metric-icon green"><Icon name="check" /></span><div><span>COMPLETED</span><strong>{counts.completed}</strong></div></article>
-      <article className="student-summary-card"><span className="metric-icon violet"><Icon name="clock" /></span><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>hrs</em></strong></div></article>
+      <article className="student-summary-card"><span className="metric-icon violet"><Icon name="clock" /></span><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>credits</em></strong></div></article>
       <article className="student-summary-card"><span className="metric-icon orange"><Icon name="award" /></span><div><span>ATTENDANCE</span><strong>96%</strong></div></article>
     </section>
 

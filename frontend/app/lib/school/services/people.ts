@@ -310,10 +310,10 @@ export function adjustCredits(actorId: string, studentId: string, hours: number,
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "credits.adjust", { studentId });
-    if (!Number.isFinite(hours) || hours === 0) throw new ServiceError("Enter how many hours to add or remove.");
+    if (!Number.isFinite(hours) || hours === 0) throw new ServiceError("Enter how many credits to add or remove.");
     if (!reason.trim()) throw new ServiceError("Add a reason for the adjustment.");
     changeCredits(draft, { studentId, hours: Number(hours.toFixed(2)), reason: "adjustment", description: reason.trim(), actorId });
-    recordActivity(draft, { actorId, action: "credits.adjusted", targetType: "user", targetId: studentId, summary: `${hours > 0 ? "+" : ""}${hours} hrs: ${reason.trim()}` });
+    recordActivity(draft, { actorId, action: "credits.adjusted", targetType: "user", targetId: studentId, summary: `${hours > 0 ? "+" : ""}${hours} credits: ${reason.trim()}` });
   }));
 }
 

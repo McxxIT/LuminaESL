@@ -136,7 +136,7 @@ export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose
       <label>Course<select value={form.courseId} onChange={(event) => setForm({ ...form, courseId: event.target.value })} disabled={!form.teacherId}>
         {courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}
       </select></label>
-      <label className="full-field">Starting credits (hours)<input type="number" min="0" step="0.5" value={form.startingCredits} onChange={(event) => setForm({ ...form, startingCredits: event.target.value })} /><small>One 25-minute lesson uses 1 credit.</small></label>
+      <label className="full-field">Starting credits<input type="number" min="0" step="0.5" value={form.startingCredits} onChange={(event) => setForm({ ...form, startingCredits: event.target.value })} /><small>One 25-minute lesson uses 1 credit.</small></label>
     </>}
     <label>Guardian name<input value={form.guardianName} onChange={(event) => setForm({ ...form, guardianName: event.target.value })} placeholder="Optional" /></label>
     <label>Guardian email<input type="email" value={form.guardianEmail} onChange={(event) => setForm({ ...form, guardianEmail: event.target.value })} placeholder="Optional" /></label>
@@ -173,12 +173,12 @@ export function CreditAdjustModal({ studentName, balance, onSubmit, onClose }: {
   const [reason, setReason] = useState("");
   const amount = Number(hours) || 0;
   const next = Number((balance + (direction === "add" ? amount : -amount)).toFixed(2));
-  return <FormModal id="credit-form" eyebrow="CREDITS" title={`Adjust credits for ${studentName}`} description={`Current balance: ${balance.toFixed(2)} hours.`}
+  return <FormModal id="credit-form" eyebrow="CREDITS" title={`Adjust credits for ${studentName}`} description={`Current balance: ${balance.toFixed(2)} credits.`}
     submitLabel="Save adjustment" onClose={onClose} onSubmit={() => onSubmit({ hours: direction === "add" ? amount : -amount, reason })}>
-    <label>Change<select value={direction} onChange={(event) => setDirection(event.target.value as "add" | "remove")}><option value="add">Add hours</option><option value="remove">Remove hours</option></select></label>
-    <label>Hours<input type="number" min="0.25" step="0.25" value={hours} onChange={(event) => setHours(event.target.value)} /></label>
+    <label>Change<select value={direction} onChange={(event) => setDirection(event.target.value as "add" | "remove")}><option value="add">Add credits</option><option value="remove">Remove credits</option></select></label>
+    <label>Credits<input type="number" min="0.25" step="0.25" value={hours} onChange={(event) => setHours(event.target.value)} /></label>
     <label className="full-field">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="e.g. Goodwill credit for a technical issue" /></label>
-    <p className="student-form-note full-field">New balance: <strong>{next.toFixed(2)} hours</strong>{next < 0 ? " (cannot go below zero)" : ""}</p>
+    <p className="student-form-note full-field">New balance: <strong>{next.toFixed(2)} credits</strong>{next < 0 ? " (cannot go below zero)" : ""}</p>
   </FormModal>;
 }
 

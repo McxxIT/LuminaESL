@@ -94,7 +94,7 @@ function BookOnBehalfModal({ user, initial, teachers, onBooked, onClose }: {
         {slots.length === 0 && <option value="">No open slots this day</option>}
       </select></label>
       <label className="full-field">Lesson focus<select value={title} onChange={(event) => setTitle(event.target.value)}>{teacherFocusOptions.map((focus) => <option key={focus} value={focus}>{focus}</option>)}</select></label>
-      {chosenStudent && <p className={`student-form-note full-field ${chosenStudent.credits < LESSON_CREDIT_HOURS ? "manager-low" : ""}`}>{chosenStudent.student.name} has {chosenStudent.credits.toFixed(2)} credit hours{chosenStudent.credits < LESSON_CREDIT_HOURS ? " (not enough for a lesson; add credits first)" : ""}.</p>}
+      {chosenStudent && <p className={`student-form-note full-field ${chosenStudent.credits < LESSON_CREDIT_HOURS ? "manager-low" : ""}`}>{chosenStudent.student.name} has {chosenStudent.credits.toFixed(2)} credits{chosenStudent.credits < LESSON_CREDIT_HOURS ? " (not enough for a lesson; add credits first)" : ""}.</p>}
       {error && <p className="form-error full-field" role="alert"><Icon name="x" size={14} /> {error}</p>}
     </form>
   </Modal>;

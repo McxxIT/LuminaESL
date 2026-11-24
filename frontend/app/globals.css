@@ -368,7 +368,7 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
 .lesson-material-copy strong { color: #0f172a; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .lesson-material-copy small { color: #64748b; font-size: 11px; overflow-wrap: anywhere; }
 .lesson-material .compact-button { flex-shrink: 0; }
-@media (max-width: 480px) { .lesson-material { align-items: flex-start; flex-wrap: wrap; } .lesson-material .compact-button { margin-left: 50px; } }
+@media (max-width: 480px) { .lesson-material { align-items: flex-start; flex-wrap: wrap; } .lesson-material .compact-button { margin-left: 0; } }
 .lesson-detail-section { margin-top: 18px; }
 .lesson-detail-section p { color: #475569; font-size: 12px; line-height: 1.55; margin: 7px 0 0; }
 .lesson-detail-section blockquote { border-left: 3px solid #c7d2fe; color: #475569; font-size: 12px; font-style: italic; line-height: 1.6; margin: 8px 0 0; padding: 2px 0 2px 12px; }
@@ -1540,7 +1540,7 @@ button:focus-visible { outline: 3px solid #c7d2fe; outline-offset: 2px; }
 
 /* Teacher lesson details: plan files */
 .lesson-material { flex-wrap: wrap; }
-.lesson-material-files { display: grid; flex-basis: 100%; gap: 6px; padding-left: 50px; }
+.lesson-material-files { display: grid; flex-basis: 100%; gap: 6px; grid-template-columns: minmax(0, 1fr); min-width: 0; padding-left: 50px; }
 .lesson-material-file { align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; color: #334155; cursor: pointer; display: flex; font: inherit; font-size: 12px; gap: 8px; padding: 7px 10px; text-align: left; }
 .lesson-material-file:hover { border-color: #a5b4fc; color: #4338ca; }
 .lesson-material-file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -378,9 +378,9 @@ export const studentTransactionSeed: CreditTransaction[] = [
 ];
 
 export const creditPackages = [
-  { hours: 5, price: 75, label: "5 lesson hours", detail: "5 twenty-five-minute sessions" },
-  { hours: 10, price: 140, label: "10 lesson hours", detail: "10 twenty-five-minute sessions · most popular" },
-  { hours: 20, price: 260, label: "20 lesson hours", detail: "20 twenty-five-minute sessions · best value" },
+  { hours: 5, price: 75, label: "5 lesson credits", detail: "5 twenty-five-minute sessions" },
+  { hours: 10, price: 140, label: "10 lesson credits", detail: "10 twenty-five-minute sessions · most popular" },
+  { hours: 20, price: 260, label: "20 lesson credits", detail: "20 twenty-five-minute sessions · best value" },
 ];
 
 export const studentTutors = [

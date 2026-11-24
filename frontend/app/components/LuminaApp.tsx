@@ -245,7 +245,7 @@ export default function LuminaApp() {
       <header className="topbar">
         <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{activeNav}</strong></div>
         <div className="topbar-actions">
-          {effectiveAccount.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} hrs</strong></button>}
+          {effectiveAccount.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} credits</strong></button>}
           <div className="popover-anchor">
             <button type="button" className="icon-button notification-button" aria-label="Notifications" onClick={() => setOpenPopover(openPopover === "notifications" ? null : "notifications")}><Icon name="bell" /><span className={`notification-dot ${unreadCount > 0 ? "" : "hidden-dot"}`} /></button>
             {openPopover === "notifications" && <NotificationPanel notifications={notifications} onOpen={openNotification} onMarkAllRead={markAllRead} onClose={() => setOpenPopover(null)} />}

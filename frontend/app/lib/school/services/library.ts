@@ -6,7 +6,7 @@ import {
   updateLibraryItem as updateLibraryItemApi,
 } from "../api/library";
 import { uploadFile as uploadFileApi } from "../api/uploads";
-import { largeFileKey, MAX_UPLOAD_BYTES, saveLargeFile } from "../files";
+import { largeFileKey, saveLargeFile, validateUploadFile as validateFile } from "../files";
 import { assertCan } from "../permissions";
 import { createId, get, patch, recordActivity, remove, upsert } from "../repositories";
 import { updateSchool } from "../store";
@@ -22,15 +22,6 @@ import { fail, run, runAsync, ServiceError, type ServiceCall, type ServiceResult
  * Archive-only: archived items leave browse and new attaches, existing links keep working.
  * The local branch mirrors the backend rules and activity action names in `routes/library.ts`.
  */
-
-/** Same file rules as `services/uploads.ts` (5 MB; PDF, image, Word, PowerPoint). */
-const ACCEPTED = /^(application\/pdf|image\/|application\/(msword|vnd\.openxmlformats-officedocument\.|vnd\.ms-powerpoint))/;
-
-function validateFile(file: File): string | undefined {
-  if (file.size > MAX_UPLOAD_BYTES) return `${file.name} is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`;
-  if (!ACCEPTED.test(file.type)) return "Upload a PDF, image, Word, or PowerPoint file.";
-  return undefined;
-}
 
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

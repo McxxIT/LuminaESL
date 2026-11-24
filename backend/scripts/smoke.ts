@@ -537,6 +537,12 @@ async function onBehalfScenario(): Promise<void> {
 }
 
 async function rebookScenario(): Promise<void> {
+  // studentR needs an enrollment with teacherA so a rebook can take the next plan.
+  // Local variable on purpose: the module-level enrollmentId belongs to studentA.
+  const enrollmentRes = await call(tok("managerA"), "POST", "/enrollments", { studentId: uid("studentR"), teacherId: uid("teacherA"), courseId });
+  expectStatus(enrollmentRes, 201, "create rebook enrollment");
+  const rebookEnrollmentId = str(enrollmentRes.body, "id");
+
   await addCredits("studentR", 2.5);
   const original = await scheduleLesson(tok("teacherA"), uid("teacherA"), uid("studentR"), nextSlot(6));
   check(near(await balance("studentR"), 1.5), "rebook fixture balance should be 1.5");
@@ -547,11 +553,64 @@ async function rebookScenario(): Promise<void> {
   expectStatus(res, 201, "rebook with 1.5 credits");
   check(near(await balance("studentR"), 0.5), "rebook must debit exactly 1 (1.5 -> 0.5)");
   await expectOneActivity("lesson", str(res.body, "id"), "lesson.booked");
+
+  // Enrichment parity with POST /bookings: fresh room code, next plan, plan author, enrollment.
+  const originalLesson = await getLesson(original);
+  const rebooked = await getLesson(str(res.body, "id"));
+  expectRebookEnrichment(originalLesson, rebooked, rebookEnrollmentId, "scheduled original");
+  check(rebooked.lessonPlanId !== originalLesson.lessonPlanId, "rebooked lesson must not reuse the original's plan");
+
   const slot2 = nextSlot(6);
   await openSlot(tok("teacherA"), uid("teacherA"), slot2);
   const refused = await call(tok("studentR"), "POST", `/lessons/${original}/rebook`, slot2);
   expectStatus(refused, 400, "rebook with 0.5 credits");
   check(near(await balance("studentR"), 0.5), "refused rebook must not debit");
+
+  // Any non-live original can be rebooked (completed, cancelled), each charged exactly once.
+  await addCredits("studentR", 3);
+  check(near(await balance("studentR"), 3.5), "rebook top-up balance should be 3.5");
+  for (const status of ["completed", "cancelled"] as const) {
+    const source = await insertLibraryLesson("teacherA", "studentR", status);
+    const target = nextSlot(6);
+    await openSlot(tok("teacherA"), uid("teacherA"), target);
+    const before = await balance("studentR");
+    const rebook = await call(tok("studentR"), "POST", `/lessons/${source}/rebook`, target);
+    expectStatus(rebook, 201, `rebook a ${status} original`);
+    check(near(await balance("studentR"), before - 1), `rebook of a ${status} original must debit exactly 1`);
+    const newId = str(rebook.body, "id");
+    await expectOneActivity("lesson", newId, "lesson.booked");
+    expectRebookEnrichment(await getLesson(source), await getLesson(newId), rebookEnrollmentId, `${status} original`);
+  }
+  await expectDistinctActivePlans("studentR");
+
+  // A live original is refused: no debit, slot still open.
+  const live = await insertLibraryLesson("teacherA", "studentR", "live");
+  const liveTarget = nextSlot(6);
+  const liveSlotId = await openSlot(tok("teacherA"), uid("teacherA"), liveTarget);
+  const beforeLive = await balance("studentR");
+  expectStatus(await call(tok("studentR"), "POST", `/lessons/${live}/rebook`, liveTarget), 400, "rebook a live original");
+  check(near(await balance("studentR"), beforeLive), "refused live rebook must not debit");
+  check(await slotExists(uid("teacherA"), liveSlotId, liveTarget.date), "refused live rebook consumed the slot");
+}
+
+function expectRebookEnrichment(original: Record<string, unknown>, rebooked: Record<string, unknown>, enrollment: string, label: string): void {
+  const roomCode = String(rebooked.roomCode);
+  check(/^ESL-\d{4}$/.test(roomCode), `${label}: rebook room code "${roomCode}" must match ESL-####`);
+  check(rebooked.roomCode !== original.roomCode, `${label}: rebook must get a fresh room code, got ${roomCode} again`);
+  check(typeof rebooked.lessonPlanId === "string" && rebooked.lessonPlanId.length > 0, `${label}: rebook must take the next lesson plan`);
+  check(typeof rebooked.planAttachedBy === "string" && rebooked.planAttachedBy.length > 0, `${label}: rebook must set planAttachedBy`);
+  check(rebooked.enrollmentId === enrollment, `${label}: rebook enrollmentId ${String(rebooked.enrollmentId)} != ${enrollment}`);
+}
+
+async function expectDistinctActivePlans(studentLabel: string): Promise<void> {
+  const res = await call(tok("admin"), "GET", `/lessons?studentId=${uid(studentLabel)}&limit=100`);
+  expectStatus(res, 200, `list ${studentLabel} lessons`);
+  const plans = arr(obj(res.body, "lessons").items, "lessons.items")
+    .map((item) => obj(item, "lesson"))
+    .filter((lesson) => lesson.status === "scheduled" || lesson.status === "live")
+    .map((lesson) => lesson.lessonPlanId)
+    .filter((plan): plan is string => typeof plan === "string");
+  check(new Set(plans).size === plans.length, `active ${studentLabel} lessons share a lesson plan: ${plans.join(", ")}`);
 }
 
 let completedLessonId = "";

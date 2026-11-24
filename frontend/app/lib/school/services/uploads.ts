@@ -1,17 +1,9 @@
 import { isApiDataMode } from "../../auth/mode";
 import { uploadFile as uploadFileApi } from "../api/uploads";
-import { largeFileKey, MAX_UPLOAD_BYTES, saveLargeFile } from "../files";
+import { largeFileKey, saveLargeFile, validateUploadFile as validate } from "../files";
 import { createId } from "../repositories";
 import { attachFileToPlan } from "./curriculum";
 import { fail, runAsync, ServiceError, type ServiceResult } from "./result";
-
-const ACCEPTED = /^(application\/pdf|image\/|application\/(msword|vnd\.openxmlformats-officedocument\.|vnd\.ms-powerpoint))/;
-
-function validate(file: File): string | undefined {
-  if (file.size > MAX_UPLOAD_BYTES) return `${file.name} is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`;
-  if (!ACCEPTED.test(file.type)) return "Upload a PDF, image, Word, or PowerPoint file.";
-  return undefined;
-}
 
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

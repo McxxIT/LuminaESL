@@ -540,7 +540,9 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
       if (!original) throw notFound("Lesson not found");
       if (request.user.role === "student" && original.studentId !== request.user.sub) throw forbidden();
       if (request.user.role === "manager" && !(await managerOwnsStudent(app.db, request.user.sub, original.studentId))) throw forbidden();
-      if (original.status !== "scheduled") throw badRequest("Only scheduled lessons can be rebooked");
+      // Any non-live original (scheduled, completed, cancelled) can be rebooked; a lesson in
+      // progress cannot.
+      if (original.status === "live") throw badRequest("A lesson in progress cannot be rebooked");
 
       let result: typeof lessons.$inferSelect;
       try {
@@ -550,11 +552,20 @@ export const lessonRoutes: FastifyPluginAsync = async (app) => {
           if (!slot) throw badRequest("That time is not open for booking");
           const balance = await getCreditBalance(tx, original.studentId);
           if (balance < 1) throw badRequest("The student does not have enough credits");
+          // Enrich like a booking: the pair's active enrollment, the next lesson plan and a fresh
+          // room code. With no active enrollment (or the course plans used up) the enrollment and
+          // plan fields stay null exactly like POST /lessons; the room code is always fresh.
+          const defaults = await resolveLessonDefaults(tx, {
+            teacherId: original.teacherId,
+            studentId: original.studentId,
+            actorId: request.user.sub,
+          });
           const [created] = await tx.insert(lessons).values({
-            teacherId: original.teacherId, studentId: original.studentId, enrollmentId: original.enrollmentId,
+            teacherId: original.teacherId, studentId: original.studentId, enrollmentId: defaults.enrollmentId,
             date: body.date, time: body.time, endTime: addMinutes(body.time, LESSON_MINUTES),
-            title: original.title, focus: original.focus, roomCode: original.roomCode,
-            lessonPlanId: original.lessonPlanId, createdBy: request.user.sub,
+            title: original.title, focus: original.focus, roomCode: defaults.roomCode,
+            lessonPlanId: defaults.lessonPlanId, planAttachedBy: defaults.planAttachedBy,
+            planAttachedAt: defaults.planAttachedAt, createdBy: request.user.sub,
           }).returning();
           if (!created) throw new Error("Failed to rebook lesson");
           await tx.delete(slotOpenings).where(eq(slotOpenings.id, slot.id));

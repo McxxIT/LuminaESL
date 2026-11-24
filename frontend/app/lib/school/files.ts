@@ -53,6 +53,15 @@ const DB_NAME = "lumina-files";
 const STORE = "files";
 /** Largest lesson-plan upload accepted. */
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+/** MIME types accepted for lesson-plan and library uploads: PDF, image, Word, PowerPoint. */
+export const ACCEPTED = /^(application\/pdf|image\/|application\/(msword|vnd\.openxmlformats-officedocument\.|vnd\.ms-powerpoint))/;
+
+/** Shared upload rule (5 MB; PDF, image, Word, PowerPoint). Returns the message to show, or undefined. */
+export function validateUploadFile(file: File): string | undefined {
+  if (file.size > MAX_UPLOAD_BYTES) return `${file.name} is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`;
+  if (!ACCEPTED.test(file.type)) return "Upload a PDF, image, Word, or PowerPoint file.";
+  return undefined;
+}
 
 export function largeFileKey(attachmentId: string) {
   return `${IDB_PREFIX}${attachmentId}`;

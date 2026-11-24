@@ -146,7 +146,7 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
           <span className="manager-person" role="cell"><PersonAvatar name={row.student.name} color={row.student.avatarColor} /><span><strong>{row.student.name}</strong><small>{row.profile ? `${row.profile.level} → ${row.profile.targetLevel}` : row.student.email}</small></span></span>
           <span role="cell" className="manager-cell" data-label="Teacher">{row.teacherName}</span>
           <span role="cell" className="manager-cell" data-label="Course">{row.courseTitle}{row.progress && row.progress.total > 0 && <small className="manager-progress-inline">{row.progress.completed}/{row.progress.total} lessons</small>}</span>
-          <span role="cell" className={`manager-cell ${row.credits < 2 ? "manager-low" : ""}`} data-label="Credits">{row.credits.toFixed(1)} hrs</span>
+          <span role="cell" className={`manager-cell ${row.credits < 2 ? "manager-low" : ""}`} data-label="Credits">{row.credits.toFixed(1)} credits</span>
           <span role="cell" className="manager-cell" data-label="Status"><UserStatusBadge status={row.student.status} /></span>
         </button>)}
         {filtered.length === 0 && <div className="student-empty-inline"><Icon name="user" /><p>{rows.length ? "No students match your search." : "No students yet. Add your first student."}</p></div>}
@@ -167,7 +167,7 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       <div className="manager-detail-stats">
         <div><span className="eyebrow">LEVEL</span><strong>{selected.profile?.level ?? "—"}</strong></div>
         <div><span className="eyebrow">TEACHER</span><strong>{selected.teacherName}</strong></div>
-        <div><span className="eyebrow">CREDITS</span><strong className={selected.credits < 2 ? "manager-low" : ""}>{selected.credits.toFixed(2)} hrs</strong></div>
+        <div><span className="eyebrow">CREDITS</span><strong className={selected.credits < 2 ? "manager-low" : ""}>{selected.credits.toFixed(2)} credits</strong></div>
         <div><span className="eyebrow">ATTENDANCE</span><strong>{selected.attendance === null ? "—" : `${selected.attendance}%`}</strong></div>
       </div>
       <div className="lesson-detail-section">
