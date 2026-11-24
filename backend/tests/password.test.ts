@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   PASSWORD_MIN_LENGTH,
+  UNUSABLE_PASSWORD_PREFIX,
   changePasswordSchema,
   hashPassword,
+  isUnusablePasswordHash,
   passwordSchema,
   resetPasswordSchema,
+  unusablePasswordHash,
   verifyPassword,
 } from "../src/lib/password";
 import { addMinutes } from "../src/lib/time";
@@ -63,5 +66,24 @@ describe("password policy", () => {
       resetPasswordSchema.safeParse({ newPassword: "Password123!", role: "admin" }).success,
     ).toBe(false);
     expect(resetPasswordSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("unusable password hash", () => {
+  it("should recognize an unusable password hash and never verify it", async () => {
+    const first = unusablePasswordHash();
+    const second = unusablePasswordHash();
+    expect(first.startsWith(UNUSABLE_PASSWORD_PREFIX)).toBe(true);
+    expect(first).not.toBe(second);
+    expect(isUnusablePasswordHash(first)).toBe(true);
+    expect(await verifyPassword("", first)).toBe(false);
+    expect(await verifyPassword(first, first)).toBe(false);
+    expect(await verifyPassword(first.slice(UNUSABLE_PASSWORD_PREFIX.length), first)).toBe(false);
+  });
+
+  it("does not treat a real scrypt hash as unusable", async () => {
+    const real = await hashPassword("a real password");
+    expect(isUnusablePasswordHash(real)).toBe(false);
+    expect(isUnusablePasswordHash("")).toBe(false);
   });
 });

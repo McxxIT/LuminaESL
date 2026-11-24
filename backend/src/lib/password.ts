@@ -84,3 +84,20 @@ export async function verifyPassword(
   if (actual.length !== expectedBuffer.length) return false;
   return timingSafeEqual(actual, expectedBuffer);
 }
+
+/**
+ * Prefix of a password hash that can never verify. `verifyPassword` only accepts
+ * six `$`-separated parts starting with `scrypt`, so this value always fails, and
+ * the fixed prefix marks an account that has never set a password (invited).
+ */
+export const UNUSABLE_PASSWORD_PREFIX = "!unset$";
+
+/** A fresh, never-verifiable password hash for an invited account. */
+export function unusablePasswordHash(): string {
+  return `${UNUSABLE_PASSWORD_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+/** True when the account has never set a password (see `unusablePasswordHash`). */
+export function isUnusablePasswordHash(hash: string): boolean {
+  return hash.startsWith(UNUSABLE_PASSWORD_PREFIX);
+}

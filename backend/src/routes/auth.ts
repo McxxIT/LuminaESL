@@ -5,7 +5,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   refreshTokens,
@@ -16,6 +16,11 @@ import {
 } from "../db/schema";
 import { logActivity } from "../lib/activity";
 import { AppError, conflict, unauthorized } from "../lib/errors";
+import {
+  consumeInvite,
+  findInviteUserId,
+  lockUserForInvite,
+} from "../lib/invites";
 import {
   changePasswordSchema,
   hashPassword,
@@ -29,6 +34,7 @@ import {
   refreshCookieOptions,
   revokeUserRefreshTokens,
 } from "../lib/refresh-tokens";
+import { hashToken } from "../lib/tokens";
 
 /** The global refresh-token sweep (a table scan) runs at most this often. */
 const GLOBAL_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
@@ -51,6 +57,14 @@ const registerSchema = z.object({
     .optional(),
 });
 
+/** Body for `POST /auth/set-password`; the raw token comes from the link fragment. */
+const setPasswordSchema = z
+  .object({
+    token: z.string().min(20).max(128),
+    password: passwordSchema,
+  })
+  .strict();
+
 const loginSchema = z.object({
   email: z
     .string()
@@ -70,10 +84,6 @@ function publicUser(user: User) {
     avatarColor: user.avatarColor,
     createdAt: user.createdAt,
   };
-}
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 /** Short, fixed-length digest of a user-controlled value for limiter keys. */
@@ -119,6 +129,19 @@ export function changePasswordRateLimitKey(request: FastifyRequest): string {
     if (typeof raw === "string") sub = raw.slice(0, MAX_KEY_PART);
   }
   return `auth-change-password:${requestIp(request)}:${keyDigest(sub)}`;
+}
+
+export function setPasswordRateLimitKey(request: FastifyRequest): string {
+  return `auth-set-password:${requestIp(request)}`;
+}
+
+/** One answer for unknown, used, expired and archived-user tokens (no oracle). */
+function invalidInviteToken(): AppError {
+  return new AppError(
+    400,
+    "INVALID_OR_EXPIRED_TOKEN",
+    "This invitation link is invalid or has expired",
+  );
 }
 
 async function issueSession(
@@ -258,6 +281,49 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
       await pruneAfterAuth(app, request, user.id, { globalSweep: true });
       return issueSession(app, reply, user);
+    },
+  );
+
+  app.post(
+    "/set-password",
+    {
+      preHandler: enforceIpCeiling,
+      config: { rateLimit: authRateLimit(setPasswordRateLimitKey) },
+    },
+    async (request, reply) => {
+      // Parse first: a policy-invalid password never consumes the token.
+      const body = setPasswordSchema.parse(request.body);
+      const passwordHash = await hashPassword(body.password);
+      const now = new Date();
+
+      await app.db.transaction(async (tx) => {
+        // Lock order matches resend/pause/archive/delete: user row, then token.
+        const userId = await findInviteUserId(tx, body.token);
+        if (!userId) throw invalidInviteToken();
+        const locked = await lockUserForInvite(tx, userId);
+        if (!locked) throw invalidInviteToken();
+        if (!(await consumeInvite(tx, body.token, userId, now))) {
+          throw invalidInviteToken();
+        }
+        const [activated] = await tx
+          .update(users)
+          .set({ passwordHash, status: "active", updatedAt: now })
+          .where(and(eq(users.id, userId), eq(users.status, "invited")))
+          .returning({ id: users.id, name: users.name });
+        // Paused/archived since the invite: roll back, token stays unconsumed.
+        if (!activated) throw invalidInviteToken();
+        await revokeUserRefreshTokens(tx, activated.id);
+        await logActivity(tx, {
+          actorId: activated.id,
+          action: "user.invite_accepted",
+          targetType: "user",
+          targetId: activated.id,
+          summary: activated.name,
+        });
+      });
+
+      // No session: the person signs in normally next.
+      return reply.status(204).send();
     },
   );
 

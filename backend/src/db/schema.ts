@@ -26,6 +26,7 @@ export const userStatus = pgEnum("user_status", [
   "active",
   "paused",
   "archived",
+  "invited",
 ]);
 export const courseStatus = pgEnum("course_status", [
   "draft",
@@ -115,6 +116,34 @@ export const refreshTokens = pgTable(
       .notNull(),
   },
   (table) => [index("refresh_tokens_user_idx").on(table.userId)],
+);
+
+/**
+ * Single-use account tokens. Only the sha256 hex of the raw token is stored.
+ * `invite` is issued today; `reset` is reserved for a future self-service flow.
+ */
+export const authTokens = pgTable(
+  "auth_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    purpose: text("purpose").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("auth_tokens_user_idx").on(table.userId),
+    check(
+      "auth_tokens_purpose_check",
+      sql`${table.purpose} in ('invite', 'reset')`,
+    ),
+  ],
 );
 
 export const teacherProfiles = pgTable("teacher_profiles", {
@@ -597,6 +626,7 @@ export const settings = pgTable("settings", {
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type AuthToken = typeof authTokens.$inferSelect;
 export type Course = typeof courses.$inferSelect;
 export type Lesson = typeof lessons.$inferSelect;
 export type Assignment = typeof assignments.$inferSelect;

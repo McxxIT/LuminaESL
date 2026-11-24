@@ -57,6 +57,12 @@ describe("env defaults", () => {
         ...base,
         NODE_ENV: "production",
         CORS_ORIGIN: "https://app.lumina.school, https://admin.lumina.school",
+        // Production also requires a complete mail configuration (env-mail.test.ts).
+        MAIL_MAILER: "smtp",
+        MAIL_HOST: "smtp.lumina.school",
+        MAIL_ENCRYPTION: "ssl",
+        MAIL_FROM_ADDRESS: "school@lumina.school",
+        APP_URL: "https://app.lumina.school",
       }).success,
     ).toBe(true);
     expect(envSchema.safeParse({ ...base, NODE_ENV: "development", CORS_ORIGIN: "*" }).success).toBe(true);

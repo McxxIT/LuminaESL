@@ -5,6 +5,8 @@ import Icon from "../Icon";
 import { ConfirmStatusModal, ManagerFormModal, ResetPasswordModal } from "../manager/PeopleForms";
 import { isDemoMode } from "../../lib/auth/mode";
 import { PersonAvatar, ScorePill, UserStatusBadge } from "../manager/parts";
+import { InviteResultModal, ResendInviteButton, canResendInvite, type InviteResult } from "../manager/InviteForms";
+import type { InviteOutcome } from "../../lib/api/types";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   lessonsForUser,
@@ -45,6 +47,12 @@ export default function AdminManagers({ user, onNavigate, onNotice }: { user: Sc
   const select = useCallback((data: SchoolData) => selectManagers(data), []);
   const { rows, unassigned } = useSchool(select);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [inviteResult, setInviteResult] = useState<InviteResult>(null);
+
+  function showResend(person: SchoolUser, result: { ok: true; value: InviteOutcome } | { ok: false; error: string }) {
+    if (result.ok) setInviteResult({ person, invite: result.value });
+    else onNotice(result.error);
+  }
 
   return <div className="role-workspace">
     <section className="page-heading student-page-heading">
@@ -83,17 +91,25 @@ export default function AdminManagers({ user, onNavigate, onNotice }: { user: Sc
           {row.teachers.length === 0 && <p>No teachers assigned yet.</p>}
         </div>
         <footer className="manager-card-actions">
-          <button type="button" className={row.manager.status === "active" ? "danger-outline-button compact-button" : "secondary-button compact-button"} onClick={() => setDialog({ kind: "status", manager: row.manager })}>{row.manager.status === "active" ? "Pause" : "Reactivate"}</button>
-          {!isDemoMode() && <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "reset-password", manager: row.manager })}><Icon name="lock" size={14} /> Reset password</button>}
+          {row.manager.status === "invited" ? <>
+            {canResendInvite(user, row.manager) && <ResendInviteButton actorId={user.id} person={row.manager} onResult={showResend} compact />}
+          </> : <>
+            <button type="button" className={row.manager.status === "active" ? "danger-outline-button compact-button" : "secondary-button compact-button"} onClick={() => setDialog({ kind: "status", manager: row.manager })}>{row.manager.status === "active" ? "Pause" : "Reactivate"}</button>
+            {!isDemoMode() && <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "reset-password", manager: row.manager })}><Icon name="lock" size={14} /> Reset password</button>}
+          </>}
           <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "edit", manager: row.manager })}><Icon name="edit" size={14} /> Edit</button>
         </footer>
       </article>)}
       {rows.length === 0 && <section className="panel student-panel"><div className="student-empty-inline"><Icon name="shield" /><p>No managers yet. Add one to start building teams.</p></div></section>}
     </section>
 
+    {inviteResult && <InviteResultModal actorId={user.id} person={inviteResult.person} invite={inviteResult.invite} canResend onClose={() => setInviteResult(null)} />}
     {dialog?.kind === "create" && <ManagerFormModal onClose={() => setDialog(null)} onSubmit={async (values) => {
       const result = await createManager(user.id, values);
-      if (result.ok) onNotice(`${result.value.name} was added. Assign teachers to them from Teachers.`);
+      if (result.ok) {
+        if (result.value.invite) setInviteResult({ person: result.value, invite: result.value.invite });
+        else onNotice(`${result.value.name} was added. Assign teachers to them from Teachers.`);
+      }
       return result;
     }} />}
     {dialog?.kind === "edit" && <ManagerFormModal initial={{ name: dialog.manager.name, email: dialog.manager.email }} onClose={() => setDialog(null)} onSubmit={async (values) => {

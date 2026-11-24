@@ -106,7 +106,11 @@ Bearer <token>` header and an httpOnly refresh cookie scoped to
 
 The API seed and the browser demo use the same accounts. After `npm run db:seed`,
 every API account uses the password `Password123!`; the browser demo accepts any
-non-empty password.
+non-empty password. This password applies to the seeded dev accounts only, and
+the seed refuses to run with `NODE_ENV=production`. Accounts created in the app
+(by an admin, a manager, or the one-time import) start as `invited` and get a
+single-use set-password link by email (72 hours); in development the backend
+logs mail instead of sending it, and an admin sees a copyable link.
 
 | Role | Name | Email |
 | --- | --- | --- |

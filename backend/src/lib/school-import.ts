@@ -21,6 +21,7 @@ import {
   users,
 } from "../db/schema";
 import type { DbOrTx } from "./db-handle";
+import { unusablePasswordHash } from "./password";
 
 /**
  * One-time import of a browser school store (`SchoolData` v3) into Postgres.
@@ -306,7 +307,8 @@ export type ImportWarning = {
     | "missing-parent"
     | "unknown-user"
     | "missing-bytes"
-    | "dropped-reference";
+    | "dropped-reference"
+    | "status-reset";
   collection: string;
   localId: string;
   message: string;
@@ -389,8 +391,6 @@ const AVATAR_COLORS: Record<string, string> = {
   indigo: "#6366f1",
 };
 
-export const DEFAULT_IMPORT_PASSWORD = "Password123!";
-
 export function avatarColor(value: string | undefined): string {
   if (!value) return "#6366f1";
   if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
@@ -422,7 +422,7 @@ function emptyCounts(): CollectionCounts {
 export function buildImportPlan(
   payload: ImportPayload,
   existing: ExistingSchool,
-  options: { actorId: string; defaultPasswordHash: string; dryRun: boolean },
+  options: { actorId: string; dryRun: boolean },
 ): ImportPlan {
   const rows: PlanRows = {
     users: [],
@@ -510,6 +510,9 @@ export function buildImportPlan(
   const source = payload.source.collections;
 
   // 1. Users: adopt by email (the server seed already holds the demo identities).
+  // New accounts are created `invited` with a fresh unusable hash and no email;
+  // an admin sends each invitation later from the admin screens.
+  let statusResets = 0;
   for (const user of Object.values(source.users)) {
     if (isExcluded("users", user.id)) continue;
     const email = user.email.trim().toLowerCase();
@@ -526,13 +529,22 @@ export function buildImportPlan(
       role: user.role,
       name: user.name,
       email,
-      passwordHash: options.defaultPasswordHash,
-      status: user.status,
+      passwordHash: unusablePasswordHash(),
+      status: "invited",
       avatarColor: avatarColor(user.avatarColor),
       createdAt,
       updatedAt: createdAt,
     });
+    if (user.status !== "active") statusResets += 1;
     created("users", user.id, serverId);
+  }
+  if (statusResets > 0) {
+    warn(
+      "status-reset",
+      "users",
+      "*",
+      `${statusResets} imported account(s) were not active in the browser; every new account is created invited.`,
+    );
   }
 
   const mapUser = (localId: string | null | undefined): string | null =>

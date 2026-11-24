@@ -36,7 +36,8 @@ export type SchoolAction =
   | "homework.review"
   | "homework.submit"
   | "performance.view"
-  | "settings.edit";
+  | "settings.edit"
+  | "account.invite";
 
 /** What the action is about. Pass whichever ids apply; `lessonId` resolves teacher and student. */
 export type PermissionTarget = {
@@ -81,6 +82,16 @@ export function can(data: SchoolData, actor: SchoolUser | undefined, action: Sch
     case "teacher.assignManager":
     case "settings.edit":
       return isAdmin;
+
+    // Resend an invitation: admin, or a manager for their own teacher / roster
+    // student. Intentionally no looser than the backend, which also counts a
+    // student enrolled with a team teacher (`managerOwnsStudent`).
+    case "account.invite":
+      if (isAdmin) return true;
+      if (!isManager) return false;
+      if (teacherId) return managerIdForTeacher(data, teacherId) === actor.id;
+      if (studentId) return managerIdForStudent(data, studentId) === actor.id;
+      return false;
 
     case "teacher.manage":
     case "student.manage":

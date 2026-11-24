@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { studentProfiles, users } from "../db/schema";
+import { studentProfiles, users, type User } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
@@ -15,7 +15,7 @@ const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
   managerId: z.string().uuid().optional(),
   level: z.string().trim().max(60).optional(),
-  status: z.enum(["active", "paused", "archived"]).optional(),
+  status: z.enum(["active", "paused", "archived", "invited"]).optional(),
 });
 
 const updateStudentSchema = z.object({
@@ -45,7 +45,7 @@ function toStudent(
     guardianRelationship: string | null;
     name: string;
     email: string;
-    status: "active" | "paused" | "archived";
+    status: User["status"];
     avatarColor: string;
   },
 ) {

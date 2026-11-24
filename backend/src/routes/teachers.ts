@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { teacherProfiles, users } from "../db/schema";
+import { teacherProfiles, users, type User } from "../db/schema";
 import { badRequest, forbidden, notFound } from "../lib/errors";
 import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
@@ -10,7 +10,7 @@ import { assertCanViewUser, managerOwnsTeacher } from "../lib/scope";
 const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
   managerId: z.string().uuid().optional(),
-  status: z.enum(["active", "paused", "archived"]).optional(),
+  status: z.enum(["active", "paused", "archived", "invited"]).optional(),
 });
 
 const updateTeacherSchema = z.object({
@@ -52,7 +52,7 @@ function toTeacher(row: {
   weeklyGoalHours: number;
   name: string;
   email: string;
-  status: "active" | "paused" | "archived";
+  status: User["status"];
   avatarColor: string;
 }) {
   return {

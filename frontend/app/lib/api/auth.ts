@@ -14,6 +14,18 @@ export async function signInWithPassword(
   return session;
 }
 
+/**
+ * Accept an invitation: set the first password with the single-use token from
+ * the link. Public (no session); answers 204 and does not sign the person in.
+ */
+export async function setPasswordWithToken(token: string, password: string): Promise<void> {
+  await request<void>("/auth/set-password", {
+    method: "POST",
+    body: { token, password },
+    auth: false,
+  });
+}
+
 export async function signOutOfApi(): Promise<void> {
   try {
     await request<{ success: boolean }>("/auth/logout", { method: "POST" });

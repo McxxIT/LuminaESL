@@ -2,7 +2,7 @@ import { ApiError, request } from "../../api/client";
 import { getSessionSnapshot } from "../../auth/session";
 import { refreshSchoolFromApi } from "./bootstrap";
 import type { Guardian, SchoolRole, SchoolSettings } from "../types";
-import type { ApiUser } from "../../api/types";
+import type { ApiUser, InviteOutcome } from "../../api/types";
 
 export type SchoolSettingsCommand = Partial<
   Pick<
@@ -14,8 +14,6 @@ export type SchoolSettingsCommand = Partial<
     | "refundTeacherCancellations"
   >
 >;
-
-const DEFAULT_ACCOUNT_PASSWORD = "Password123!";
 
 export type UserCommandInput = {
   name: string;
@@ -49,11 +47,30 @@ function splitList(value: string[] | string | undefined, fallback = "English"): 
   return items.map((item) => item.trim()).filter(Boolean);
 }
 
-export async function createUser(input: UserCommandInput): Promise<ApiUser> {
+/** A created account (status `invited`) plus the outcome of its invitation email. */
+export type CreatedUser = ApiUser & { invite?: InviteOutcome };
+
+/**
+ * Create an account without a password: the server creates it `invited` and
+ * emails a single-use set-password link. Managers create on their own team.
+ */
+export async function createUser(input: UserCommandInput): Promise<CreatedUser> {
   return request("/users", {
     method: "POST",
-    body: { ...input, managerId: input.managerId ?? undefined, password: DEFAULT_ACCOUNT_PASSWORD },
+    body: { ...input, managerId: input.managerId ?? undefined },
   });
+}
+
+/** Send a fresh invitation (the previous link stops working). */
+export async function resendInvite(userId: string): Promise<InviteOutcome> {
+  const result = await request<{ invite: InviteOutcome }>(`/users/${encodeURIComponent(userId)}/invite`, {
+    method: "POST",
+  });
+  return result.invite;
+}
+
+function isAdminSession(): boolean {
+  return getSessionSnapshot().user?.role === "admin";
 }
 
 export async function updateUser(userId: string, input: { name: string; email?: string }): Promise<void> {
@@ -78,7 +95,7 @@ export async function setUserStatus(userId: string, status: "active" | "paused")
   });
 }
 
-export async function createTeacher(input: TeacherCommandInput): Promise<string> {
+export async function createTeacher(input: TeacherCommandInput): Promise<{ userId: string; invite?: InviteOutcome }> {
   const user = await createUser({ name: input.name, email: input.email, role: "teacher", managerId: input.managerId });
   const userId = user.id;
   await request(`/teachers/${encodeURIComponent(userId)}`, {
@@ -90,7 +107,7 @@ export async function createTeacher(input: TeacherCommandInput): Promise<string>
       bio: input.bio?.trim() ?? "",
     },
   });
-  return userId;
+  return { userId, invite: user.invite };
 }
 
 export async function updateTeacher(userId: string, input: TeacherCommandInput): Promise<void> {
@@ -113,11 +130,11 @@ export async function assignTeacherToManager(teacherId: string, managerId: strin
   });
 }
 
-export async function createStudent(input: StudentCommandInput): Promise<string> {
+export async function createStudent(input: StudentCommandInput): Promise<{ userId: string; invite?: InviteOutcome }> {
   const user = await createUser({ name: input.name, email: input.email, role: "student", managerId: input.managerId });
   const userId = user.id;
   await updateStudentProfile(userId, input);
-  return userId;
+  return { userId, invite: user.invite };
 }
 
 export async function updateStudent(userId: string, input: StudentCommandInput): Promise<void> {
@@ -133,7 +150,9 @@ async function updateStudentProfile(userId: string, input: StudentCommandInput):
       level: input.level,
       targetLevel: input.targetLevel,
       goal: input.goal.trim(),
-      managerId: input.managerId,
+      // Only an admin may move a student between managers; the backend rejects
+      // a manager sending managerId (the team was set atomically on create).
+      ...(isAdminSession() ? { managerId: input.managerId } : {}),
       guardianName: guardian?.name?.trim() || null,
       guardianEmail: guardian?.email?.trim().toLowerCase() || null,
       guardianPhone: guardian?.phone?.trim() || null,

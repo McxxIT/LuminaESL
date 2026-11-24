@@ -55,6 +55,7 @@ export default function LoginScreen({ onLogin }: { onLogin: (account: Account) =
       {error && <p className="auth-error" role="alert">{error}</p>}
       <button type="submit" className="primary-button auth-submit" disabled={submitting}>{submitting ? "Signing in" : "Sign in"} <Icon name="arrow" size={16} /></button>
     </form>
+    {!demoMode && <p className="auth-note">Invited? Open the link in your invitation email to set your password.</p>}
     <p className="auth-note">Demo accounts: admin@lumina.school · manager@lumina.school · manager2@lumina.school · teacher@lumina.school · student@lumina.school</p>
   </section></main>;
 }

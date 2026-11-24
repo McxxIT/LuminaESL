@@ -6,6 +6,9 @@ import Modal from "../shared/Modal";
 import { teacherLevelOptions } from "../../lib/data";
 import type { Course, Guardian, SchoolUser } from "../../lib/school";
 import type { ServiceResult } from "../../lib/school/services";
+import { isApiDataMode } from "../../lib/auth/mode";
+
+const INVITE_NOTE = "We'll email them a link to set their password.";
 
 /**
  * Create/edit forms for people management. Each form calls `onSubmit`, shows a service error
@@ -54,7 +57,7 @@ export function ManagerFormModal({ initial, onSubmit, onClose }: {
 }) {
   const [form, setForm] = useState(initial ?? { name: "", email: "" });
   return <FormModal id="manager-form" eyebrow={initial ? "EDIT MANAGER" : "NEW MANAGER"} title={initial ? `Edit ${initial.name}` : "Add a manager"}
-    description={initial ? undefined : "They can sign in right away with this email and look after the teachers you assign them."}
+    description={initial ? undefined : (isApiDataMode() ? `${INVITE_NOTE} They will look after the teachers you assign them.` : "They can sign in right away with this email and look after the teachers you assign them.")}
     submitLabel={initial ? "Save changes" : "Add manager"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Dana Cruz" autoFocus /></label>
     <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" /></label>
@@ -74,7 +77,7 @@ export function TeacherFormModal({ initial, managers, onSubmit, onClose }: {
 }) {
   const [form, setForm] = useState<TeacherFormValues>(initial ?? { name: "", email: "", headline: "", specializations: "", bio: "", managerId: managers?.[0]?.id ?? "" });
   return <FormModal id="teacher-form" eyebrow={initial ? "EDIT TEACHER" : "NEW TEACHER"} title={initial ? `Edit ${initial.name}` : "Add a teacher"}
-    description={initial ? undefined : "The teacher can sign in right away with this email and start opening booking slots."}
+    description={initial ? undefined : (isApiDataMode() ? `${INVITE_NOTE} Then they can start opening booking slots.` : "The teacher can sign in right away with this email and start opening booking slots.")}
     submitLabel={initial ? "Save changes" : "Add teacher"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Ana Lopez" autoFocus /></label>
     <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" /></label>
@@ -121,7 +124,7 @@ export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose
     teacherId: teachers?.find((teacher) => teacher.status === "active")?.id ?? "", courseId: courses?.[0]?.id ?? "", startingCredits: "5",
   });
   return <FormModal id="student-form" eyebrow={creating ? "NEW STUDENT" : "EDIT STUDENT"} title={creating ? "Add a student" : `Edit ${initial.name}`}
-    description={creating ? "The student can sign in right away and book with the teacher you choose." : undefined}
+    description={creating ? (isApiDataMode() ? `${INVITE_NOTE} Then they can book with the teacher you choose.` : "The student can sign in right away and book with the teacher you choose.") : undefined}
     submitLabel={creating ? "Add student" : "Save changes"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Sam Rivera" autoFocus /></label>
     <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" /></label>

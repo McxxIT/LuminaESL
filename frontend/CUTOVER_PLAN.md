@@ -37,7 +37,7 @@ one login and one dataset to test against.
 | Topic | Decision |
 | --- | --- |
 | **Canonical demo identities** | Keep the browser seed (`.school`) and make the API seed match. Confirmed and implemented in Step A. |
-| Password | API seeded accounts use `Password123!`. Demo browser sign-in keeps "any non-empty password". |
+| Password | API seeded dev accounts only use `Password123!` (the seed refuses production). Accounts created in the app are `invited` and set their own password from an emailed link. Demo browser sign-in keeps "any non-empty password". |
 | API seed scope | Identities and profile links only: admin, 2 managers, 1 teacher, 1 student. The full roster, courses, lessons, and history arrive with Step B / item 13. |
 | Data source flag | `NEXT_PUBLIC_DATA_SOURCE=local` (default) or `api`, separate from `NEXT_PUBLIC_DEMO_MODE`, so auth and data can be verified independently. |
 | Local database reset | Guarded `npm run db:reset` (refuses `NODE_ENV=production`) truncates, migrates, and seeds. Never run it automatically. Added in Step A. |

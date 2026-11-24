@@ -17,15 +17,18 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { and, eq, inArray, isNull, like, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app";
 import { loadEnv } from "../src/config/env";
 import * as schema from "../src/db/schema";
-import { attachments, creditEntries, lessonPlans, lessons, libraryItems, refreshTokens, settings, users } from "../src/db/schema";
-import { hashPassword } from "../src/lib/password";
+import { attachments, authTokens, creditEntries, lessonPlans, lessons, libraryItems, refreshTokens, settings, users } from "../src/db/schema";
+import { createArrayMailer } from "../src/lib/mailer";
+import { hashPassword, unusablePasswordHash } from "../src/lib/password";
+import { hashToken } from "../src/lib/tokens";
+import { insertAccount } from "../src/routes/users";
 import { addMinutes, LESSON_MINUTES } from "../src/lib/time";
 
 // ---------------------------------------------------------------- guards
@@ -66,7 +69,12 @@ const env = loadEnv({
   RATE_LIMIT_MAX: "100000",
   AUTH_RATE_LIMIT_MAX: "100000",
   UPLOAD_DIR: uploadDir,
+  // Mail never leaves the process: in-memory outbox, short resend cooldown.
+  MAIL_MAILER: "array",
+  INVITE_RESEND_COOLDOWN_SECONDS: "2",
 });
+// The array mailer is injected into buildApp; createMailer would also refuse smtp under test.
+const mailer = createArrayMailer();
 
 const runId = `${Date.now().toString(36)}${randomBytes(2).toString("hex")}`;
 const password = randomBytes(18).toString("base64url");
@@ -1349,6 +1357,300 @@ async function authScenario(): Promise<void> {
 type Outcome = { domain: string; checks: number; error?: string };
 const outcomes: Outcome[] = [];
 
+// ---------------------------------------------------------------- invites
+// Account invitations. Mail goes only to the in-memory array mailer; tokens are read from
+// the captured message, never printed. Fixtures use `smoke-{runId}-inv*` emails and are
+// archived by cleanup() with the other smoke users.
+
+const RESEND_WAIT_MS = 2_100; // INVITE_RESEND_COOLDOWN_SECONDS=2 in this run
+const INVALID_TOKEN_CODE = "INVALID_OR_EXPIRED_TOKEN";
+const GENERIC_MAIL_ERROR = "The invitation email could not be sent.";
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function outboxFor(email: string) {
+  return mailer.outbox.filter((message) => message.to === email);
+}
+function tokenFromText(text: string): string {
+  const match = /#set-password=([A-Za-z0-9_-]+)/.exec(text);
+  if (!match?.[1]) throw new Error("no invitation link in the captured message");
+  return match[1];
+}
+function latestInviteToken(email: string): string {
+  const messages = outboxFor(email);
+  const last = messages[messages.length - 1];
+  if (!last) throw new Error(`no captured invitation for ${email.split("@")[0]}`);
+  return tokenFromText(last.text);
+}
+function inviteOf(res: Res): Record<string, unknown> {
+  return obj(obj(res.body, "response").invite, "invite");
+}
+async function setPasswordWith(token: string, newPassword: string): Promise<Res> {
+  return call(null, "POST", "/auth/set-password", { token, password: newPassword });
+}
+async function openInviteCount(userId: string): Promise<number> {
+  const rows = await db
+    .select({ id: authTokens.id })
+    .from(authTokens)
+    .where(and(eq(authTokens.userId, userId), isNull(authTokens.usedAt), gt(authTokens.expiresAt, new Date())));
+  return rows.length;
+}
+async function inviteTokenRow(token: string) {
+  const [row] = await db.select().from(authTokens).where(eq(authTokens.tokenHash, hashToken(token))).limit(1);
+  return row;
+}
+async function userStatusOf(userId: string): Promise<string | undefined> {
+  const [row] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId)).limit(1);
+  return row?.status;
+}
+async function adminInvite(label: string, role: "manager" | "teacher" | "student", extra: Record<string, unknown> = {}): Promise<{ id: string; email: string; res: Res }> {
+  const email = emailFor(label);
+  const res = await call(tok("admin"), "POST", "/users", { name: `Smoke ${label} ${runId}`, email, role, ...extra });
+  expectStatus(res, 201, `admin invites ${label}`);
+  return { id: str(res.body, "id"), email, res };
+}
+function noLink(res: Res, label: string): void {
+  check(!("link" in inviteOf(res)), `${label}: a manager response must never contain a link`);
+  check(!JSON.stringify(res.body).includes("set-password"), `${label}: no link text anywhere in a manager response`);
+}
+
+async function invitesScenario(): Promise<void> {
+  check(mailer.kind === "array", "invites run on the array mailer only");
+
+  // 1. Admin creates an invited user (no password).
+  const outboxBefore = mailer.outbox.length;
+  const first = await adminInvite("inv1", "teacher");
+  check(str(first.res.body, "status") === "invited", "a user created without a password is invited");
+  const firstInvite = inviteOf(first.res);
+  check(firstInvite.sent === true && firstInvite.mode === "array", "admin create reports an array-mode send");
+  check(typeof firstInvite.link === "string", "admin gets the link outside production in array mode");
+  check(mailer.outbox.length === outboxBefore + 1 && outboxFor(first.email).length === 1, "exactly one message captured");
+  const message = outboxFor(first.email)[0];
+  check(Boolean(message) && message!.text.includes(String(firstInvite.link)) && message!.html.includes(String(firstInvite.link)), "the message carries the link");
+  const textWithoutLink = message!.text.split(String(firstInvite.link)).join("");
+  check(!message!.text.includes(password) && !/password\s*[:=]/i.test(textWithoutLink), "the message carries no password");
+  const guessed = await call(null, "POST", "/auth/login", { email: first.email, password });
+  expectStatus(guessed, 401, "invited user login");
+  check(obj(obj(guessed.body, "login").error, "error").message === "Invalid email or password", "invited login fails with the generic message");
+  const adminBoot = await bootstrapOf("admin");
+  check(adminBoot.users?.[first.id]?.status === "invited", "the invited user is in the admin bootstrap");
+
+  // 2. Accept: a policy-invalid password does not burn the token; refresh tokens are revoked.
+  await db.insert(refreshTokens).values({
+    userId: first.id,
+    tokenHash: createHash("sha256").update(`smoke-${runId}-inv1-${randomBytes(8).toString("hex")}`).digest("hex"),
+    expiresAt: new Date(Date.now() + 86_400_000),
+  });
+  const token1 = tokenFromText(message!.text);
+  const tooShort = await setPasswordWith(token1, "short1234");
+  expectStatus(tooShort, 400, "set-password with 9 characters");
+  check(errorCode(tooShort) === "VALIDATION_ERROR", "policy failure is a validation error");
+  check((await inviteTokenRow(token1))?.usedAt === null, "the token is not consumed by a validation failure");
+  const newPassword = randomBytes(18).toString("base64url");
+  expectStatus(await setPasswordWith(token1, newPassword), 204, "set-password");
+  check((await userStatusOf(first.id)) === "active", "accepting activates the account");
+  check((await activeTokenCount(first.id)) === 0, "refresh tokens were revoked at accept");
+  await signIn(first.email, newPassword, "login after accept");
+  const reuse = await setPasswordWith(token1, newPassword);
+  expectStatus(reuse, 400, "token reuse");
+  check(errorCode(reuse) === INVALID_TOKEN_CODE, "reuse gives the generic code");
+  await expectOneActivity("user", first.id, "user.invite_accepted");
+
+  // 3. Token edge cases give one identical answer; parallel accepts have one winner.
+  const unknown = await setPasswordWith(randomBytes(32).toString("base64url"), newPassword);
+  const expiredUser = await adminInvite("inv3", "student");
+  const expiredToken = latestInviteToken(expiredUser.email);
+  await db.update(authTokens).set({ expiresAt: sql`now() - interval '1 minute'` }).where(eq(authTokens.tokenHash, hashToken(expiredToken)));
+  const expired = await setPasswordWith(expiredToken, newPassword);
+  const archivedUser = await adminInvite("inv4", "teacher");
+  const archivedToken = latestInviteToken(archivedUser.email);
+  expectStatus(await call(tok("admin"), "DELETE", `/users/${archivedUser.id}`), 200, "archive invited user");
+  const archived = await setPasswordWith(archivedToken, newPassword);
+  for (const [label, res] of [["unknown", unknown], ["expired", expired], ["used", reuse], ["archived", archived]] as const) {
+    expectStatus(res, 400, `${label} token`);
+    check(JSON.stringify(res.body) === JSON.stringify(reuse.body), `${label} token answers exactly like a used token`);
+  }
+  check((await userStatusOf(archivedUser.id)) === "archived", "the archived invitee stays archived");
+  check((await inviteTokenRow(archivedToken))?.usedAt === null, "a rolled-back accept leaves the token unconsumed");
+  const reactivate = await call(tok("admin"), "PATCH", `/users/${archivedUser.id}`, { status: "active" });
+  expectStatus(reactivate, 409, "invite -> archive -> PATCH active");
+  check(errorCode(reactivate) === "ACCOUNT_NOT_ACTIVATED", "reactivating a never-activated account is refused");
+  const raceUser = await adminInvite("inv5", "student");
+  const raceToken = latestInviteToken(raceUser.email);
+  const race = await Promise.all([setPasswordWith(raceToken, newPassword), setPasswordWith(raceToken, newPassword)]);
+  const raceStatuses = race.map((res) => res.status).sort();
+  check(raceStatuses[0] === 204 && raceStatuses[1] === 400, `parallel accepts: one 204 and one 400 (got ${raceStatuses.join(",")})`);
+
+  // 3b. Lock order: set-password racing resend or archive never deadlocks (no 500) and ends consistent.
+  for (let round = 1; round <= 3; round += 1) {
+    const resendRace = await adminInvite(`inv-lock-r${round}`, "teacher");
+    const resendRaceToken = latestInviteToken(resendRace.email);
+    await sleep(RESEND_WAIT_MS);
+    const [accept, resend] = await Promise.all([
+      setPasswordWith(resendRaceToken, newPassword),
+      call(tok("admin"), "POST", `/users/${resendRace.id}/invite`),
+    ]);
+    check(accept.status < 500 && resend.status < 500, `round ${round}: set-password vs resend has no 500 (got ${accept.status},${resend.status})`);
+    const afterResend = await userStatusOf(resendRace.id);
+    const resendTokenUsed = (await inviteTokenRow(resendRaceToken))?.usedAt != null;
+    check(
+      (accept.status === 204 && afterResend === "active" && resendTokenUsed && resend.status === 409) ||
+        (accept.status === 400 && errorCode(accept) === INVALID_TOKEN_CODE && afterResend === "invited" && !resendTokenUsed && resend.status === 200),
+      `round ${round}: set-password vs resend ends consistent (accept ${accept.status}, resend ${resend.status}, ${afterResend})`,
+    );
+
+    const archiveRace = await adminInvite(`inv-lock-a${round}`, "student");
+    const archiveRaceToken = latestInviteToken(archiveRace.email);
+    const [accept2, archive] = await Promise.all([
+      setPasswordWith(archiveRaceToken, newPassword),
+      call(tok("admin"), "PATCH", `/users/${archiveRace.id}`, { status: "archived" }),
+    ]);
+    check(accept2.status < 500 && archive.status < 500, `round ${round}: set-password vs archive has no 500 (got ${accept2.status},${archive.status})`);
+    const afterArchive = await userStatusOf(archiveRace.id);
+    const archiveTokenUsed = (await inviteTokenRow(archiveRaceToken))?.usedAt != null;
+    check(
+      (accept2.status === 204 && archiveTokenUsed && archive.status === 200 && afterArchive === "archived") ||
+        (accept2.status === 400 && errorCode(accept2) === INVALID_TOKEN_CODE && !archiveTokenUsed && afterArchive === "archived"),
+      `round ${round}: set-password vs archive ends consistent (accept ${accept2.status}, archive ${archive.status}, ${afterArchive})`,
+    );
+  }
+
+  // 4. Resend: old link dies, cooldown 429, parallel resend leaves one open token.
+  const resendUser = await adminInvite("inv6", "teacher");
+  const oldToken = latestInviteToken(resendUser.email);
+  await sleep(RESEND_WAIT_MS);
+  const resent = await call(tok("admin"), "POST", `/users/${resendUser.id}/invite`);
+  expectStatus(resent, 200, "admin resend");
+  check(outboxFor(resendUser.email).length === 2, "resend captured a second message");
+  const oldUse = await setPasswordWith(oldToken, newPassword);
+  expectStatus(oldUse, 400, "first link after resend");
+  const tooSoon = await call(tok("admin"), "POST", `/users/${resendUser.id}/invite`);
+  expectStatus(tooSoon, 429, "resend inside the cooldown");
+  await sleep(RESEND_WAIT_MS);
+  const parallel = await Promise.all([
+    call(tok("admin"), "POST", `/users/${resendUser.id}/invite`),
+    call(tok("admin"), "POST", `/users/${resendUser.id}/invite`),
+  ]);
+  const parallelStatuses = parallel.map((res) => res.status).sort();
+  check(parallelStatuses[0] === 200 && parallelStatuses[1] === 429, `parallel resend: one 200 and one 429 (got ${parallelStatuses.join(",")})`);
+  check((await openInviteCount(resendUser.id)) === 1, "exactly one open invite after parallel resends");
+  check((await activityCount("user", resendUser.id, "user.invite_resent")) === 2, "one invite_resent row per successful resend");
+  expectStatus(await call(tok("admin"), "POST", `/users/${uid("teacherA")}/invite`), 409, "resend for an active user");
+  expectStatus(await call(tok("admin"), "POST", `/users/${randomUUID()}/invite`), 404, "admin resend for an unknown id");
+
+  // 5. Manager creation: own team, atomically; no other roles, no password, no other team.
+  const managerTeacher = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv7 ${runId}`, email: emailFor("inv7"), role: "teacher" });
+  expectStatus(managerTeacher, 201, "manager creates a teacher");
+  noLink(managerTeacher, "manager create");
+  const inv7 = str(managerTeacher.body, "id");
+  check(str(managerTeacher.body, "status") === "invited", "manager-created teacher is invited");
+  const [teacherProfile] = await db.select({ managerId: schema.teacherProfiles.managerId }).from(schema.teacherProfiles).where(eq(schema.teacherProfiles.userId, inv7));
+  check(teacherProfile?.managerId === uid("managerA"), "the teacher joins the manager's team in the same create");
+  expectStatus(await call(tok("managerA"), "PATCH", `/teachers/${inv7}`, { headline: "Smoke invited teacher" }), 200, "manager edits the new teacher at once");
+  const managerBoot = await bootstrapOf("managerA");
+  check(Boolean(managerBoot.users?.[inv7]), "the new teacher is in the manager's bootstrap");
+  const managerStudent = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv8 ${runId}`, email: emailFor("inv8"), role: "student" });
+  expectStatus(managerStudent, 201, "manager creates a student");
+  noLink(managerStudent, "manager create student");
+  const [studentProfile] = await db.select({ managerId: schema.studentProfiles.managerId }).from(schema.studentProfiles).where(eq(schema.studentProfiles.userId, str(managerStudent.body, "id")));
+  check(studentProfile?.managerId === uid("managerA"), "the student joins the manager's roster in the same create");
+  for (const role of ["admin", "manager"] as const) {
+    expectStatus(await call(tok("managerA"), "POST", "/users", { name: "Nope", email: emailFor(`inv-${role}`), role }), 403, `manager creates ${role}`);
+  }
+  expectStatus(await call(tok("managerA"), "POST", "/users", { name: "Nope", email: emailFor("inv-pw"), role: "teacher", password }), 403, "manager sends a password");
+  expectStatus(await call(tok("managerA"), "POST", "/users", { name: "Nope", email: emailFor("inv-other"), role: "student", managerId: uid("managerB") }), 403, "manager names another manager");
+  const ownId = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv9 ${runId}`, email: emailFor("inv9"), role: "student", managerId: uid("managerA") });
+  expectStatus(ownId, 201, "manager names themself");
+  expectStatus(await call(tok("managerB"), "PATCH", `/teachers/${inv7}`, { headline: "Not yours" }), 403, "another manager edits the new teacher");
+  expectStatus(await call(tok("admin"), "POST", "/users", { name: "Nope", email: emailFor("inv-badmgr"), role: "teacher", managerId: uid("teacherA") }), 400, "admin managerId must be a manager");
+
+  // 6. Manager resend: own team only; never a link.
+  await sleep(RESEND_WAIT_MS);
+  const managerResend = await call(tok("managerA"), "POST", `/users/${inv7}/invite`);
+  expectStatus(managerResend, 200, "manager resends to own teacher");
+  noLink(managerResend, "manager resend");
+  const otherTeamStudent = await adminInvite("inv10", "student", { managerId: uid("managerB") });
+  expectStatus(await call(tok("managerA"), "POST", `/users/${otherTeamStudent.id}/invite`), 403, "manager resend to another team");
+  const invitedManager = await adminInvite("inv11", "manager");
+  expectStatus(await call(tok("managerA"), "POST", `/users/${invitedManager.id}/invite`), 403, "manager resend to a manager");
+  expectStatus(await call(tok("managerA"), "POST", `/users/${randomUUID()}/invite`), 403, "manager resend to an unknown id (no oracle)");
+  expectStatus(await call(tok("teacherA"), "POST", `/users/${inv7}/invite`), 403, "teacher cannot resend");
+  expectStatus(await call(tok("studentA"), "POST", `/users/${inv7}/invite`), 403, "student cannot resend");
+
+  // 9. Mail failure: the account is committed, the error is generic; managers still get no link.
+  mailer.failNext(new Error("Simulated SMTP rejection"));
+  const failedManager = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv12 ${runId}`, email: emailFor("inv12"), role: "teacher" });
+  expectStatus(failedManager, 201, "manager create with a mail failure");
+  const failedInvite = inviteOf(failedManager);
+  check(failedInvite.sent === false && failedInvite.error === GENERIC_MAIL_ERROR, "a failed send reports the fixed generic error");
+  check(!JSON.stringify(failedManager.body).includes("Simulated"), "SMTP detail never reaches the client");
+  noLink(failedManager, "manager create with a failed send");
+  const inv12 = str(failedManager.body, "id");
+  check((await userStatusOf(inv12)) === "invited" && (await openInviteCount(inv12)) === 1, "user and token exist despite the failed send");
+  mailer.failNext(new Error("Simulated SMTP rejection"));
+  const failedAdmin = await adminInvite("inv13", "student");
+  check(inviteOf(failedAdmin.res).sent === false && typeof inviteOf(failedAdmin.res).link === "string", "an admin gets the link when the send failed");
+  await sleep(RESEND_WAIT_MS);
+  const recovered = await call(tok("managerA"), "POST", `/users/${inv12}/invite`);
+  expectStatus(recovered, 200, "resend after a failed send");
+  check(inviteOf(recovered).sent === true, "the following resend succeeds");
+  noLink(recovered, "manager resend after failure");
+
+  // 7. Admin-only password: an active account, no mail.
+  const withPasswordEmail = emailFor("inv14");
+  const withPassword = await call(tok("admin"), "POST", "/users", { name: `Smoke inv14 ${runId}`, email: withPasswordEmail, role: "student", password });
+  expectStatus(withPassword, 201, "admin create with a password");
+  check(str(withPassword.body, "status") === "active" && !("invite" in obj(withPassword.body, "create")), "a password makes an active account with no invite");
+  check(outboxFor(withPasswordEmail).length === 0, "no mail for a password-created account");
+  await signIn(withPasswordEmail, password, "login with an admin-set password");
+
+  // 8. Status safety on an invited account.
+  const safety = await adminInvite("inv15", "teacher");
+  const safetyToken = latestInviteToken(safety.email);
+  for (const status of ["active", "paused"] as const) {
+    const res = await call(tok("admin"), "PATCH", `/users/${safety.id}`, { status });
+    expectStatus(res, 409, `PATCH ${status} on an invited user`);
+    check(errorCode(res) === "ACCOUNT_NOT_ACTIVATED", `PATCH ${status} answers ACCOUNT_NOT_ACTIVATED`);
+  }
+  expectStatus(await call(tok("admin"), "POST", `/users/${safety.id}/reset-password`, { newPassword: newPassword }), 409, "reset-password on an invited user");
+  expectStatus(await call(tok("admin"), "PATCH", `/users/${safety.id}`, { email: emailFor("inv15b") }), 200, "email change on an invited user");
+  expectStatus(await setPasswordWith(safetyToken, newPassword), 400, "the link after an email change");
+  check((await openInviteCount(safety.id)) === 0, "an email change expires open invites");
+  const invitedList = await call(tok("admin"), "GET", `/users?status=invited&q=${encodeURIComponent(`smoke-${runId}`)}`);
+  expectStatus(invitedList, 200, "list invited users");
+  const items = fieldArr(invitedList.body, "items");
+  check(items.length > 0 && items.every((item) => obj(item, "user").status === "invited"), "status=invited filters");
+
+  // AC-20: a forced profile-insert failure rolls back the user and the token.
+  const rollbackEmail = emailFor("inv-rollback");
+  let rolledBack = false;
+  try {
+    await db.transaction(async (tx) => {
+      await insertAccount(tx, {
+        actorId: uid("admin"),
+        name: `Smoke rollback ${runId}`,
+        email: rollbackEmail,
+        role: "teacher",
+        avatarColor: "#6366f1",
+        managerId: randomUUID(), // no such user: the profile insert violates its foreign key
+        passwordHash: unusablePasswordHash(),
+        invited: true,
+        now: new Date(),
+      });
+    });
+  } catch {
+    rolledBack = true;
+  }
+  check(rolledBack, "the forced profile-insert failure throws");
+  const leftover = await db.select({ id: users.id }).from(users).where(eq(users.email, rollbackEmail));
+  check(leftover.length === 0, "no users row survives a failed create");
+  const orphanTokens = await db
+    .select({ id: authTokens.id })
+    .from(authTokens)
+    .leftJoin(users, eq(users.id, authTokens.userId))
+    .where(isNull(users.id));
+  check(orphanTokens.length === 0, "no invite token survives a failed create");
+}
+
 async function scenario(domain: string, body: () => Promise<void>): Promise<void> {
   const start = checkCount;
   try {
@@ -1659,7 +1961,11 @@ async function libraryStepFChecks(
 
 async function main(): Promise<number> {
   console.log(`Lumina API smoke run ${runId} on ${base} (db host ${dbHost})`);
-  app = await buildApp({ env });
+  if (env.NODE_ENV !== "test" || mailer.kind !== "array" || env.MAIL_MAILER !== "array") {
+    console.error("SMOKE REFUSED: mail must run with NODE_ENV=test and the in-memory array mailer.");
+    return 2;
+  }
+  app = await buildApp({ env, mailer });
   try {
     await app.listen({ host: "127.0.0.1", port });
   } catch (error) {
@@ -1690,6 +1996,7 @@ async function main(): Promise<number> {
   await scenario("notifications", notificationsScenario);
   await scenario("library", libraryScenario);
   await scenario("auth", authScenario);
+  await scenario("invites", invitesScenario);
 
   const failed = outcomes.filter((outcome) => outcome.error);
   const total = outcomes.reduce((sum, outcome) => sum + outcome.checks, 0);

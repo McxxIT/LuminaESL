@@ -6,6 +6,7 @@ import {
   apiLogin,
   bootstrap,
   creditBalance,
+  SEEDED_PASSWORD,
 } from "../support/api";
 import { signIn } from "../support/auth";
 import { expectNotice, nav, runId } from "../support/fixtures";
@@ -24,7 +25,7 @@ import { ensurePreconditions, type Preconditions } from "../support/precondition
 
 type BootstrapWithHistory = {
   collections: {
-    users: Record<string, { id: string; email: string; avatarColor: string; createdAt: string }>;
+    users: Record<string, { id: string; email: string; avatarColor: string; createdAt: string; status: string }>;
     lessons: Record<
       string,
       { id: string; title: string; createdAt: string; endTime: string; createdBy: string }
@@ -127,6 +128,13 @@ test.describe("one-time import", () => {
       (user) => user.email === fixture.markers.studentEmail,
     );
     expect(student, "the new student was created").toBeDefined();
+    expect(student?.status, "imported accounts wait for an invitation").toBe("invited");
+    const importedLogin = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: fixture.markers.studentEmail, password: SEEDED_PASSWORD }),
+    });
+    expect(importedLogin.status, "an imported account cannot sign in before it sets a password").toBe(401);
     expect(student?.avatarColor, "the palette name became hex").toBe("#f97316");
     expect(student?.createdAt, "createdAt is the recorded one").toBe(
       fixture.markers.lessonCreatedAt,

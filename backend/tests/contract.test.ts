@@ -245,4 +245,32 @@ describe("school contract", () => {
       expect(response.statusCode).toBe(401);
     }
   });
+
+  it("registers the invitation routes: set-password is public, the rest need a session", async () => {
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/users/:id/invite" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/auth/set-password" })).toBe(true);
+
+    // Public route: an empty body is a validation error, never a 401.
+    const setPassword = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/set-password",
+      payload: {},
+    });
+    expect(setPassword.statusCode).toBe(400);
+    expect(setPassword.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+
+    const resend = await app.inject({
+      method: "POST",
+      url: "/api/v1/users/00000000-0000-0000-0000-000000000004/invite",
+    });
+    expect(resend.statusCode).toBe(401);
+
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "Nobody", email: "nobody@example.com", role: "student" },
+    });
+    expect(create.statusCode).toBe(401);
+    expect(BOOTSTRAP_COLLECTION_KEYS).toHaveLength(18);
+  });
 });

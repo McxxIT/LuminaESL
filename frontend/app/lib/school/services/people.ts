@@ -3,10 +3,12 @@ import { isApiDataMode } from "../../auth/mode";
 import {
   assignTeacherToManager as assignTeacherToManagerApi,
   createStudent as createStudentApi,
+  createTeacher as createTeacherApi,
   createUser,
   enrollStudent as enrollStudentApi,
   recordCreditAdjustment,
   refreshSchoolAfterCommand,
+  resendInvite as resendInviteApi,
   resetUserPassword,
   setUserStatus,
   updateUser,
@@ -17,11 +19,15 @@ import { assertCan } from "../permissions";
 import { createId, get, list, patch, query, recordActivity, upsert } from "../repositories";
 import { managerIdForTeacher } from "../selectors";
 import { updateSchool } from "../store";
-import type { Guardian, SchoolData, SchoolRole, SchoolUser, UserStatus } from "../types";
+import type { InviteOutcome } from "../../api/types";
+import type { Guardian, SchoolData, SchoolRole, SchoolUser } from "../types";
 import { changeCredits, requireUser } from "./common";
 import { fail, run, runAsync, ServiceError, type ServiceResult } from "./result";
 
 /** People management: managers (admin only), teachers, students, enrollments, and credits. */
+
+/** A newly created person; in API mode they are `invited` and carry the invitation outcome. */
+export type CreatedPerson = SchoolUser & { invite?: InviteOutcome };
 
 const AVATAR_COLORS = ["indigo", "peach", "lavender", "mint"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -71,7 +77,7 @@ function manageActionFor(user: SchoolUser) {
 
 // Managers --------------------------------------------------------------------------------
 
-export function createManager(actorId: string, input: { name: string; email: string }): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+export function createManager(actorId: string, input: { name: string; email: string }): ServiceResult<CreatedPerson> | Promise<ServiceResult<CreatedPerson>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
       const user = await createUser({ name: cleanName(input.name), email: input.email.trim().toLowerCase(), role: "manager" });
@@ -84,6 +90,7 @@ export function createManager(actorId: string, input: { name: string; email: str
         status: user.status,
         avatarColor: user.avatarColor ?? AVATAR_COLORS[0],
         createdAt: user.createdAt ?? new Date().toISOString(),
+        invite: user.invite,
       };
     });
   }
@@ -109,20 +116,21 @@ export type TeacherInput = {
   managerId?: string | null;
 };
 
-export function createTeacher(actorId: string, input: TeacherInput): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+export function createTeacher(actorId: string, input: TeacherInput): ServiceResult<CreatedPerson> | Promise<ServiceResult<CreatedPerson>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      const user = await createUser({ name: cleanName(input.name), email: input.email.trim().toLowerCase(), role: "teacher", managerId: input.managerId });
-      await updateTeacherApi(user.id, input);
+      // Team assignment happens atomically in POST /users; only the profile is patched after.
+      const created = await createTeacherApi({ ...input, name: cleanName(input.name), email: input.email.trim().toLowerCase() });
       await refreshSchoolAfterCommand();
       return {
-        id: user.id,
+        id: created.userId,
         role: "teacher" as const,
-        name: user.name,
-        email: user.email,
-        status: user.status,
-        avatarColor: user.avatarColor ?? AVATAR_COLORS[0],
-        createdAt: user.createdAt ?? new Date().toISOString(),
+        name: cleanName(input.name),
+        email: input.email.trim().toLowerCase(),
+        status: "invited" as const,
+        avatarColor: AVATAR_COLORS[0],
+        createdAt: new Date().toISOString(),
+        invite: created.invite,
       };
     });
   }
@@ -206,13 +214,14 @@ export type StudentInput = {
   guardian?: Guardian | null;
 };
 
-export function createStudent(actorId: string, input: StudentInput & { teacherId?: string; courseId?: string; startingCredits?: number; managerId?: string | null }): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+export function createStudent(actorId: string, input: StudentInput & { teacherId?: string; courseId?: string; startingCredits?: number; managerId?: string | null }): ServiceResult<CreatedPerson> | Promise<ServiceResult<CreatedPerson>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
       if (input.startingCredits && !Number.isInteger(input.startingCredits)) {
         throw new ServiceError("Starting credits must be a whole number in API mode.");
       }
-      const user = await createStudentApi(input);
+      const created = await createStudentApi(input);
+      const user = created.userId;
       if (input.teacherId && input.courseId) await enrollStudentApi(user, input.teacherId, input.courseId);
       if (input.startingCredits) await recordCreditAdjustment(user, input.startingCredits, "Starting credits");
       await refreshSchoolAfterCommand();
@@ -221,9 +230,10 @@ export function createStudent(actorId: string, input: StudentInput & { teacherId
         role: "student" as const,
         name: input.name.trim(),
         email: input.email.trim().toLowerCase(),
-        status: "active",
+        status: "invited" as const,
         avatarColor: AVATAR_COLORS[0],
         createdAt: new Date().toISOString(),
+        invite: created.invite,
       };
     });
   }
@@ -320,7 +330,7 @@ export function adjustCredits(actorId: string, studentId: string, hours: number,
 // Any person ------------------------------------------------------------------------------
 
 /** Pause or reactivate a manager (admin), teacher, or student. Paused people cannot sign in or act. */
-export function setPersonStatus(actorId: string, userId: string, status: Exclude<UserStatus, "archived">): ServiceResult | Promise<ServiceResult> {
+export function setPersonStatus(actorId: string, userId: string, status: "active" | "paused"): ServiceResult | Promise<ServiceResult> {
   if (isApiDataMode()) {
     return runAsync(async () => {
       await setUserStatus(userId, status);
@@ -337,6 +347,19 @@ export function setPersonStatus(actorId: string, userId: string, status: Exclude
     patch(draft, "users", userId, { status });
     recordActivity(draft, { actorId, action: `user.${status}`, targetType: "user", targetId: userId, summary: person.name });
   }));
+}
+
+/**
+ * Send a fresh invitation to an `invited` person (API mode only). The previous
+ * link stops working. Demo mode has no invitations.
+ */
+export function resendInvite(actorId: string, userId: string): ServiceResult<InviteOutcome> | Promise<ServiceResult<InviteOutcome>> {
+  if (!isApiDataMode()) return fail("Invitations are not used in demo mode.");
+  return runAsync(async () => {
+    const invite = await resendInviteApi(userId);
+    await refreshSchoolAfterCommand();
+    return invite;
+  });
 }
 
 /**

@@ -31,6 +31,8 @@ import {
 import { adjustCredits, assignPlanToLesson, createStudent, enrollStudent, resetPersonPassword, setPersonStatus, updateStudent } from "../../lib/school/services";
 import { formatLessonDate, todayISO } from "../../lib/student";
 import { LessonStatusBadge, PersonAvatar, UserStatusBadge } from "./parts";
+import { InviteResultModal, ResendInviteButton, canResendInvite, type InviteResult } from "./InviteForms";
+import type { InviteOutcome } from "../../lib/api/types";
 
 function selectStudents(data: SchoolData, user: SchoolUser) {
   const today = todayISO();
@@ -96,6 +98,7 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
   const [teacherFilter, setTeacherFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [inviteResult, setInviteResult] = useState<InviteResult>(null);
 
   const filtered = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -103,6 +106,15 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       && (!search || `${row.student.name} ${row.student.email} ${row.profile?.goal ?? ""}`.toLowerCase().includes(search)));
   }, [rows, query, teacherFilter]);
   const selected: StudentRow | undefined = rows.find((row) => row.student.id === selectedId);
+
+  function showResend(person: SchoolUser, result: { ok: true; value: InviteOutcome } | { ok: false; error: string }) {
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
+    setSelectedId(null);
+    setInviteResult({ person, invite: result.value });
+  }
 
   async function submitCreate(values: StudentFormValues) {
     const result = await createStudent(user.id, {
@@ -112,7 +124,11 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       courseId: values.teacherId ? values.courseId : undefined,
       startingCredits: Number(values.startingCredits) || 0,
     });
-    if (result.ok) onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
+    if (result.ok) {
+      // API mode: the person is invited by email; demo keeps its sign-in notice.
+      if (result.value.invite) setInviteResult({ person: result.value, invite: result.value.invite });
+      else onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
+    }
     return result;
   }
 
@@ -153,12 +169,18 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       </div>
     </section>
 
+    {inviteResult && <InviteResultModal actorId={user.id} person={inviteResult.person} invite={inviteResult.invite}
+      canResend={canResendInvite(user, { ...inviteResult.person, status: "invited", avatarColor: "", createdAt: "" })} onClose={() => setInviteResult(null)} />}
     {selected && !dialog && <Modal eyebrow="STUDENT" title={selected.student.name} description={`${selected.student.email}${selected.profile?.goal ? ` · ${selected.profile.goal}` : ""}`} onClose={() => setSelectedId(null)} size="wide"
       footer={<>
         <button type="button" className="cancel-button" onClick={() => setSelectedId(null)}>Close</button>
         {selected.canManage && <>
-          {user.role === "admin" && !isDemoMode() && <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "reset-password", row: selected })}><Icon name="lock" size={14} /> Reset password</button>}
-          <button type="button" className={selected.student.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.student.status === "active" ? "Pause" : "Reactivate"}</button>
+          {selected.student.status === "invited" ? <>
+            {canResendInvite(user, selected.student) && <ResendInviteButton actorId={user.id} person={selected.student} onResult={showResend} />}
+          </> : <>
+            {user.role === "admin" && !isDemoMode() && <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "reset-password", row: selected })}><Icon name="lock" size={14} /> Reset password</button>}
+            <button type="button" className={selected.student.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.student.status === "active" ? "Pause" : "Reactivate"}</button>
+          </>}
           <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "credits", row: selected })}><Icon name="wallet" size={14} /> Credits</button>
           <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "enroll", row: selected })}><Icon name="users" size={14} /> Teacher &amp; course</button>
           <button type="button" className="primary-button" onClick={() => setDialog({ kind: "edit", row: selected })}><Icon name="edit" size={14} /> Edit</button>

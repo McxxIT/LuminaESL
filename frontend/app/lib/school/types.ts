@@ -15,7 +15,8 @@ export type ClockTime = string;
 export type Timestamp = string;
 
 export type SchoolRole = "admin" | "manager" | "teacher" | "student";
-export type UserStatus = "active" | "paused" | "archived";
+/** `invited`: created by an admin or manager, waiting for the person to set a password (API mode only). */
+export type UserStatus = "active" | "paused" | "archived" | "invited";
 
 export type SchoolUser = {
   id: string;

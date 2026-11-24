@@ -100,7 +100,8 @@ function isPublicAuthPath(path: string): boolean {
   return (
     path.startsWith("/auth/login") ||
     path.startsWith("/auth/register") ||
-    path.startsWith("/auth/refresh")
+    path.startsWith("/auth/refresh") ||
+    path.startsWith("/auth/set-password")
   );
 }
 

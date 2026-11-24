@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { can, getSchoolSnapshot, type PermissionTarget, type SchoolAction } from "@/app/lib/school";
+import { can, getSchoolSnapshot, updateSchool, type PermissionTarget, type SchoolAction } from "@/app/lib/school";
+import { upsert } from "@/app/lib/school/repositories";
 import { addLibraryItem, bookAs } from "./helpers/fixtures";
 import { dayFrom, freezeTime, freshSchool, TEST_NOW } from "./helpers/school";
 
@@ -57,5 +58,60 @@ describe("lesson.attachLibraryItem", () => {
 
   test("a paused account is denied", () => {
     expect(allowed("student-diego", "lesson.book")).toBe(false);
+  });
+});
+
+describe("account.invite", () => {
+  test("admin any person; a manager only their own teacher or roster student", () => {
+    expect(allowed("admin-jamie", "account.invite", { teacherId: "teacher-daniel" })).toBe(true);
+    expect(allowed("admin-jamie", "account.invite", { studentId: "student-kenji" })).toBe(true);
+    expect(allowed("manager-priya", "account.invite", { teacherId: "teacher-grace" })).toBe(true);
+    expect(allowed("manager-priya", "account.invite", { studentId: "student-leo" })).toBe(true);
+    expect(allowed("manager-priya", "account.invite", { teacherId: "teacher-daniel" })).toBe(false);
+    expect(allowed("manager-priya", "account.invite", { studentId: "student-kenji" })).toBe(false);
+    expect(allowed("manager-marco", "account.invite", { studentId: "student-kenji" })).toBe(true);
+    expect(allowed("manager-priya", "account.invite")).toBe(false);
+    expect(allowed("teacher-alex", "account.invite", { studentId: "student-ava" })).toBe(false);
+    expect(allowed("student-ava", "account.invite", { studentId: "student-ava" })).toBe(false);
+  });
+
+  test("intentional asymmetry: enrollment with a team teacher is not enough in the frontend", () => {
+    // student-kenji is on manager-marco's roster. Enrolled with teacher-grace (manager-priya's
+    // team), the backend `managerOwnsStudent` would answer true for manager-priya; the frontend
+    // only offers the action to the roster manager, so it is never looser than the backend.
+    updateSchool((draft) => {
+      upsert(draft, "enrollments", {
+        id: "enrollment-kenji-grace",
+        studentId: "student-kenji",
+        teacherId: "teacher-grace",
+        courseId: Object.keys(draft.collections.courses)[0] ?? "course",
+        nextPlanIndex: 0,
+        status: "active",
+        startedAt: new Date().toISOString(),
+      });
+    });
+    expect(allowed("manager-priya", "account.invite", { studentId: "student-kenji" })).toBe(false);
+    expect(allowed("manager-marco", "account.invite", { studentId: "student-kenji" })).toBe(true);
+  });
+
+  test("teacher.create and student.create are unchanged: admin and managers", () => {
+    for (const action of ["teacher.create", "student.create"] as const) {
+      expect(allowed("admin-jamie", action)).toBe(true);
+      expect(allowed("manager-marco", action)).toBe(true);
+      expect(allowed("teacher-alex", action)).toBe(false);
+      expect(allowed("student-ava", action)).toBe(false);
+    }
+  });
+});
+
+describe("invited accounts", () => {
+  test("an invited person can do nothing until they set a password", () => {
+    updateSchool((draft) => {
+      const manager = draft.collections.users["manager-priya"];
+      if (manager) manager.status = "invited";
+    });
+    expect(allowed("manager-priya", "teacher.create")).toBe(false);
+    expect(allowed("manager-priya", "account.invite", { teacherId: "teacher-grace" })).toBe(false);
+    expect(allowed("admin-jamie", "account.invite", { teacherId: "teacher-grace" })).toBe(true);
   });
 });

@@ -295,4 +295,36 @@ test.describe("Demo mode regression", () => {
     expect(apiCalls, "demo mode must not call the API").toEqual([]);
     assertNoPageErrors(pageErrors);
   });
+
+  test("ignores invitation links and shows no invite controls", async ({ page }) => {
+    const pageErrors = collectPageErrors(page);
+    const apiCalls: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/")) apiCalls.push(request.url());
+    });
+
+    const hash = "#set-password=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd";
+    await page.goto(`/${hash}`);
+    // Demo mode renders the normal login and leaves the fragment alone.
+    await expect(page.locator('input[type="email"]')).toBeVisible();
+    await expect(page.getByTestId("set-password-form")).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(new URL(page.url()).hash).toBe(hash);
+
+    await page.locator('input[type="email"]').fill("admin@lumina.school");
+    await page.locator('input[type="password"]').fill("demo-pass");
+    await page.locator('button[type="submit"]').click();
+    await expect(page.locator('button[aria-label="Notifications"]')).toBeVisible();
+
+    for (const screen of ["Managers", "Teachers", "Students"]) {
+      await nav(page, screen);
+      await expect(page.getByRole("heading", { name: screen, level: 1 })).toBeVisible();
+      await expect(page.getByTestId("invite-row-resend")).toHaveCount(0);
+      await expect(page.getByTestId("invite-result")).toHaveCount(0);
+      await expect(page.getByText("Resend invite")).toHaveCount(0);
+    }
+
+    expect(apiCalls, "demo mode must not call the API").toEqual([]);
+    assertNoPageErrors(pageErrors);
+  });
 });
