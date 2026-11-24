@@ -6,6 +6,7 @@ import Modal from "../shared/Modal";
 import { ConfirmStatusModal, CreditAdjustModal, EnrollmentModal, ResetPasswordModal, StudentFormModal, toGuardian, type StudentFormValues } from "./PeopleForms";
 import { isDemoMode } from "../../lib/auth/mode";
 import { PlanPickerModal } from "./CurriculumForms";
+import { LibraryPickerModal } from "./LibraryForms";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   activeCourseProgress,
@@ -13,6 +14,7 @@ import {
   can,
   courseById,
   lessonPlanForLesson,
+  libraryForLesson,
   creditBalance,
   enrollmentsForStudent,
   lessonsForStudent,
@@ -49,7 +51,13 @@ function selectStudents(data: SchoolData, user: SchoolUser) {
       progress: activeCourseProgress(data, student.id),
       completedCount: completed.length,
       attendance: completed.length ? Math.round((attended / completed.length) * 100) : null,
-      upcoming: upcoming.slice(0, 4).map((lesson) => ({ lesson, teacher: nameOf(data, lesson.teacherId), planTitle: lessonPlanForLesson(data, lesson)?.title })),
+      upcoming: upcoming.slice(0, 4).map((lesson) => ({
+        lesson,
+        teacher: nameOf(data, lesson.teacherId),
+        planTitle: lessonPlanForLesson(data, lesson)?.title,
+        materials: libraryForLesson(data, lesson.id).length,
+        canAttachLibrary: can(data, user, "lesson.attachLibraryItem", { lessonId: lesson.id }),
+      })),
       recent: completed.slice(-3).reverse().map((lesson) => ({ lesson, teacher: nameOf(data, lesson.teacherId) })),
       canManage: can(data, user, "student.manage", { studentId: student.id }),
     };
@@ -57,7 +65,7 @@ function selectStudents(data: SchoolData, user: SchoolUser) {
 }
 
 type StudentRow = ReturnType<typeof selectStudents>[number];
-type Dialog = { kind: "create" } | { kind: "edit" | "enroll" | "credits" | "status" | "reset-password"; row: StudentRow } | { kind: "plan"; row: StudentRow; lesson: Lesson; teacher: string } | null;
+type Dialog = { kind: "create" } | { kind: "edit" | "enroll" | "credits" | "status" | "reset-password"; row: StudentRow } | { kind: "plan" | "library"; row: StudentRow; lesson: Lesson; teacher: string } | null;
 
 function formValues(row: StudentRow): StudentFormValues {
   return {
@@ -174,7 +182,8 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       <div className="lesson-detail-section">
         <span className="eyebrow">UPCOMING</span>
         <div className="manager-mini-list">
-          {selected.upcoming.map(({ lesson, teacher, planTitle }) => <div key={lesson.id}><span>{formatLessonDate(lesson.date)} · {lesson.time}</span><strong>{lesson.title}<small className="manager-plan-line">{planTitle ? `Plan: ${planTitle}` : "No plan yet"}</small></strong><small>{teacher}</small>
+          {selected.upcoming.map(({ lesson, teacher, planTitle, materials, canAttachLibrary }) => <div key={lesson.id}><span>{formatLessonDate(lesson.date)} · {lesson.time}</span><strong>{lesson.title}<small className="manager-plan-line">{planTitle ? `Plan: ${planTitle}` : "No plan yet"}{materials > 0 ? ` · ${materials} material${materials === 1 ? "" : "s"}` : ""}</small></strong><small>{teacher}</small>
+            {canAttachLibrary && <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "library", row: selected, lesson, teacher })}>Materials</button>}
             {selected.canManage ? <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "plan", row: selected, lesson, teacher })}>Change plan</button> : <LessonStatusBadge status={lesson.status} />}
           </div>)}
           {selected.upcoming.length === 0 && <p>No upcoming lessons.</p>}
@@ -216,6 +225,10 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
         if (result.ok) onNotice(planId ? "Plan updated. The teacher and student see it now." : "Plan removed from the lesson.");
         return result;
       }} />}
+    {dialog?.kind === "library" && <LibraryPickerModal user={user} lessonId={dialog.lesson.id}
+      lessonLabel={`${dialog.lesson.title} with ${dialog.teacher} · ${formatLessonDate(dialog.lesson.date)} ${dialog.lesson.time}`}
+      lessonOpen={dialog.lesson.status === "scheduled" || dialog.lesson.status === "live"}
+      onNotice={onNotice} onClose={() => setDialog(null)} />}
     {dialog?.kind === "reset-password" && <ResetPasswordModal person={dialog.row.student} onClose={() => setDialog(null)} onSubmit={async (password) => {
       const result = await resetPersonPassword(user.id, dialog.row.student.id, password);
       if (result.ok) onNotice(`${dialog.row.student.name}’s password was reset.`);

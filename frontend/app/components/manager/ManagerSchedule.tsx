@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, type FormEvent } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
 import { PlanPickerModal } from "./CurriculumForms";
+import { LibraryPickerModal } from "./LibraryForms";
 import { AbsenceModal } from "./PeopleForms";
 import { LessonStatusBadge } from "./parts";
 import { teacherFocusOptions } from "../../lib/data";
@@ -14,6 +15,7 @@ import {
   can,
   creditBalance,
   enrollmentsForStudent,
+  libraryForLesson,
   openSlotsForTeacher,
   studentsForUser,
   teachersForUser,
@@ -23,12 +25,12 @@ import {
   type SchoolUser,
   type TeamWeekItem,
 } from "../../lib/school";
-import { assignPlanToLesson, bookLessonOnBehalf, recordTeacherAbsence, LESSON_CREDIT_HOURS } from "../../lib/school/services";
+import { assignPlanToLesson, bookLessonOnBehalf, detachLibraryItem, recordTeacherAbsence, LESSON_CREDIT_HOURS } from "../../lib/school/services";
 import { formatLessonDate, parseISODate, todayISO } from "../../lib/student";
 
 type LessonItem = Extract<TeamWeekItem, { kind: "lesson" }>;
 type BookingDraft = { teacherId: string; date: string; time: string };
-type Dialog = { kind: "lesson"; item: LessonItem } | { kind: "plan"; item: LessonItem } | { kind: "absence"; item: LessonItem } | { kind: "book"; draft: BookingDraft } | null;
+type Dialog = { kind: "lesson"; item: LessonItem } | { kind: "plan"; item: LessonItem } | { kind: "library"; item: LessonItem } | { kind: "absence"; item: LessonItem } | { kind: "book"; draft: BookingDraft } | null;
 
 function dayLabel(date: string) {
   return parseISODate(date).toLocaleDateString("en-US", { weekday: "short", day: "numeric" });
@@ -117,6 +119,8 @@ export default function ManagerSchedule({ user, onNotice }: { user: SchoolUser; 
     return {
       preferredCourseId: lesson ? activeCourseProgress(data, lesson.studentId)?.courseId : undefined,
       canManage: lesson ? can(data, user, "lesson.attachPlan", { lessonId: lesson.id }) : false,
+      canAttachLibrary: lesson ? can(data, user, "lesson.attachLibraryItem", { lessonId: lesson.id }) : false,
+      materials: lesson ? libraryForLesson(data, lesson.id) : [],
     };
   }, [dialog, user]);
   const extras = useSchool(selectExtras);
@@ -177,6 +181,7 @@ export default function ManagerSchedule({ user, onNotice }: { user: SchoolUser; 
       footer={<>
         <button type="button" className="cancel-button" onClick={() => setDialog(null)}>Close</button>
         {extras.canManage && dialog.item.started && dialog.item.lesson.status !== "cancelled" && !dialog.item.hasAbsence && <button type="button" className="danger-outline-button" onClick={() => setDialog({ kind: "absence", item: dialog.item })}>Record absence</button>}
+        {extras.canAttachLibrary && (dialog.item.lesson.status === "scheduled" || dialog.item.lesson.status === "live") && <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "library", item: dialog.item })}><Icon name="book" size={14} /> Materials</button>}
         {extras.canManage && (dialog.item.lesson.status === "scheduled" || dialog.item.lesson.status === "live") && <button type="button" className="primary-button" onClick={() => setDialog({ kind: "plan", item: dialog.item })}>Change plan</button>}
       </>}>
       <div className="manager-detail-stats schedule-lesson-stats">
@@ -185,6 +190,16 @@ export default function ManagerSchedule({ user, onNotice }: { user: SchoolUser; 
         <div><span className="eyebrow">STATUS</span><LessonStatusBadge status={dialog.item.lesson.status} /></div>
       </div>
       <div className="lesson-detail-section"><span className="eyebrow">LESSON PLAN</span><p>{dialog.item.planTitle ?? "No plan attached."}</p></div>
+      {extras.materials.length > 0 && <div className="lesson-detail-section" data-testid="manager-lesson-materials"><span className="eyebrow">LIBRARY MATERIALS</span>
+        <div className="manager-mini-list">
+          {extras.materials.map((item) => <div key={item.id}><strong>{item.title}<small className="manager-plan-line">{item.category}{item.status === "archived" ? " · archived" : ""}</small></strong>
+            {extras.canAttachLibrary && <button type="button" className="secondary-button compact-button" aria-label={`Remove ${item.title}`} onClick={async () => {
+              const result = await detachLibraryItem(user.id, dialog.item.lesson.id, item.id);
+              onNotice(result.ok ? `${item.title} removed from the lesson.` : result.error);
+            }}>Remove</button>}
+          </div>)}
+        </div>
+      </div>}
       {dialog.item.lesson.cancelReason && <div className="lesson-detail-section"><span className="eyebrow">CANCELLATION</span><p>{dialog.item.lesson.cancelReason}</p></div>}
       {dialog.item.lesson.feedback && <div className="lesson-detail-section"><span className="eyebrow">TEACHER FEEDBACK</span><p>{dialog.item.lesson.feedback}</p></div>}
     </Modal>}
@@ -198,6 +213,10 @@ export default function ManagerSchedule({ user, onNotice }: { user: SchoolUser; 
         if (result.ok) onNotice(planId ? "Plan updated. The teacher and student see it now." : "Plan removed from the lesson.");
         return result;
       }} />}
+    {dialog?.kind === "library" && <LibraryPickerModal user={user} lessonId={dialog.item.lesson.id}
+      lessonLabel={`${dialog.item.lesson.title} · ${dialog.item.teacherName} → ${dialog.item.studentName} · ${formatLessonDate(dialog.item.lesson.date)} ${dialog.item.time}`}
+      lessonOpen={dialog.item.lesson.status === "scheduled" || dialog.item.lesson.status === "live"}
+      onNotice={onNotice} onClose={() => setDialog({ kind: "lesson", item: dialog.item })} />}
     {dialog?.kind === "absence" && <AbsenceModal lessonLabel={`${dialog.item.lesson.title} · ${dialog.item.teacherName} → ${dialog.item.studentName} · ${formatLessonDate(dialog.item.lesson.date)} ${dialog.item.time}`}
       onClose={() => setDialog(null)}
       onSubmit={async (note) => {

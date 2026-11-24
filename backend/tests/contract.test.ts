@@ -82,7 +82,7 @@ describe("school contract", () => {
     // removed collection/setting key; the runtime assertion keeps the test honest.
     expect(collectionContract).toBeNull();
     expect(settingsContract).toBeNull();
-    expect(BOOTSTRAP_COLLECTION_KEYS).toHaveLength(16);
+    expect(BOOTSTRAP_COLLECTION_KEYS).toHaveLength(18);
     expect(BOOTSTRAP_SETTINGS_KEYS).toHaveLength(7);
   });
 
@@ -212,5 +212,37 @@ describe("school contract", () => {
       payload: { newPassword: "Different456!" },
     });
     expect(student.statusCode).toBe(403);
+  });
+  it("registers the Curriculum Library routes behind authentication", async () => {
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/library" })).toBe(true);
+    expect(app.hasRoute({ method: "PATCH", url: "/api/v1/library/:id" })).toBe(true);
+    expect(
+      app.hasRoute({ method: "POST", url: "/api/v1/lessons/:id/library-items" }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({
+        method: "DELETE",
+        url: "/api/v1/lessons/:id/library-items/:libraryItemId",
+      }),
+    ).toBe(true);
+
+    const id = "00000000-0000-0000-0000-000000000003";
+    const calls = [
+      { method: "POST" as const, url: "/api/v1/library", payload: {} },
+      { method: "PATCH" as const, url: `/api/v1/library/${id}`, payload: {} },
+      {
+        method: "POST" as const,
+        url: `/api/v1/lessons/${id}/library-items`,
+        payload: { libraryItemId: id },
+      },
+      {
+        method: "DELETE" as const,
+        url: `/api/v1/lessons/${id}/library-items/${id}`,
+      },
+    ];
+    for (const call of calls) {
+      const response = await app.inject(call);
+      expect(response.statusCode).toBe(401);
+    }
   });
 });

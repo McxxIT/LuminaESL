@@ -10,7 +10,7 @@ import {
   runId,
   writeFixture,
 } from "../support/fixtures";
-import { openEditableCourse } from "../support/flows";
+import { isoDaysFromNow, openEditableCourse, openTeacherLesson } from "../support/flows";
 
 /**
  * Demo-mode regression: with the browser store in charge, sign-in must accept a
@@ -176,5 +176,123 @@ test.describe("Demo mode regression", () => {
     expect(after.collections.courses, "the demo school is back").toHaveProperty("course-core-1to1");
     expect(Object.keys(after.collections.assignments).length, "homework is re-seeded").toBeGreaterThan(0);
     expect(after.seededAt, "the snapshot was re-created").not.toBe("2026-01-01T00:00:00.000Z");
+  });
+  /**
+   * Curriculum Library in demo mode: the manager adds and archives items in the Library tab,
+   * attaches one to Mia's lesson, the student downloads it from IndexedDB, and the teacher sees
+   * it with no attach control. Archived items never reach the picker, completed lessons offer
+   * no Materials action, and nothing calls the API.
+   */
+  test("runs the Curriculum Library locally", async ({ page }, testInfo) => {
+    const pageErrors = collectPageErrors(page);
+    const marker = runId();
+    const title = `Demo library ${marker}`;
+    const archivedTitle = `Demo archived ${marker}`;
+    const bytes = pdfBuffer(marker);
+    const filePath = await writeFixture(testInfo, `demo-library-${marker}.pdf`, bytes);
+    const otherPath = await writeFixture(testInfo, `demo-archived-${marker}.pdf`, pdfBuffer(`${marker}-archived`));
+
+    const apiCalls: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/")) apiCalls.push(request.url());
+    });
+    const demoSignIn = async (email: string) => {
+      await page.locator('input[type="email"]').fill(email);
+      await page.locator('input[type="password"]').fill("demo-pass");
+      await page.locator('button[type="submit"]').click();
+      await expect(page.locator("button.nav-item").first()).toBeVisible();
+    };
+    const demoSignOut = async () => {
+      await nav(page, "Log out");
+      await page.locator('.modal-footer button:has-text("Log out")').click();
+      await expect(page.locator('input[type="email"]')).toBeVisible();
+    };
+    const addMaterial = async (itemTitle: string, file: string) => {
+      await page.locator('button:has-text("Add material")').click();
+      const form = page.locator("#library-item-form");
+      await form.locator('input[type="file"]').setInputFiles(file);
+      await form.locator('label:has-text("Title") input').fill(itemTitle);
+      await form.locator('label:has-text("Category") input').fill("Worksheets");
+      await page.locator('button[form="library-item-form"]').click();
+      await expectNotice(page, /added to the library/i);
+    };
+
+    await page.goto("/");
+    await demoSignIn("manager@lumina.school");
+
+    // Library tab: create two items, archive one.
+    await nav(page, "Curriculum");
+    const libraryTab = page.getByRole("tab", { name: "Library" });
+    await expect(libraryTab, "the Courses / Library toggle is visible").toBeVisible();
+    await libraryTab.click();
+    await addMaterial(title, filePath);
+    await expect(
+      page.getByTestId("library-item").filter({ hasText: title }),
+      "demo library shows the local creator name",
+    ).toContainText("by Priya Raman");
+    expect(apiCalls, "demo library create must not call the API").toEqual([]);
+    await addMaterial(archivedTitle, otherPath);
+    await page.getByTestId("library-item").filter({ hasText: archivedTitle }).locator('button:has-text("Archive")').click();
+    await expectNotice(page, /archived/i);
+    await expect(page.getByTestId("library-item").filter({ hasText: archivedTitle })).toHaveCount(0);
+
+    // Attach to Mia's next lesson from the Students screen.
+    await nav(page, "Students");
+    await page.locator('input[aria-label="Search students"]').fill("Mia Chen");
+    await page.locator("button.manager-table-row").filter({ hasText: "Mia Chen" }).first().click();
+    const upcoming = page.locator(".manager-mini-list > div").filter({ hasText: "Business English" }).first();
+    await upcoming.locator('button:has-text("Materials")').click();
+    const picker = page.locator("#library-picker-form");
+    await expect(picker).toBeVisible();
+    const options = await picker.locator('select[aria-label="Library item"] option').allInnerTexts();
+    expect(options.some((option) => option.includes(title)), "published item is offered").toBe(true);
+    expect(options.some((option) => option.includes(archivedTitle)), "archived item is not offered").toBe(false);
+    await picker.locator('select[aria-label="Library item"]').selectOption({ label: `${title} · Worksheets` });
+    await page.locator('button[form="library-picker-form"]').click();
+    await expectNotice(page, /attached/i);
+    await expect(picker.locator(".manager-mini-list")).toContainText(title);
+    await page.locator('.modal-footer button:has-text("Done")').click();
+    // Closing the picker returns to the student's detail dialog; close that too.
+    await expect(page.locator(".manager-mini-list").first()).toContainText("1 material");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+
+    // A completed lesson offers no Materials action.
+    await nav(page, "Schedule");
+    const completed = page.locator(".schedule-item.lesson.status-completed");
+    for (let week = 0; week < 3 && !(await completed.count()); week += 1) {
+      await page.locator('button[aria-label="Previous week"]').click();
+    }
+    await completed.first().click();
+    await expect(page.locator(".modal-footer")).toBeVisible();
+    await expect(page.locator('.modal-footer button:has-text("Materials")')).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+    await demoSignOut();
+
+    // The student sees the material and downloads the stored bytes.
+    await demoSignIn("student@lumina.school");
+    await nav(page, "Lessons");
+    await page.locator('input[aria-label="Search lessons"]').fill("Business English");
+    await page.locator("button.lesson-card-main").filter({ hasText: "14:30" }).first().click();
+    const studentMaterials = page.getByTestId("student-lesson-materials");
+    await expect(studentMaterials).toContainText(title);
+    const downloadEvent = page.waitForEvent("download");
+    await studentMaterials.locator("button.lesson-material-file").first().click();
+    const downloaded = await downloadBytes(await downloadEvent);
+    expect(downloaded.equals(bytes), "IndexedDB returns the library file").toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+    await demoSignOut();
+
+    // The teacher sees it with no attach control.
+    await demoSignIn("teacher@lumina.school");
+    await openTeacherLesson(page, { time: "14:30", date: isoDaysFromNow(1), studentName: "Mia Chen" });
+    await expect(page.getByTestId("teacher-library-materials")).toContainText(title);
+    await expect(page.locator('.student-modal button:has-text("Materials")')).toHaveCount(0);
+    await expect(page.locator('.student-modal button:has-text("Attach")')).toHaveCount(0);
+
+    expect(apiCalls, "demo mode must not call the API").toEqual([]);
+    assertNoPageErrors(pageErrors);
   });
 });

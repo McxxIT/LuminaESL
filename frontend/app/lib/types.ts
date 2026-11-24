@@ -8,6 +8,18 @@ export type Account = {
 
 export type StudentLessonStatus = "upcoming" | "completed" | "cancelled";
 
+/** A Curriculum Library file linked to a lesson. `storageKey` lets demo mode read IndexedDB. */
+export type LessonLibraryMaterial = {
+  id: string;
+  title: string;
+  category: string;
+  attachmentId: string;
+  fileName: string;
+  type: string;
+  size: number;
+  storageKey?: string;
+};
+
 export type StudentLesson = {
   id: string;
   date: string;
@@ -32,6 +44,8 @@ export type StudentLesson = {
   attendance?: "attended" | "no-show";
   /** Ratings this lesson received from the student and/or their parent. */
   ratings?: { from: "student" | "parent"; score: number; comment?: string }[];
+  /** Library materials linked to this lesson (none for cancelled lessons). */
+  materials?: LessonLibraryMaterial[];
 };
 
 export type AssignmentStatus = "pending" | "submitted" | "graded";
@@ -323,6 +337,8 @@ export type TeacherLesson = {
   cancelReason?: string;
   cancellation?: TeacherLessonCancellation;
   material?: TeacherLessonMaterial;
+  /** Library materials linked to this lesson (none for cancelled lessons). */
+  libraryMaterials?: LessonLibraryMaterial[];
   ratings?: TeacherLessonRating[];
   teacherAbsence?: TeacherLessonAbsence;
 };

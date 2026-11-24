@@ -44,8 +44,8 @@ export const updateLessonPlan = (courseId: string, unitId: string, planId: strin
   command(`/courses/${encodeURIComponent(courseId)}/units/${encodeURIComponent(unitId)}/plans/${encodeURIComponent(planId)}`, "PATCH", input);
 export const deleteLessonPlan = (courseId: string, unitId: string, planId: string) =>
   command(`/courses/${encodeURIComponent(courseId)}/units/${encodeURIComponent(unitId)}/plans/${encodeURIComponent(planId)}`, "DELETE");
-export const attachLessonPlanFile = (courseId: string, unitId: string, planId: string, file: { id: string; name: string; type: string; size: number; storageKey: string }) =>
-  command(`/courses/${encodeURIComponent(courseId)}/units/${encodeURIComponent(unitId)}/plans/${encodeURIComponent(planId)}/attachments`, "POST", file);
+export const attachLessonPlanFile = (courseId: string, unitId: string, planId: string, attachmentId: string) =>
+  command(`/courses/${encodeURIComponent(courseId)}/units/${encodeURIComponent(unitId)}/plans/${encodeURIComponent(planId)}/attachments`, "POST", { attachmentId });
 export const detachLessonPlanFile = (courseId: string, unitId: string, planId: string, attachmentId: string) =>
   command(`/courses/${encodeURIComponent(courseId)}/units/${encodeURIComponent(unitId)}/plans/${encodeURIComponent(planId)}/attachments/${encodeURIComponent(attachmentId)}`, "DELETE");
 

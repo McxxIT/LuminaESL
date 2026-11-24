@@ -13,8 +13,8 @@
  * SIGINT; smoke users are archived at the end. Fixture rows are left behind.
  */
 import "dotenv/config";
-import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq, inArray, isNull, like, sql } from "drizzle-orm";
@@ -24,7 +24,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app";
 import { loadEnv } from "../src/config/env";
 import * as schema from "../src/db/schema";
-import { creditEntries, lessons, refreshTokens, settings, users } from "../src/db/schema";
+import { attachments, creditEntries, lessonPlans, lessons, libraryItems, refreshTokens, settings, users } from "../src/db/schema";
 import { hashPassword } from "../src/lib/password";
 import { addMinutes, LESSON_MINUTES } from "../src/lib/time";
 
@@ -109,6 +109,21 @@ async function cleanup(): Promise<void> {
     } catch (error) {
       console.error("FAILED to archive the smoke admin:", error);
     }
+  }
+  // Library items created by smoke users are archived (never deleted) so they do not stay
+  // published in the shared dev library for real managers.
+  try {
+    await db
+      .update(libraryItems)
+      .set({ status: "archived" })
+      .where(
+        inArray(
+          libraryItems.createdBy,
+          db.select({ id: users.id }).from(users).where(like(users.email, `smoke-${runId}-%`)),
+        ),
+      );
+  } catch (error) {
+    console.error("Could not archive smoke library items (best effort):", error);
   }
   try {
     await db
@@ -873,9 +888,8 @@ async function uploadsScenario(): Promise<void> {
   check(bytes.bytes.length === content.length, `download length ${bytes.bytes.length} != ${content.length}`);
   check(Buffer.compare(Buffer.from(bytes.bytes), Buffer.from(content)) === 0, "download returns the same bytes");
 
-  const attach = await call(tok("managerA"), "POST", `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`, {
-    id, name: "smoke-plan.pdf", type: "application/pdf", size: content.length, storageKey: "smoke",
-  });
+  const planAttachPath = `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`;
+  const attach = await call(tok("managerA"), "POST", planAttachPath, { attachmentId: id });
   expectStatus(attach, 200, "attach upload to a plan");
 
   // Published course plan attachment: enrolled student/teacher and any manager allowed; unrelated student/teacher denied.
@@ -901,7 +915,7 @@ async function uploadsScenario(): Promise<void> {
   expectStatus(draftUpload, 201, "upload draft plan file");
   const draftAttachmentId = str(draftUpload.body, "id");
   expectStatus(await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units/${str(draftUnit.body, "id")}/plans/${str(draftPlan.body, "id")}/attachments`, {
-    id: draftAttachmentId, name: "draft-only.pdf", type: "application/pdf", size: content.length, storageKey: "smoke-draft",
+    attachmentId: draftAttachmentId,
   }), 200, "attach file to draft plan");
   expectStatus(await call(tok("admin"), "GET", `/uploads/${draftAttachmentId}`), 200, "admin reads draft course attachment");
   expectStatus(await call(tok("managerB"), "GET", `/uploads/${draftAttachmentId}`), 403, "other manager blocked from draft course attachment");
@@ -918,6 +932,102 @@ async function uploadsScenario(): Promise<void> {
 
   // Current behavior: uploads write no activity row of their own.
   await expectNoActivity("attachment", id, "attachment.uploaded");
+
+  await planAttachRulesChecks(id, content);
+  await traversalCanaryCheck(id);
+}
+
+/** Plan attach takes only `{ attachmentId }` of an existing upload (Step F, F1.1). */
+async function planAttachRulesChecks(attachedId: string, content: Uint8Array): Promise<void> {
+  const errorCode = (res: Res) => str(obj(res.body, "error").error, "code");
+  const planAttachPath = `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`;
+
+  // (a) managerB can edit their own plan but cannot attach managerA's upload to it.
+  const courseB = await call(tok("managerB"), "POST", "/courses", { title: `Smoke B course ${runId}`, level: "A1", status: "draft" });
+  expectStatus(courseB, 201, "managerB creates a course");
+  const courseBId = str(courseB.body, "id");
+  const unitB = await call(tok("managerB"), "POST", `/courses/${courseBId}/units`, { title: "B Unit 1", order: 0 });
+  expectStatus(unitB, 201, "managerB creates a unit");
+  const unitBId = str(unitB.body, "id");
+  const planB = await call(tok("managerB"), "POST", `/courses/${courseBId}/units/${unitBId}/plans`, { title: "B Plan 1", order: 0 });
+  expectStatus(planB, 201, "managerB creates a plan");
+  const planBPath = `/courses/${courseBId}/units/${unitBId}/plans/${str(planB.body, "id")}/attachments`;
+  const ownB = await upload(tok("managerB"), { name: "b-own.pdf", type: "application/pdf", bytes: content });
+  expectStatus(ownB, 201, "managerB uploads own file");
+  expectStatus(await call(tok("managerB"), "POST", planBPath, { attachmentId: str(ownB.body, "id") }), 200, "managerB attaches own upload to own plan");
+  expectStatus(await call(tok("managerB"), "POST", planBPath, { attachmentId: attachedId }), 403, "managerB attaches managerA's upload");
+
+  // (b) unknown attachment id.
+  expectStatus(await call(tok("managerA"), "POST", planAttachPath, { attachmentId: randomUUID() }), 404, "attach an unknown attachment id");
+
+  // (c) client file metadata and legacy shapes are rejected by the strict body.
+  const clientId = randomUUID();
+  const shapes: Array<[string, unknown]> = [
+    ["attachmentId + storageKey", { attachmentId: attachedId, storageKey: `../smoke-evil-${runId}` }],
+    ["legacy file shape", { id: clientId, name: "x.pdf", type: "application/pdf", size: 1, storageKey: `smoke-evil-legacy-${runId}` }],
+    ["empty body", {}],
+  ];
+  for (const [label, body] of shapes) {
+    const res = await call(tok("managerA"), "POST", planAttachPath, body);
+    expectStatus(res, 400, `plan attach rejects ${label}`);
+    check(errorCode(res) === "VALIDATION_ERROR", `plan attach ${label} error code ${JSON.stringify(res.body)}`);
+  }
+
+  // (d) request evidence cannot be attached to a plan.
+  const reqLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const evidence = await upload(tok("managerA"), { name: "plan-evidence.pdf", type: "application/pdf", bytes: content });
+  expectStatus(evidence, 201, "upload a file that becomes request evidence");
+  const evidenceId = str(evidence.body, "id");
+  const request = await call(tok("teacherA"), "POST", "/requests", { type: "lesson-cancellation", lessonId: reqLesson, reason: "Smoke plan evidence", attachmentId: evidenceId });
+  expectStatus(request, 201, "teacher files request citing the upload");
+  const evidenceAttach = await call(tok("managerA"), "POST", planAttachPath, { attachmentId: evidenceId });
+  expectStatus(evidenceAttach, 422, "attach request evidence to a plan");
+  check(errorCode(evidenceAttach) === "ATTACHMENT_NOT_ELIGIBLE", `request evidence attach error code ${JSON.stringify(evidenceAttach.body)}`);
+
+  // (e) admin attaches any upload to any plan.
+  expectStatus(await call(tok("admin"), "POST", planBPath, { attachmentId: attachedId }), 200, "admin attaches another user's upload");
+
+  // (f) the route created no attachments rows for client-supplied ids or keys.
+  const [stray] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(attachments)
+    .where(sql`${attachments.storageKey} like ${`%smoke-evil-%${runId}%`} or ${attachments.id} = ${clientId}`);
+  check(stray?.n === 0, `plan attach created no attachments rows for client keys (got ${stray?.n})`);
+  const [plan] = await db.select({ ids: lessonPlans.attachmentIds }).from(lessonPlans).where(eq(lessonPlans.id, firstPlanId));
+  check(JSON.stringify(plan?.ids) === JSON.stringify([attachedId]), `plan holds only the legitimately attached id (got ${JSON.stringify(plan?.ids)})`);
+}
+
+/**
+ * A stored key that escapes UPLOAD_DIR is refused with 404 (Step F, F1.3). Uses a canary
+ * file in the system temp dir (outside the upload dir and the repo), never a real secret.
+ */
+async function traversalCanaryCheck(controlId: string): Promise<void> {
+  const canaryName = `smoke-canary-${runId}.txt`;
+  const canaryPath = join(uploadDir, "..", canaryName);
+  const sentinel = `CANARY-${runId}`;
+  let rowId: string | undefined;
+  try {
+    writeFileSync(canaryPath, sentinel);
+    const [row] = await db
+      .insert(attachments)
+      .values({
+        name: `smoke-traversal-${runId}.txt`,
+        type: "text/plain",
+        size: sentinel.length,
+        storageKey: `../${canaryName}`,
+        uploadedBy: adminId!,
+      })
+      .returning({ id: attachments.id });
+    rowId = row?.id;
+    if (!rowId) throw new Error("could not insert the traversal fixture row");
+    const res = await download(tok("admin"), rowId);
+    check(res.status === 404, `traversal key download expected 404, got ${res.status}`);
+    check(!Buffer.from(res.bytes).toString("utf8").includes(sentinel), "traversal download leaks no canary content");
+    check((await download(tok("admin"), controlId)).status === 200, "legitimate upload still downloads");
+  } finally {
+    if (rowId) await db.delete(attachments).where(eq(attachments.id, rowId)).catch(() => undefined);
+    rmSync(canaryPath, { force: true });
+  }
 }
 
 async function notificationsScenario(): Promise<void> {
@@ -1193,6 +1303,301 @@ async function scenario(domain: string, body: () => Promise<void>): Promise<void
   }
 }
 
+/** Lesson inserted straight into the DB with a chosen status (library fixtures need completed/live/cancelled). */
+async function insertLibraryLesson(teacherLabel: string, studentLabel: string, status: "scheduled" | "live" | "completed" | "cancelled"): Promise<string> {
+  const slot = nextSlot(9);
+  const [row] = await db
+    .insert(lessons)
+    .values({
+      teacherId: uid(teacherLabel),
+      studentId: uid(studentLabel),
+      date: slot.date,
+      time: slot.time,
+      endTime: addMinutes(slot.time, LESSON_MINUTES),
+      title: `Smoke library lesson ${runId}`,
+      status,
+      createdBy: adminId!,
+    })
+    .returning({ id: lessons.id });
+  if (!row) throw new Error("could not insert a library lesson");
+  return row.id;
+}
+
+async function setLessonStatus(lessonId: string, status: "completed" | "cancelled"): Promise<void> {
+  await db.update(lessons).set({ status }).where(eq(lessons.id, lessonId));
+}
+
+async function bootstrapOf(label: string): Promise<Record<string, Record<string, Record<string, unknown>>>> {
+  const res = await call(tok(label), "GET", "/school/bootstrap");
+  expectStatus(res, 200, `bootstrap ${label}`);
+  return obj(obj(res.body, "bootstrap").collections, "collections") as Record<string, Record<string, Record<string, unknown>>>;
+}
+
+async function libraryScenario(): Promise<void> {
+  const bytesOf = (label: string) => new TextEncoder().encode(`smoke library ${label} ${runId}`);
+  const pdf = async (label: string, name: string, bytes: Uint8Array) => {
+    const res = await upload(tok(label), { name, type: "application/pdf", bytes });
+    expectStatus(res, 201, `${label} uploads ${name}`);
+    return str(res.body, "id");
+  };
+  const errorCode = (res: Res) => str(obj(res.body, "error").error, "code");
+  const missing = "00000000-0000-4000-8000-000000000000";
+  await createUser("managerC", "manager");
+
+  // 1. Create ------------------------------------------------------------------------------
+  const contentA = bytesOf("a");
+  const fileA = await pdf("managerA", "lib-a.pdf", contentA);
+  const created = await call(tok("managerA"), "POST", "/library", { attachmentId: fileA, title: "  Airport worksheet  ", category: "Worksheets", level: "B1", tags: ["travel", "travel", "speaking"] });
+  expectStatus(created, 201, "manager creates a library item from own upload");
+  const itemA = str(created.body, "id");
+  check(str(created.body, "title") === "Airport worksheet", "library title is trimmed");
+  check(str(created.body, "status") === "published", "new library item is published");
+  check(str(created.body, "createdBy") === uid("managerA"), "createdBy is the actor");
+  check(JSON.stringify(fieldArr(created.body, "tags")) === JSON.stringify(["travel", "speaking"]), "duplicate tags collapse");
+  await expectOneActivity("libraryItem", itemA, "library.created");
+
+  const fileB = await pdf("managerB", "lib-b.pdf", bytesOf("b"));
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileB, title: "Not mine", category: "Worksheets" }), 403, "manager creates from another user's upload");
+  const adminCreated = await call(tok("admin"), "POST", "/library", { attachmentId: fileB, title: "Team B slides", category: "Slides" });
+  expectStatus(adminCreated, 201, "admin creates from another user's upload");
+  const itemB = str(adminCreated.body, "id");
+  check(str(adminCreated.body, "createdBy") === uid("admin"), "admin item createdBy is the admin");
+
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileA, title: "Again", category: "Worksheets" }), 409, "second item on the same attachment");
+  expectStatus(await call(tok("admin"), "POST", "/library", { attachmentId: missing, title: "Ghost", category: "Worksheets" }), 404, "unknown attachment");
+  expectStatus(await call(tok("studentA"), "POST", "/library", { attachmentId: fileA, title: "Student", category: "Worksheets" }), 403, "student creates a library item");
+  expectStatus(await call(tok("teacherA"), "POST", "/library", { attachmentId: fileA, title: "Teacher", category: "Worksheets" }), 403, "teacher creates a library item");
+  // Client file metadata is never accepted: the strict body rejects it; metadata comes from the upload row.
+  const fileMeta = await pdf("managerA", "lib-meta.pdf", bytesOf("meta"));
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", name: "evil.exe", size: 1 }), 400, "client file metadata rejected");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", description: "x".repeat(2001) }), 400, "description over 2000 chars");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", level: "x".repeat(51) }), 400, "level over 50 chars");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", tags: Array.from({ length: 21 }, (_, i) => `t${i}`) }), 400, "more than 20 tags");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: " ", category: "Worksheets" }), 400, "blank title");
+
+  // Request evidence can never become a library item.
+  const reqLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const evidence = await pdf("teacherA", "lib-evidence.pdf", bytesOf("evidence"));
+  const request = await call(tok("teacherA"), "POST", "/requests", { type: "lesson-cancellation", lessonId: reqLesson, reason: "Smoke library evidence", attachmentId: evidence });
+  expectStatus(request, 201, "teacher files request evidence");
+  const evidenceItem = await call(tok("admin"), "POST", "/library", { attachmentId: evidence, title: "Evidence", category: "Worksheets" });
+  expectStatus(evidenceItem, 422, "request evidence into the library");
+  check(errorCode(evidenceItem) === "ATTACHMENT_NOT_ELIGIBLE", `request evidence error code ${JSON.stringify(evidenceItem.body)}`);
+
+  const createdC = await call(tok("managerC"), "POST", "/library", { attachmentId: await pdf("managerC", "lib-c.pdf", bytesOf("c")), title: "Manager C handout", category: "Handouts" });
+  expectStatus(createdC, 201, "manager without a team creates an item");
+  const itemC = str(createdC.body, "id");
+
+  // 2. Patch -------------------------------------------------------------------------------
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemA}`, { title: "Airport worksheet v2" }), 200, "creator edits");
+  expectStatus(await call(tok("managerB"), "PATCH", `/library/${itemA}`, { title: "Hijack" }), 403, "other manager edits");
+  expectStatus(await call(tok("teacherA"), "PATCH", `/library/${itemA}`, { title: "Hijack" }), 403, "teacher edits");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { category: "Worksheets A" }), 200, "admin edits");
+  check((await activityCount("libraryItem", itemA, "library.updated")) === 2, "two edits log two library.updated rows");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { attachmentId: fileB }), 400, "PATCH cannot swap the file");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { createdBy: uid("managerB") }), 400, "PATCH cannot change the creator");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { owner: "x" }), 400, "PATCH rejects unknown keys");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, {}), 400, "PATCH rejects an empty body");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${missing}`, { title: "Ghost" }), 404, "PATCH unknown item");
+
+  // 3. Attach ------------------------------------------------------------------------------
+  const lessonA = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const lessonLive = await insertLibraryLesson("teacherA", "studentA", "live");
+  const lessonDone = await insertLibraryLesson("teacherA", "studentA", "completed");
+  const lessonGone = await insertLibraryLesson("teacherA", "studentA", "cancelled");
+  const lessonB = await insertLibraryLesson("teacherB", "studentB", "scheduled");
+
+  const attached = await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemA });
+  expectStatus(attached, 200, "manager attaches to own-team lesson");
+  check(str(attached.body, "id") === `${lessonA}:${itemA}`, "link id is lessonId:libraryItemId");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemA }), 200, "repeat attach is idempotent");
+  await expectOneActivity("lesson", lessonA, "lesson.libraryAttached");
+  expectStatus(await call(tok("managerB"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemB }), 403, "other-team manager attaches");
+  expectStatus(await call(tok("teacherA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemB }), 403, "teacher attaches");
+  expectStatus(await call(tok("studentA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemB }), 403, "student attaches");
+  expectStatus(await call(tok("admin"), "POST", `/lessons/${lessonB}/library-items`, { libraryItemId: itemB }), 200, "admin attaches to any lesson");
+  expectStatus(await call(tok("admin"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemC }), 200, "admin attaches manager C's item");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonLive}/library-items`, { libraryItemId: itemA }), 200, "attach to a live lesson");
+  const doneAttach = await call(tok("managerA"), "POST", `/lessons/${lessonDone}/library-items`, { libraryItemId: itemA });
+  expectStatus(doneAttach, 422, "attach to a completed lesson");
+  check(errorCode(doneAttach) === "LESSON_NOT_ATTACHABLE", "completed lesson error code");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonGone}/library-items`, { libraryItemId: itemA }), 422, "attach to a cancelled lesson");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${missing}/library-items`, { libraryItemId: itemA }), 404, "attach to an unknown lesson");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: missing }), 404, "attach an unknown item");
+
+  // 4. Download ----------------------------------------------------------------------------
+  const studentBytes = await download(tok("studentA"), fileA);
+  check(studentBytes.status === 200 && Buffer.compare(Buffer.from(studentBytes.bytes), Buffer.from(contentA)) === 0, `linked student downloads identical bytes (got ${studentBytes.status})`);
+  check((await download(tok("studentB"), fileA)).status === 403, "unrelated student download blocked");
+  check((await download(tok("teacherA"), fileA)).status === 200, "teacher of the linked lesson downloads");
+  check((await download(tok("teacherB"), fileA)).status === 403, "unrelated teacher download blocked");
+  check((await download(tok("managerB"), fileA)).status === 200, "other manager downloads a published item");
+
+  // A student whose only linked lesson is cancelled loses access.
+  const fileZ = await pdf("managerA", "lib-z.pdf", bytesOf("z"));
+  const createdZ = await call(tok("managerA"), "POST", "/library", { attachmentId: fileZ, title: "Zero handout", category: "Handouts" });
+  expectStatus(createdZ, 201, "create item for the cancel check");
+  const itemZ = str(createdZ.body, "id");
+  const lessonZero = await insertLibraryLesson("teacherA", "studentZero", "scheduled");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonZero}/library-items`, { libraryItemId: itemZ }), 200, "attach item for studentZero");
+  check((await download(tok("studentZero"), fileZ)).status === 200, "student downloads before the lesson is cancelled");
+  await setLessonStatus(lessonZero, "cancelled");
+  check((await download(tok("studentZero"), fileZ)).status === 403, "student of a cancelled linked lesson is blocked");
+
+  // Archive: no new browse, existing links keep access.
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemA}`, { status: "archived" }), 200, "creator archives");
+  await expectOneActivity("libraryItem", itemA, "library.archived");
+  check((await download(tok("studentA"), fileA)).status === 200, "linked student keeps access to an archived item");
+  check((await download(tok("managerB"), fileA)).status === 403, "other manager loses an archived item not linked to their team");
+  check((await download(tok("managerA"), fileA)).status === 200, "creator keeps access to an archived item");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonLive}/library-items`, { libraryItemId: itemA }), 422, "archived item cannot be attached again");
+  const fileU = await pdf("managerA", "lib-u.pdf", bytesOf("u"));
+  const createdU = await call(tok("managerA"), "POST", "/library", { attachmentId: fileU, title: "Unused", category: "Handouts" });
+  expectStatus(createdU, 201, "create an unlinked item");
+  const itemU = str(createdU.body, "id");
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemU}`, { status: "archived" }), 200, "archive the unlinked item");
+  check((await download(tok("managerB"), fileU)).status === 403, "other manager blocked from an archived unlinked item");
+  const blocked = await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemU });
+  expectStatus(blocked, 422, "attach an archived item");
+  check(errorCode(blocked) === "ITEM_ARCHIVED", "archived item error code");
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemU}`, { status: "published" }), 200, "unarchive");
+  check((await activityCount("libraryItem", itemU, "library.archived")) === 1, "unarchive logs no second library.archived row");
+  await expectOneActivity("libraryItem", itemU, "library.updated");
+
+  // Phase 02 regression with library items present.
+  check((await download(tok("studentA"), evidence)).status === 403, "request evidence stays student-invisible");
+  const stray = await pdf("managerB", "lib-stray.pdf", bytesOf("stray"));
+  check((await download(tok("studentA"), stray)).status === 403, "unreferenced upload stays blocked for a student");
+  check((await download(tok("managerA"), stray)).status === 403, "unreferenced upload stays blocked for another manager");
+
+  // 5. Bootstrap per role --------------------------------------------------------------------
+  const studentBoot = await bootstrapOf("studentA");
+  const studentLessonIds = new Set(Object.keys(studentBoot.lessons ?? {}));
+  const studentLinks = Object.values(studentBoot.lessonLibraryItems ?? {});
+  check(studentLinks.every((link) => studentLessonIds.has(String(link.lessonId))), "student sees only links on own lessons");
+  check(Boolean(studentBoot.lessonLibraryItems?.[`${lessonA}:${itemA}`]), "student sees the link on their lesson");
+  check(Boolean(studentBoot.libraryItems?.[itemA]) && Boolean(studentBoot.libraryItems?.[itemC]), "student sees items linked to their lessons");
+  check(!studentBoot.libraryItems?.[itemB] && !studentBoot.libraryItems?.[itemU], "student does not browse other items");
+  check(Boolean(studentBoot.attachments?.[fileA]) && studentBoot.attachments?.[fileA]?.name === "lib-a.pdf" && studentBoot.attachments?.[fileA]?.size === contentA.length, "attachment metadata comes from the upload row");
+  check(!studentBoot.users?.[uid("managerC")], "student bootstrap pulls no library creator rows");
+  check(Object.values(studentBoot.libraryItems ?? {}).every((item) => item.createdByName === undefined), "student library items carry no creator name");
+
+  const zeroBoot = await bootstrapOf("studentZero");
+  check(Object.keys(zeroBoot.libraryItems ?? {}).length === 0 && Object.keys(zeroBoot.lessonLibraryItems ?? {}).length === 0, "student with only a cancelled linked lesson sees no library data");
+
+  const teacherBoot = await bootstrapOf("teacherA");
+  const teacherLessons = teacherBoot.lessons ?? {};
+  check(Object.values(teacherBoot.lessonLibraryItems ?? {}).every((link) => teacherLessons[String(link.lessonId)] && teacherLessons[String(link.lessonId)]?.status !== "cancelled"), "teacher sees only links on own non-cancelled lessons");
+  check(Boolean(teacherBoot.libraryItems?.[itemA]) && !teacherBoot.libraryItems?.[itemZ] && !teacherBoot.libraryItems?.[itemB], "teacher item visibility");
+  check(!teacherBoot.users?.[uid("managerC")], "teacher bootstrap pulls no library creator rows");
+  check(Object.values(teacherBoot.libraryItems ?? {}).every((item) => item.createdByName === undefined), "teacher library items carry no creator name");
+
+  const managerBoot = await bootstrapOf("managerA");
+  check(Boolean(managerBoot.libraryItems?.[itemB]) && Boolean(managerBoot.libraryItems?.[itemC]), "manager browses published items");
+  check(Boolean(managerBoot.libraryItems?.[itemA]), "manager sees own archived item");
+  check(Boolean(managerBoot.lessonLibraryItems?.[`${lessonA}:${itemA}`]) && !managerBoot.lessonLibraryItems?.[`${lessonB}:${itemB}`], "manager sees team links only");
+  const creatorBoot = await bootstrapOf("admin");
+  const managerCName = creatorBoot.users?.[uid("managerC")]?.name;
+  check(typeof managerCName === "string" && managerCName.length > 0, "admin bootstrap has managerC's name");
+  check(!managerBoot.users?.[uid("managerC")], "manager bootstrap pulls no other-manager user row because of the library");
+  check(managerBoot.libraryItems?.[itemC]?.createdByName === managerCName, "manager bootstrap carries the library creator's display name");
+  check(creatorBoot.libraryItems?.[itemC]?.createdByName === managerCName, "admin bootstrap carries the library creator's display name");
+  const managerBBoot = await bootstrapOf("managerB");
+  check(!managerBBoot.libraryItems?.[itemA], "other manager does not see an archived item unrelated to their team");
+  check(!managerBBoot.lessonLibraryItems?.[`${lessonA}:${itemA}`], "other manager sees no links on another team's lessons");
+  for (const label of ["studentA", "studentB", "teacherA", "managerB"]) {
+    const boot = label === "studentA" ? studentBoot : label === "teacherA" ? teacherBoot : label === "managerB" ? managerBBoot : await bootstrapOf(label);
+    const lessonIds = new Set(Object.keys(boot.lessons ?? {}));
+    check(Object.values(boot.lessonLibraryItems ?? {}).every((link) => lessonIds.has(String(link.lessonId))), `${label} gets no link rows for lessons outside their view`);
+  }
+  const adminBoot = await bootstrapOf("admin");
+  check(Boolean(adminBoot.lessonLibraryItems?.[`${lessonB}:${itemB}`]) && Boolean(adminBoot.libraryItems?.[itemU]), "admin sees every item and link");
+
+  // 6. Detach --------------------------------------------------------------------------------
+  expectStatus(await call(tok("teacherA"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 403, "teacher detaches");
+  expectStatus(await call(tok("studentA"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 403, "student detaches");
+  expectStatus(await call(tok("managerB"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 403, "other-team manager detaches");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${missing}/library-items/${itemA}`), 404, "detach on an unknown lesson");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonA}/library-items/${missing}`), 404, "detach an unknown item");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonA}/library-items/${itemA}`), 204, "manager detaches");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonA}/library-items/${itemA}`), 204, "repeat detach is idempotent");
+  await expectOneActivity("lesson", lessonA, "lesson.libraryDetached");
+  await setLessonStatus(lessonLive, "completed");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 204, "detach on a completed lesson");
+  await expectOneActivity("lesson", lessonLive, "lesson.libraryDetached");
+  check((await download(tok("studentA"), fileA)).status === 403, "student loses access once the item is detached everywhere");
+
+  expectStatus(await call(null, "POST", "/library", { attachmentId: fileA, title: "x", category: "y" }), 401, "anonymous create");
+  check(str(createdC.body, "createdByName") === managerCName, "create response carries the creator name");
+
+  await libraryStepFChecks(pdf, bytesOf);
+}
+
+/** Step F library checks: plan/library overlap, concurrency, and the status CHECK (F5 i-iii, v). */
+async function libraryStepFChecks(
+  pdf: (label: string, name: string, bytes: Uint8Array) => Promise<string>,
+  bytesOf: (label: string) => Uint8Array,
+): Promise<void> {
+  // (i) A file that is both a published-course plan attachment and a library item keeps plan access.
+  const both = await pdf("managerA", "lib-both.pdf", bytesOf("both"));
+  expectStatus(await call(tok("managerA"), "POST", `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`, { attachmentId: both }), 200, "attach the overlap file to a plan");
+  const bothItem = await call(tok("managerA"), "POST", "/library", { attachmentId: both, title: "Overlap", category: "Handouts" });
+  expectStatus(bothItem, 201, "overlap file becomes a library item");
+  const bothItemId = str(bothItem.body, "id");
+  const bothLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${bothLesson}/library-items`, { libraryItemId: bothItemId }), 200, "link the overlap item to a lesson");
+  check((await download(tok("studentA"), both)).status === 200, "enrolled student downloads the overlap file");
+  check((await download(tok("teacherA"), both)).status === 200, "enrolled teacher downloads the overlap file");
+  check((await download(tok("studentB"), both)).status === 403, "unrelated student blocked from the overlap file");
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${bothItemId}`, { status: "archived" }), 200, "archive the overlap item");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${bothLesson}/library-items/${bothItemId}`), 204, "detach the overlap item");
+  check((await download(tok("studentA"), both)).status === 200, "plan access survives archive and detach of the library link");
+  check((await download(tok("studentB"), both)).status === 403, "unrelated student still blocked after detach");
+
+  // (ii) Two parallel creates on one upload: exactly one 201 and one 409, never 500.
+  const raceFile = await pdf("managerA", "lib-race.pdf", bytesOf("race"));
+  const creates = await Promise.all([0, 1].map((n) => call(tok("managerA"), "POST", "/library", { attachmentId: raceFile, title: `Race ${n}`, category: "Handouts" })));
+  const createStatuses = creates.map((res) => res.status).sort((a, b) => a - b);
+  check(JSON.stringify(createStatuses) === JSON.stringify([201, 409]), `parallel creates give [201, 409], got ${JSON.stringify(createStatuses)}`);
+  const raceItem = creates.find((res) => res.status === 201);
+  if (!raceItem) throw new Error("no parallel create succeeded");
+  const raceItemId = str(raceItem.body, "id");
+
+  // (iii) Two parallel attaches: both 200, exactly one activity row.
+  const raceLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const linkPath = `/lessons/${raceLesson}/library-items`;
+  const attaches = await Promise.all([0, 1].map(() => call(tok("managerA"), "POST", linkPath, { libraryItemId: raceItemId })));
+  check(attaches.every((res) => res.status === 200), `parallel attaches both 200, got ${JSON.stringify(attaches.map((res) => res.status))}`);
+  await expectOneActivity("lesson", raceLesson, "lesson.libraryAttached");
+
+  // Attach racing detach: never 500; attach in {200, 409}, detach in {200, 204}.
+  for (let round = 0; round < 5; round += 1) {
+    const [attachRes, detachRes] = await Promise.all([
+      call(tok("managerA"), "POST", linkPath, { libraryItemId: raceItemId }),
+      call(tok("managerA"), "DELETE", `${linkPath}/${raceItemId}`),
+    ]);
+    check(attachRes.status === 200 || attachRes.status === 409, `attach vs detach round ${round}: attach got ${attachRes.status}`);
+    check(detachRes.status === 200 || detachRes.status === 204, `attach vs detach round ${round}: detach got ${detachRes.status}`);
+  }
+  const settle = await call(tok("managerA"), "POST", linkPath, { libraryItemId: raceItemId });
+  expectStatus(settle, 200, "attach after the race settles");
+  const links = Object.values((await bootstrapOf("admin")).lessonLibraryItems ?? {}).filter((link) => link.lessonId === raceLesson && link.libraryItemId === raceItemId);
+  check(links.length === 1, `end state holds exactly one link, got ${links.length}`);
+
+  // (v) The DB CHECK rejects an invalid status (23514); no row is left behind.
+  const bogusFile = await pdf("admin", "lib-bogus.pdf", bytesOf("bogus"));
+  let code: unknown;
+  try {
+    await db.insert(libraryItems).values({ title: "Bogus", category: "Handouts", attachmentId: bogusFile, createdBy: adminId!, status: "bogus" });
+  } catch (error) {
+    const err = error as { code?: unknown; cause?: { code?: unknown } };
+    code = err.code ?? err.cause?.code;
+  }
+  check(code === "23514", `invalid status insert fails with a check violation (got ${String(code)})`);
+  const leftover = await db.select({ id: libraryItems.id }).from(libraryItems).where(eq(libraryItems.attachmentId, bogusFile));
+  check(leftover.length === 0, "the rejected insert left no library row");
+}
+
 async function main(): Promise<number> {
   console.log(`Lumina API smoke run ${runId} on ${base} (db host ${dbHost})`);
   app = await buildApp({ env });
@@ -1224,6 +1629,7 @@ async function main(): Promise<number> {
   await scenario("profile", profileScenario);
   await scenario("uploads", uploadsScenario);
   await scenario("notifications", notificationsScenario);
+  await scenario("library", libraryScenario);
   await scenario("auth", authScenario);
 
   const failed = outcomes.filter((outcome) => outcome.error);

@@ -1,0 +1,1 @@
+ALTER TABLE "library_items" ADD CONSTRAINT "library_items_status_check" CHECK ("library_items"."status" in ('published', 'archived'));

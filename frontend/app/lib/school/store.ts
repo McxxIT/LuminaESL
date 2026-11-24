@@ -39,6 +39,8 @@ export function createEmptySchool(): SchoolData {
       assignments: {},
       credits: {},
       activity: {},
+      libraryItems: {},
+      lessonLibraryItems: {},
     },
   };
 }

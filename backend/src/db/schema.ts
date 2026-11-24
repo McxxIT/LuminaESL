@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -8,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -237,6 +239,41 @@ export const attachments = pgTable("attachments", {
     .notNull(),
 });
 
+/**
+ * Curriculum Library: one global, school-wide set of reusable materials. One file per item
+ * (`attachment_id` unique); archive-only (`status` published | archived, zod and CHECK-enforced).
+ */
+export const libraryItems = pgTable("library_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  category: text("category").notNull(),
+  level: text("level"),
+  description: text("description"),
+  tags: text("tags")
+    .array()
+    .default(sql`'{}'::text[]`)
+    .notNull(),
+  attachmentId: uuid("attachment_id")
+    .notNull()
+    .unique()
+    .references(() => attachments.id, { onDelete: "restrict" }),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  status: text("status").default("published").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+}, (table) => [
+  check(
+    "library_items_status_check",
+    sql`${table.status} in ('published', 'archived')`,
+  ),
+]);
+
 export const enrollments = pgTable(
   "enrollments",
   {
@@ -318,6 +355,29 @@ export const lessons = pgTable(
     uniqueIndex("lessons_active_teacher_date_time_uidx")
       .on(table.teacherId, table.date, table.time)
       .where(sql`${table.status} in ('scheduled', 'live')`),
+  ],
+);
+
+/** Library items linked to a lesson. No id column; the API derives `{lessonId}:{libraryItemId}`. */
+export const lessonLibraryItems = pgTable(
+  "lesson_library_items",
+  {
+    lessonId: uuid("lesson_id")
+      .notNull()
+      .references(() => lessons.id, { onDelete: "cascade" }),
+    libraryItemId: uuid("library_item_id")
+      .notNull()
+      .references(() => libraryItems.id, { onDelete: "restrict" }),
+    attachedBy: uuid("attached_by")
+      .notNull()
+      .references(() => users.id),
+    attachedAt: timestamp("attached_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.lessonId, table.libraryItemId] }),
+    index("lesson_library_items_item_idx").on(table.libraryItemId),
   ],
 );
 
@@ -542,3 +602,5 @@ export type Lesson = typeof lessons.$inferSelect;
 export type Assignment = typeof assignments.$inferSelect;
 export type CreditEntry = typeof creditEntries.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type LibraryItem = typeof libraryItems.$inferSelect;
+export type LessonLibraryItem = typeof lessonLibraryItems.$inferSelect;

@@ -109,6 +109,37 @@ export type AttachmentMeta = {
   uploadedAt: Timestamp;
 };
 
+export type LibraryItemStatus = "published" | "archived";
+
+/**
+ * Curriculum Library item: one reusable file in the global, school-wide library. Admin and
+ * managers create items; the creator or an admin edits or archives them (archive-only).
+ */
+export type LibraryItem = {
+  id: string;
+  title: string;
+  category: string;
+  level?: string;
+  description?: string;
+  tags: string[];
+  attachmentId: string;
+  createdBy: string;
+  /** Creator display name; shipped to admin/manager only, so other staff user rows are never needed. */
+  createdByName?: string;
+  status: LibraryItemStatus;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+
+/** A library item linked to a lesson. `id` is derived as `{lessonId}:{libraryItemId}` (no DB column). */
+export type LessonLibraryLink = {
+  id: string;
+  lessonId: string;
+  libraryItemId: string;
+  attachedBy: string;
+  attachedAt: Timestamp;
+};
+
 /** `ended` = replaced by a new enrollment (e.g. the student changed teacher). */
 export type EnrollmentStatus = "active" | "paused" | "completed" | "ended";
 
@@ -299,6 +330,8 @@ export type SchoolCollections = {
   assignments: Record<string, Assignment>;
   credits: Record<string, CreditLedgerEntry>;
   activity: Record<string, ActivityEntry>;
+  libraryItems: Record<string, LibraryItem>;
+  lessonLibraryItems: Record<string, LessonLibraryLink>;
 };
 
 export type CollectionName = keyof SchoolCollections;

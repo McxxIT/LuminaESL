@@ -1,5 +1,5 @@
 import { get, list, query } from "./repositories";
-import type { Course, Lesson, LessonPlan, SchoolData, SchoolRequest, SchoolRole, SchoolUser, StudentProfileRecord, TeacherProfileRecord } from "./types";
+import type { Course, Lesson, LessonPlan, LibraryItem, SchoolData, SchoolRequest, SchoolRole, SchoolUser, StudentProfileRecord, TeacherProfileRecord } from "./types";
 
 /**
  * Read-only, scoped queries shared by every role. Screens use these through `useSchool`; services
@@ -215,4 +215,35 @@ export function assignmentsForStudent(data: SchoolData, studentId: string) {
 
 export function assignmentsForTeacher(data: SchoolData, teacherId: string) {
   return query(data, "assignments", (assignment) => assignment.teacherId === teacherId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export type LibraryFilters = {
+  search?: string;
+  category?: string;
+  includeArchived?: boolean;
+};
+
+/** Library items for the browse screen, newest first. Archived items only on request. */
+export function libraryItemsFor(data: SchoolData, filters: LibraryFilters = {}): LibraryItem[] {
+  const search = filters.search?.trim().toLowerCase() ?? "";
+  return list(data, "libraryItems")
+    .filter((item) => filters.includeArchived || item.status === "published")
+    .filter((item) => !filters.category || item.category === filters.category)
+    .filter((item) => !search || [item.title, item.category, item.level ?? "", item.description ?? "", ...item.tags].some((value) => value.toLowerCase().includes(search)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** Distinct library categories, sorted, for the category filter. */
+export function libraryCategories(data: SchoolData): string[] {
+  return [...new Set(list(data, "libraryItems").map((item) => item.category))].sort((a, b) => a.localeCompare(b));
+}
+
+/** Library items linked to a lesson, in the order they were attached. */
+export function libraryForLesson(data: SchoolData, lessonId: string): LibraryItem[] {
+  return query(data, "lessonLibraryItems", (link) => link.lessonId === lessonId)
+    .sort((a, b) => a.attachedAt.localeCompare(b.attachedAt))
+    .flatMap((link) => {
+      const item = get(data, "libraryItems", link.libraryItemId);
+      return item ? [item] : [];
+    });
 }

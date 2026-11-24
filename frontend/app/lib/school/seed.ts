@@ -282,6 +282,9 @@ export function createSeedSchool(now = new Date().toISOString()): SchoolData {
     assignments: byId(assignments),
     credits: byId(credits),
     activity: byId([{ id: "activity-seed", actorId: admin, action: "school.seeded", targetType: "school", targetId: "lumina", summary: "Demo school created", createdAt: now }]),
+    // The demo library starts empty; staff add materials in the Library tab.
+    libraryItems: {},
+    lessonLibraryItems: {},
   };
 
   return { version: SCHOOL_SCHEMA_VERSION, seededAt: now, settings: defaultSchoolSettings(), collections };

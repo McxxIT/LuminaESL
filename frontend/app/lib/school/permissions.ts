@@ -20,6 +20,9 @@ export type SchoolAction =
   | "attachment.upload"
   | "enrollment.manage"
   | "lesson.attachPlan"
+  | "lesson.attachLibraryItem"
+  | "library.manage"
+  | "library.edit"
   | "lesson.book"
   | "lesson.bookOnBehalf"
   | "lesson.schedule"
@@ -40,6 +43,7 @@ export type PermissionTarget = {
   teacherId?: string;
   studentId?: string;
   lessonId?: string;
+  libraryItemId?: string;
 };
 
 export class PermissionError extends Error {
@@ -93,6 +97,22 @@ export function can(data: SchoolData, actor: SchoolUser | undefined, action: Sch
     case "teacher.create":
     case "student.create":
       return isAdmin || isManager;
+
+    // Curriculum Library: admin and managers browse and add; the creator or admin edits/archives.
+    case "library.manage":
+      return isAdmin || isManager;
+
+    case "library.edit": {
+      if (isAdmin) return true;
+      const item = get(data, "libraryItems", target.libraryItemId);
+      return isManager && item?.createdBy === actor.id;
+    }
+
+    // Teacher-team scope (mirrors backend `managerOwnsTeacher`), not `ownsAsManager`, which
+    // would also require the student's roster manager to match. Teachers/students never attach.
+    case "lesson.attachLibraryItem":
+      if (isAdmin) return true;
+      return isManager && teacherId !== undefined && managerIdForTeacher(data, teacherId) === actor.id;
 
     case "credits.purchase":
       return actor.role === "student" && (!studentId || studentId === actor.id);

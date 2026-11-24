@@ -17,9 +17,10 @@ import {
   enrollments,
   lessonPlans,
   lessons,
+  requests,
   type LessonPlanSection,
 } from "../db/schema";
-import { badRequest, conflict, notFound } from "../lib/errors";
+import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
 import { assertCourseEditable } from "../lib/scope";
@@ -78,13 +79,8 @@ const createPlanSchema = z.object({
 });
 
 const updatePlanSchema = createPlanSchema.partial();
-const attachmentSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().trim().min(1).max(255),
-  type: z.string().trim().min(1).max(120),
-  size: z.number().int().nonnegative(),
-  storageKey: z.string().trim().min(1).max(500),
-});
+/** Plan attach references an existing upload; client file metadata is never trusted. */
+const attachmentSchema = z.object({ attachmentId: z.string().uuid() }).strict();
 
 /** Resolve a plan's owning course and enforce the owner/admin write rule. */
 async function assertPlanEditable(
@@ -615,8 +611,28 @@ export const courseRoutes: FastifyPluginAsync = async (app) => {
       await assertPlanEditable(app, request.user, unitId, planId);
       const [plan] = await app.db.select().from(lessonPlans).where(and(eq(lessonPlans.id, planId), eq(lessonPlans.unitId, unitId))).limit(1);
       if (!plan) throw notFound("Lesson plan not found");
-      await app.db.insert(attachments).values({ ...body, uploadedBy: request.user.sub }).onConflictDoNothing();
-      const ids = plan.attachmentIds.includes(body.id) ? plan.attachmentIds : [...plan.attachmentIds, body.id];
+      const [attachment] = await app.db
+        .select()
+        .from(attachments)
+        .where(eq(attachments.id, body.attachmentId))
+        .limit(1);
+      if (!attachment) throw notFound("Attachment not found");
+      if (request.user.role !== "admin" && attachment.uploadedBy !== request.user.sub) {
+        throw forbidden("You can only attach files you uploaded");
+      }
+      const [evidence] = await app.db
+        .select({ id: requests.id })
+        .from(requests)
+        .where(eq(requests.attachmentId, attachment.id))
+        .limit(1);
+      if (evidence) {
+        throw new AppError(
+          422,
+          "ATTACHMENT_NOT_ELIGIBLE",
+          "Request evidence cannot be attached to a lesson plan",
+        );
+      }
+      const ids = plan.attachmentIds.includes(attachment.id) ? plan.attachmentIds : [...plan.attachmentIds, attachment.id];
       const [updated] = await app.db.update(lessonPlans).set({ attachmentIds: ids, updatedAt: new Date() }).where(eq(lessonPlans.id, planId)).returning();
       return updated;
     },
