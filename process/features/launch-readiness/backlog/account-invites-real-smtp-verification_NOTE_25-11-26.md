@@ -7,11 +7,11 @@ feature: launch-readiness
 
 # Real SMTP delivery verification (Step F / AC-19)
 
-status: OPEN, waiting for the user
+status: RESOLVED 26-11-26. Step F passed: a real email arrived through the user's SMTP account, the link opened the set-password screen, the password was set and sign-in worked (user-confirmed). AC-19 met.
 item: account-invites plan Step F, acceptance criterion AC-19
-priority: HIGH. Must run before the invite flow is relied on, and before Phase 06 documents production mail.
+priority: was HIGH (done). It had to run before the invite flow is relied on, and before Phase 06 documents production mail.
 
-## Gap
+## Gap (closed 26-11-26)
 
 Every test uses an array mailer (smoke) or the `log` mailer (e2e); smtp is refused under `NODE_ENV=test`. No real email has ever been sent by this code, so SMTP settings, deliverability, and the rendered invite email are unverified.
 
@@ -25,4 +25,9 @@ Every test uses an array mailer (smoke) or the `log` mailer (e2e); smtp is refus
 ## Notes
 
 - Never print the SMTP password, token, or link in logs or reports.
-- User to-do: add `APP_URL` and `INVITE_RESEND_COOLDOWN_SECONDS` to the backend example env file (agents cannot edit it).
+- Done 26-11-26: `APP_URL`, `INVITE_RESEND_COOLDOWN_SECONDS` and a documented `MAIL_*` placeholder block were added to the backend example env file.
+
+## Result (26-11-26)
+
+- One invited test student was created with the user's chosen address (201, `invite {sent:true, mode:smtp}`); delivery, link, set-password and sign-in all confirmed by the user; the test account was archived. The task folder moved to `completed/`.
+- Remaining unverified, low value: rendering in other mail clients and spam-folder placement on other providers.

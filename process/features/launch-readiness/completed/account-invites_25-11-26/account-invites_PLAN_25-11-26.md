@@ -16,9 +16,9 @@ Date: 25-11-26
 **Umbrella plan (context only, not modified by this plan):** process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md
 **Backlog item closed:** process/features/launch-readiness/backlog/default-account-password_NOTE_24-11-26.md (HIGH, "should-fix before launch")
 Complexity: COMPLEX (schema migration + auth/identity + public API contract + secrets/trust boundary + new external dependency + both workspaces)
-Status: VERIFIED (with gaps) 26-11-26 - execution commit 1940ea6; EVL green (independent, twice); review approved-with-concerns; Step F real SMTP send (AC-19) pending the user, so this task folder stays in active/
-**Report destination:** process/features/launch-readiness/active/account-invites_25-11-26/account-invites_REPORT_25-11-26.md
-**High-risk evidence pack:** process/features/launch-readiness/active/account-invites_25-11-26/harness/account-invites/ (5 JSON artifacts, same shape as `lumina-v1-finish_23-11-26/harness/phase-03-auth/`)
+Status: VERIFIED (all ACs incl. AC-19) 26-11-26 - execution commit 1940ea6; EVL green (independent, twice); review approved-with-concerns; Step F real SMTP delivery user-confirmed 26-11-26; archived to completed/
+**Report destination:** process/features/launch-readiness/completed/account-invites_25-11-26/account-invites_REPORT_25-11-26.md
+**High-risk evidence pack:** process/features/launch-readiness/completed/account-invites_25-11-26/harness/account-invites/ (5 JSON artifacts, same shape as `lumina-v1-finish_23-11-26/harness/phase-03-auth/`)
 
 TL;DR: Accounts created by admins or managers stop getting one shared password. They are created `invited`, cannot sign in, and receive a single-use link (72 h) by email to set their own password. Managers may now create teachers and students on their own team. Imported users are created `invited` with no email. Real email delivery is a hard stop that needs the user's explicit OK.
 
@@ -312,9 +312,9 @@ Per-step gates run at the end of each step. Steps A-D run `npm run typecheck`, `
 
 ### Step F — HARD STOP: first real SMTP delivery (NOT executed by this plan)
 
-- [ ] F1. After EXECUTE and EVL are green, the orchestrator reports status and asks the user: "Ready for the first real email? Name the recipient address." Nothing in Step F runs without that answer.
-- [ ] F2. On approval only: with the user's real `backend/.env` (agents still do not read it), start the backend manually (`npm run start --workspace @lumina/backend`, `NODE_ENV=development`, `MAIL_MAILER=smtp`), create one `invited` test user whose email is the user's chosen address, ask the user to confirm the email arrived and the link opens the set-password screen, set a password, sign in, then archive that test user. Record the outcome in the phase report. No other recipient, no loop, no retries beyond one resend.
-- [ ] F3. Until F2 completes, AC-19 stays CONDITIONAL and a backlog stub `account-invites-real-smtp-verification_NOTE_25-11-26.md` is written at UPDATE PROCESS (Known-Gap is never a PASS).
+- [x] F1. (26-11-26, done: user approved and named the recipient) After EXECUTE and EVL are green, the orchestrator reports status and asks the user: "Ready for the first real email? Name the recipient address." Nothing in Step F runs without that answer.
+- [x] F2. (26-11-26, done: one invited test student created with the user's chosen address, 201, invite sent via smtp; user confirmed the email arrived, the link opened the set-password screen, a password was set and sign-in worked; test account archived, no resend needed) On approval only: with the user's real `backend/.env` (agents still do not read it), start the backend manually (`npm run start --workspace @lumina/backend`, `NODE_ENV=development`, `MAIL_MAILER=smtp`), create one `invited` test user whose email is the user's chosen address, ask the user to confirm the email arrived and the link opens the set-password screen, set a password, sign in, then archive that test user. Record the outcome in the phase report. No other recipient, no loop, no retries beyond one resend.
+- [x] F3. (26-11-26, closed: F2 passed, AC-19 met; the backlog stub is marked resolved) Until F2 completes, AC-19 stays CONDITIONAL and a backlog stub `account-invites-real-smtp-verification_NOTE_25-11-26.md` is written at UPDATE PROCESS (Known-Gap is never a PASS).
 
 ---
 
@@ -341,9 +341,9 @@ Per-step gates run at the end of each step. Steps A-D run `npm run typecheck`, `
 | AC-17 | Static soundness and a reproducible lockfile | `typecheck`, `lint`, `git diff --check`, then `npm ci` (no node processes running) followed by `typecheck` | Fully-Automated |
 | AC-18 | New screens are usable at desktop and 390 px (set-password screen, invite result modal, invited badge + Resend, manager create form) | agent-probe screenshots (demo hides them, so API mode with the `log` mailer) | Agent-Probe |
 | AC-20 | Transactional create/resend: a forced profile-insert failure leaves no `users` row and no token; set-password miss leaves the token unconsumed; invite -> archive -> PATCH active = 409; admin-only link exposure (manager responses never contain `link`) | vitest `invites.test.ts` (truth table, spy logger) + smoke `invites` rollback/manager/status checks | Fully-Automated + Hybrid |
-| AC-19 | A real email arrives through the user's SMTP account and the link works | Step F (user-gated, NOT executed by EXECUTE) | Hybrid (manual, user-gated); until run: residual Known-Gap, CONDITIONAL, backlog stub |
+| AC-19 | A real email arrives through the user's SMTP account and the link works | Step F (user-gated, NOT executed by EXECUTE) | Hybrid (manual, user-gated). PASSED 26-11-26 (manual, user-confirmed): real email arrived, link opened the set-password screen, password set, sign-in worked |
 
-Known-Gap residual: only the real-delivery sub-claim of AC-7/AC-19. It is not a proving strategy and the plan cannot be declared fully PASS until Step F runs; every other developed behavior is proven by Fully-Automated, Hybrid or Agent-Probe gates above.
+Known-Gap residual: none after Step F (26-11-26). Historically this was only the real-delivery sub-claim of AC-7/AC-19; it was never a proving strategy; every other developed behavior is proven by Fully-Automated, Hybrid or Agent-Probe gates above.
 
 ---
 
@@ -468,7 +468,7 @@ Orchestrator reads this before deciding which subagent to spawn next. The canoni
 - [x] 4. PVL — 25-11-26: validate-contract written, Gate: PASS (cycle 1 supplement S1-S17 verified; outer-pvl)
 - [x] 5. EXECUTE — 25-11-26: Steps A-E done, all exit gates green (see account-invites_REPORT_25-11-26.md); Step F not executed (user-gated hard stop)
 - [x] 6. EVL — 26-11-26: independent vc-tester confirmed all gates twice (before and after review fix cycle 1); see account-invites-evl-iteration-001_REPORT_25-11-26.md
-- [x] 7. UPDATE PROCESS — 26-11-26: report, context docs, backlog notes, registry, umbrella state, review-decision.json done; committed; NOT archived (Step F pending user)
+- [x] 7. UPDATE PROCESS — 26-11-26: report, context docs, backlog notes, registry, umbrella state, review-decision.json done; committed; Step F passed 26-11-26 and the task folder was archived to completed/
 
 **Validate-contract required before execute.** If step 4 is unchecked or `## Validate Contract` reads "(placeholder — vc-validate-agent writes this section before EXECUTE)", the orchestrator must spawn vc-validate-agent first. A partial contract missing Plan updates applied / Execute-agent instructions / Test gates is treated as a placeholder.
 
@@ -542,7 +542,7 @@ High-risk classes present (auth/identity, schema/migration, public API contract,
 
 ## Resume and Execution Handoff
 
-- Selected plan file path: `process/features/launch-readiness/active/account-invites_25-11-26/account-invites_PLAN_25-11-26.md`
+- Selected plan file path: `process/features/launch-readiness/completed/account-invites_25-11-26/account-invites_PLAN_25-11-26.md`
 - Last completed step: Step 3 PLAN (25-11-26); Steps 0-2 recorded in Phase Loop Progress
 - Validate-contract status: written 25-11-26, Gate: PASS (outer-pvl)
 - Supporting context files loaded: `process/context/{all-context,tests/all-tests,auth/{jwt-cookie-flow,roles-and-scope}}.md`; backlog notes `default-account-password`; umbrella plan; Phase 04 plan (format); `phase-blast-radius-registry.md`; code anchors verified 25-11-26: `users.ts:41-55,160-210,212-313,315-354,356-379`, `auth.ts:75-77,92-122,175-262`, `env.ts:12-58`, `app.ts:17-37,120-121`, `schema.ts:25-29,103-118`, `password.ts:14-17,71-86`, `school-import.ts:47,392,425,521-535`, `routes/school-import.ts:8,53,67-76`, `seed.ts:5,28`, `reset.ts:28`, `teachers.ts:171-173`, `students.ts:193-194`, `api/school.ts:18,52-57,81-94,116-143`, `client.ts:99-105`, `people.ts:74-97,112-147,209-246,323-337`, `permissions.ts:10-39,89-99`, `parts.tsx:15`, `playwright.config.ts:44-46`, `smoke.ts:60-69,86,245,1662,1677-1692`
@@ -625,7 +625,7 @@ Rationale: signals S1 (two workspaces), S2 (auth/schema/API), S6 (high-risk clas
 | E10 | Before `npm run e2e`: `netstat -ano \| findstr ":3000 :3100 :4000"` must show no listener, otherwise STOP and ask the user (a reused backend on 4000 could be in `smtp` mode). | Step E gate |
 | E11 | Literal-removal gate: build the pattern from `git show c6d2e19:frontend/app/lib/school/api/school.ts` into a scratch file via `tr -d '\r'`, assert `test -s`, never print it; `git grep -l -F -f` must list only `backend/src/db/seed.ts`. | Step E5 |
 | E12 | Smoke `invites` domain: wait 2.1 s before every legitimate resend; `cleanup()` archives all `smoke-{runId}-%` users (best-effort). Counts are minimums; the EVL records exact totals. | Step E1 |
-| E13 | Write the 5-artifact high-risk pack in `process/features/launch-readiness/active/account-invites_25-11-26/harness/account-invites/` (shape of `lumina-v1-finish_23-11-26/harness/phase-03-auth/`); `review-decision.json` is completed at UPDATE PROCESS; `mustStopBeforeFinalize` stays true until Step F is decided. | Step E6 |
+| E13 | Write the 5-artifact high-risk pack in `process/features/launch-readiness/completed/account-invites_25-11-26/harness/account-invites/` (shape of `lumina-v1-finish_23-11-26/harness/phase-03-auth/`); `review-decision.json` is completed at UPDATE PROCESS; `mustStopBeforeFinalize` stays true until Step F is decided. | Step E6 |
 | E14 | Step F (real SMTP send) is a HARD STOP outside EXECUTE. Stop after E6, report status, and ask: "Ready for the first real email? Name the recipient address." No real send without that answer. | End of EXECUTE |
 | E15 | Docs edited in EXECUTE are code-adjacent only (`README.md`, `frontend/PROGRESS.md`, `frontend/CUTOVER_PLAN.md`); context docs under `process/context/` are UPDATE PROCESS work. | Step E4 |
 
@@ -688,7 +688,7 @@ Legacy line form (existing consumers):
 - UI usability: [agent-probe: desktop + 390 px screenshots in API mode]
 - real SMTP: [known-gap: documented; Step F user-gated; backlog stub at UPDATE PROCESS]
 
-High-risk pack: required (auth/identity, schema/migration, public API contract, secrets/trust boundary), 5 JSON artifacts in `process/features/launch-readiness/active/account-invites_25-11-26/harness/account-invites/`; `adversarial-validation.json` must cover token guessing, manager-link takeover, status bypass via PATCH, mail bombing, partial create, and log leakage.
+High-risk pack: required (auth/identity, schema/migration, public API contract, secrets/trust boundary), 5 JSON artifacts in `process/features/launch-readiness/completed/account-invites_25-11-26/harness/account-invites/`; `adversarial-validation.json` must cover token guessing, manager-link takeover, status bypass via PATCH, mail bombing, partial create, and log leakage.
 
 Backlog artifacts (all under `process/features/launch-readiness/backlog/`): `production-first-admin-bootstrap_NOTE_25-11-26.md` (EXECUTE C6); `account-invites-real-smtp-verification_NOTE_25-11-26.md`, `reinvite-archived-account_NOTE_25-11-26.md`, `manager-patch-team-member-email_NOTE_25-11-26.md`, `bulk-invite-send_NOTE_25-11-26.md`, `invite-clock-injection_NOTE_25-11-26.md` (UPDATE PROCESS).
 
@@ -727,7 +727,7 @@ Hard stop conditions / safety constraints:
 - Do not run npm run e2e if anything listens on ports 3000, 3100 or 4000 (a backend on 4000 could be in smtp mode); stop and ask
 - Admins only ever see/copy an invite link; a manager response must never contain a link
 - Demo mode stays untouched (zero /api/v1 calls in demo)
-Next phase: EXECUTE: process/features/launch-readiness/active/account-invites_25-11-26/account-invites_PLAN_25-11-26.md (Steps A-E, then EVL by vc-tester, then UPDATE PROCESS; Step F is user-gated)
+Next phase: EXECUTE: process/features/launch-readiness/completed/account-invites_25-11-26/account-invites_PLAN_25-11-26.md (Steps A-E, then EVL by vc-tester, then UPDATE PROCESS; Step F is user-gated)
 Validate contract: inline in plan (## Validate Contract, Gate: PASS, 25-11-26)
 Execute start: fully-auto: npm run typecheck | npm run lint | npm run test --workspace @lumina/backend | npm run test --workspace @lumina/frontend | git diff --check ; hybrid: npm run db:migrate (x2) | npm run smoke (array mailer, 17 domains) | npm run e2e (log mailer, 29+4) ; probe: desktop + 390 px screenshots of set-password screen / invite modal / Invited badge ; high-risk pack: yes (harness/account-invites/)
 ```

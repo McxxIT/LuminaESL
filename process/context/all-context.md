@@ -221,7 +221,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | Tests | vitest 3 (backend, `backend/tests`, 98 tests in 12 files; frontend, `frontend/tests`, 62 tests in 11 files, node env, drives the real local services on a memory store); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 30 API-mode tests + 5 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
-| Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. First outside service: an SMTP server for invite emails (nodemailer; real send unverified until Step F). |
+| Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. First outside service: an SMTP server for invite emails (nodemailer; real SMTP delivery verified 26-11-26). |
 
 ## Key Patterns and Conventions
 
@@ -365,7 +365,7 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
   plan-attach path-traversal file read. Phase 03 (Nov 24, 2026) added password change and admin
   reset, refresh-token revocation and pruning, named auth rate limits, and the production CORS guard. Open
   auth gaps live in `process/features/launch-readiness/backlog/`.
-- Account-invites fix (Nov 25-26, 2026, commit 1940ea6): shared default password replaced by emailed single-use set-password links (`invited` status, `auth_tokens`, SMTP mailer); independent EVL green, review approved-with-concerns; real SMTP delivery (Step F) pending the user, so the task folder `process/features/launch-readiness/active/account-invites_25-11-26/` stays active. Next: three follow-ups before Phase 06 (manager edit 403, public self-register decision, per-sender invite limit), then Phase 06; production prerequisites: mail keys, no `db:seed`, first-admin bootstrap (backlog `production-first-admin-bootstrap_NOTE_25-11-26.md`).
+- Account-invites fix (Nov 25-26, 2026, commit 1940ea6): shared default password replaced by emailed single-use set-password links (`invited` status, `auth_tokens`, SMTP mailer); independent EVL green, review approved-with-concerns; real SMTP delivery verified on 26-11-26 (Step F passed, user-confirmed, AC-19 met); archived in `process/features/launch-readiness/completed/account-invites_25-11-26/`. Next: three follow-ups before Phase 06 (manager edit 403, public self-register decision, per-sender invite limit), then Phase 06; production prerequisites: mail keys, no `db:seed`, first-admin bootstrap (backlog `production-first-admin-bootstrap_NOTE_25-11-26.md`).
 - Frontend unit tests exist (Vitest, 11 files / 62 tests; only the `createLibraryItem` happy path is uncovered, backlog `frontend-library-create-item-unit-test_NOTE_25-11-26.md`); no CI (Phase 06). Library follow-ups (legacy `storage_key` audit, upload write-path hardening, `POST /requests` attachment ownership, orphaned uploads) are in `process/features/launch-readiness/backlog/`.
 
 ## Scan Metadata

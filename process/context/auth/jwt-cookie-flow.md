@@ -36,7 +36,7 @@ BLUF: `POST /api/v1/auth/login` returns `{accessToken, user}` and sets an httpOn
 - **`POST /auth/set-password`** (public, IP-limited): finds the token's user, locks the user row, then consumes the token (user-before-token lock order, same as resend/PATCH/DELETE), activates `WHERE status='invited'`, revokes refresh tokens, and answers every miss with one generic 400. The frontend reads the token from the URL fragment (`#`), never a query parameter (`frontend/app/lib/auth/invite-hash.ts`, `SetPasswordScreen`).
 - **Link exposure:** only an admin ever receives a copyable link in the API response; managers never, in any mode (the response `mode` field tells the UI whether mail was sent). Demo mode is untouched.
 - **Mailer** (`backend/src/lib/mailer.ts`, `lib/invite-email.ts`, `app.mailer`): nodemailer 10.6.1. Modes via `MAIL_MAILER`: `smtp`, `log`, `array`. No mail config: non-production falls back to log; production refuses to start unless `MAIL_MAILER=smtp` with host, from address, `APP_URL`, and encryption set. `MAIL_USERNAME` and `MAIL_PASSWORD` must be set together; plaintext SMTP defaults to port 25. smtp is refused under `NODE_ENV=test`. Never log tokens, links, mail bodies, or `MAIL_PASSWORD`.
-- Env names: see `all-context.md` Environment section. First real send (Step F) is user-gated and still pending.
+- Env names: see `all-context.md` Environment section. Real SMTP delivery was verified on 26-11-26 (Gmail, port 587 with `tls`; one invite arrived, the link opened the set-password screen, sign-in worked). The backend example env file documents `APP_URL`, `INVITE_RESEND_COOLDOWN_SECONDS` and the `MAIL_*` placeholders.
 
 ### Auth rate limits and production guards
 
@@ -53,5 +53,5 @@ BLUF: `POST /api/v1/auth/login` returns `{accessToken, user}` and sets an httpOn
 
 - Cross-origin dev needs `CORS_ORIGIN` to include the Next origin and cookies path-scoped to `/api/v1/auth`.
 - Real passwords for seeded accounts: `Password123!` (see `database/seed-and-reset.md`).
-- Accounts created by an admin/manager no longer share a default password; they are `invited` and set their own through an emailed link (see "Account invites" above). Open follow-ups in `process/features/launch-readiness/backlog/`: real SMTP check (`account-invites-real-smtp-verification`), public `POST /auth/register` decision (`public-self-register-decision`), per-sender invite limit, first-admin bootstrap for production.
+- Accounts created by an admin/manager no longer share a default password; they are `invited` and set their own through an emailed link (see "Account invites" above). Open follow-ups in `process/features/launch-readiness/backlog/`: public `POST /auth/register` decision (`public-self-register-decision`), per-sender invite limit, first-admin bootstrap for production.
 - Frontend: `changePassword()` in `frontend/app/lib/api/auth.ts`; `PasswordChangeCard` (shared component) is mounted in the admin, manager, teacher, and student Settings screens and renders a static "Demo mode" explainer in demo mode (no form, no API call). `ResetPasswordModal` (`PeopleForms.tsx`) is admin-only and `!isDemoMode()`.

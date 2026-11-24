@@ -1,14 +1,14 @@
 ---
 phase: account-invites-execute
 date: 2026-11-25
-status: COMPLETE_WITH_GAPS
+status: COMPLETE
 feature: launch-readiness
-plan: process/features/launch-readiness/active/account-invites_25-11-26/account-invites_PLAN_25-11-26.md
+plan: process/features/launch-readiness/completed/account-invites_25-11-26/account-invites_PLAN_25-11-26.md
 ---
 
 # Account Invites — EXECUTE exit summary
 
-TL;DR: Steps A-E done; independent EVL green twice (smoke 17/835, e2e 30+5); review approved-with-concerns (user, 26-11-26). Only AC-19 (real SMTP delivery, Step F) is open, a user-gated hard stop, so the task folder stays in active/.
+TL;DR: Steps A-E done; independent EVL green twice (smoke 17/835, e2e 30+5); review approved-with-concerns (user, 26-11-26). Step F (real SMTP delivery, AC-19) passed 26-11-26 with user confirmation, so every acceptance criterion is met and the task folder is archived to completed/.
 
 ## What Was Done
 
@@ -86,3 +86,19 @@ CONTEXT_PARTIAL: none.
 - Backlog written or updated: default-account-password (RESOLVED), account-invites-real-smtp-verification, manager-edit-team-member-403, public-self-register-decision, per-sender-invite-limit, account-invites-review-residuals, production-first-admin-bootstrap (Phase 06 prerequisite).
 - User to-do: add `APP_URL` and `INVITE_RESEND_COOLDOWN_SECONDS` to the backend example env file (agents cannot edit it).
 - Next: three follow-ups before Phase 06 (manager edit 403 first), then Phase 06 CI and Docker Compose; Step F whenever the user names a recipient.
+
+## Step F result (26-11-26)
+
+- Outcome: PASSED. AC-19 met (manual, user-confirmed).
+- Setup: backend started manually with the user's real backend env (`MAIL_MAILER=smtp`, Gmail on port 587, `MAIL_ENCRYPTION=tls`) and `NODE_ENV=development`; frontend in API mode on :3000. Agents never read the env file.
+- Action: the admin created one invited test student ("Step F Test Student") using the address the user chose (not recorded here). Response 201, status `invited`, invite `{sent: true, mode: smtp}`, no error, and no link returned to the admin (correct for a successful send).
+- User confirmation: the email arrived, the link opened the "Set your password" screen, the password was set, and sign-in worked.
+- Cleanup: the test account (`f9f91bf2-37aa-4118-9cee-ca032b4baa2b`) was archived via `PATCH` status `archived` (200). Both servers stopped; ports 3000 and 4000 free. No resend was needed.
+- Env example: `APP_URL`, `INVITE_RESEND_COOLDOWN_SECONDS`, and a documented `MAIL_*` placeholder block (`MAIL_MAILER=log` default, no real values) were added to `backend/.env.example` with the user's approval.
+- Product decisions taken during Step F (decisions, not backlog): (1) user names stay required and hand-typed (no auto-name from the email address); (2) a rename updates live screens only, while past activity and notification text keeps the name used at the time (audit-log behaviour).
+
+## UPDATE PROCESS final closeout (26-11-26)
+
+- Final classification: Ready for UPDATE PROCESS archival; archived to `process/features/launch-readiness/completed/account-invites_25-11-26/`.
+- SPEC Achievement (supersedes the earlier line above): no separate SPEC (plan acceptance criteria govern). AC-1..AC-18 met by passing automated or probe gates; AC-19 MET (manual, user-confirmed Step F). No unmet criteria, no Known-Gap residual.
+- Backlog: `account-invites-real-smtp-verification` and `default-account-password` are resolved. Open follow-ups before Phase 06: manager edit 403, per-sender invite limit, public self-register decision; then Phase 06.

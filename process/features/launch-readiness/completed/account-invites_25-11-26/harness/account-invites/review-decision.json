@@ -2,16 +2,15 @@
   "task": "account-invites (pre-Phase-06 fix) - emailed single-use set-password links",
   "reviewer": "user (decision) on an independent vc-code-reviewer pass, 26-11-26",
   "decision": "approved-with-concerns",
-  "rationale": "Reviewer found 0 Critical and 0 High. The two Medium findings (set-password lock-order inversion that could deadlock against resend/PATCH/DELETE, and stale 'can sign in right away' create-form copy) were fixed in EVL fix cycle 1 and confirmed by an independent vc-tester re-run (all gates green). Remaining concerns are Low, accepted, or tracked in backlog. AC-19 (real SMTP delivery) is intentionally not run: it is the user-gated Step F hard stop.",
+  "rationale": "Reviewer found 0 Critical and 0 High. The two Medium findings (set-password lock-order inversion that could deadlock against resend/PATCH/DELETE, and stale 'can sign in right away' create-form copy) were fixed in EVL fix cycle 1 and confirmed by an independent vc-tester re-run (all gates green). Remaining concerns are Low, accepted, or tracked in backlog. AC-19 (real SMTP delivery) was verified in the user-gated Step F on 26-11-26 and passed.",
   "blockingFindings": [],
   "nonBlockingFindings": [
-    "C1 - AC-19 real SMTP delivery is pending Step F (needs explicit user approval and a named recipient). Backlog: account-invites-real-smtp-verification_NOTE_25-11-26.md",
     "C2 - Low review residuals (archived never-activated accounts have no path back to invited, manager email-existence oracle via 409 accepted, APP_URL https-only in production, seed guard only for NODE_ENV=production, MAIL_USERNAME/MAIL_PASSWORD must be set together, invited teacher labeled '(paused)' in scheduling, no route-level production link-exposure negative test, no manager duplicate-email 409 test, manager cannot fix an invitee's mistyped email). Backlog: account-invites-review-residuals_NOTE_25-11-26.md",
     "C3 - Managers editing existing teachers/students call PATCH /users/:id (admin or self only), so the edit returns 403 in API mode. User-chosen follow-up before Phase 06. Backlog: manager-edit-team-member-403_NOTE_25-11-26.md",
     "C4 - Public self-registration (POST /auth/register) sits outside the invite model with a self-chosen password; needs a product decision. Backlog: public-self-register-decision_NOTE_25-11-26.md",
     "C5 - No per-sender invite or mail throttle and invite email content is not restricted. Backlog: per-sender-invite-limit_NOTE_25-11-26.md",
     "C6 - No first-admin path in production now that the seed refuses NODE_ENV=production. Phase 06 prerequisite. Backlog: production-first-admin-bootstrap_NOTE_25-11-26.md"
   ],
-  "notes": "User decision 26-11-26: approved-with-concerns. Migration 0007_windy_grandmaster (additive: user_status 'invited' + auth_tokens) is applied to dev lumina. Tests never send real mail (smoke uses an array mailer, e2e backend uses MAIL_MAILER=log, smtp is refused under NODE_ENV=test). mustStopBeforeFinalize in risk-gate.json stays true until Step F runs, because the first real SMTP send is a user-gated hard stop and AC-19 stays CONDITIONAL.",
+  "notes": "User decision 26-11-26: approved-with-concerns. Migration 0007_windy_grandmaster (additive: user_status 'invited' + auth_tokens) is applied to dev lumina. Tests never send real mail (smoke uses an array mailer, e2e backend uses MAIL_MAILER=log, smtp is refused under NODE_ENV=test). Step F real SMTP delivery user-confirmed 26-11-26: AC-19 met and mustStopBeforeFinalize is false in risk-gate.json.",
   "timestamp": "2026-11-26T03:00:00Z"
 }

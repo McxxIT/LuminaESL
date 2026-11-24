@@ -1,6 +1,6 @@
 {
   "task": "account-invites (pre-Phase-06 fix)",
-  "result": "PASS (executor run 25-11-26; independent vc-tester EVL #1 and #2 PASS 26-11-26; AC-19 real SMTP delivery not run - user-gated Step F)",
+  "result": "PASS (executor run 25-11-26; independent vc-tester EVL #1 and #2 PASS 26-11-26; AC-19 real SMTP delivery PASSED 26-11-26, user-confirmed Step F)",
   "steps": [
     {
       "step": "Generate and review migration 0007",
@@ -76,9 +76,9 @@
     },
     {
       "step": "Real SMTP delivery (AC-19)",
-      "command": "not run",
-      "result": "SKIP",
-      "notes": "HARD STOP Step F: needs explicit user approval and a named recipient"
+      "command": "Step F manual send (user-approved, one recipient)",
+      "result": "PASS",
+      "notes": "26-11-26: backend run manually with the real env (smtp, port 587, tls, NODE_ENV=development); one invited test student created with the user's chosen address (201, invite sent:true mode smtp, no link returned to admin); user confirmed the email arrived, the link opened the set-password screen, the password was set and sign-in worked; test account archived (200); servers stopped"
     },
     {
       "step": "EVL fix cycle 1 (26-11-26): set-password lock order (user row then token) + mode-aware PeopleForms copy",
@@ -97,6 +97,12 @@
       "command": "db:migrate (no-op); typecheck; lint; backend vitest; frontend vitest; smoke; e2e; git diff --check; db status; literal-removal; logging; lockfile; npm ci + typecheck",
       "result": "PASS",
       "notes": "backend 12/98, frontend 11/62, smoke 17 domains/835 (invites 130, no 500s), e2e 30 API + 5 demo, literal only in seed.ts, logging gate clean, lockfile only nodemailer"
+    },
+    {
+      "step": "Step F real SMTP delivery (AC-19)",
+      "command": "manual, user-approved",
+      "result": "PASS",
+      "notes": "user-confirmed 26-11-26; see account-invites_REPORT_25-11-26.md Step F result"
     }
   ],
   "commands": [
@@ -174,8 +180,9 @@
     },
     {
       "check": "Real SMTP delivery (AC-19)",
-      "result": "SKIP",
-      "notes": "HARD STOP Step F: needs explicit user approval and a named recipient"
+      "result": "PASS",
+      "notes": "26-11-26: backend run manually with the real env (smtp, port 587, tls, NODE_ENV=development); one invited test student created with the user's chosen address (201, invite sent:true mode smtp, no link returned to admin); user confirmed the email arrived, the link opened the set-password screen, the password was set and sign-in worked; test account archived (200); servers stopped",
+      "command": "Step F manual send (user-approved, one recipient)"
     }
   ]
 }

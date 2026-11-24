@@ -7,3 +7,4 @@ iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_statu
 5	2026-11-26T00:30	2	0	2	0	ACTIVE	RUNNING	EVL confirm #1 (vc-tester): all 14 gates green (be 12/98, fe 11/62, smoke 17/817, e2e 30+5); review: approved-with-concerns, 2 Medium fix-before-commit (set-password lock order, create-form copy) -> execute supplement
 6	2026-11-26T01:30	2	0	2	2	ACTIVE	RUNNING	EVL fix cycle 1 applied (lock order user->token in set-password; mode-aware create copy); execute gates green (smoke 17/835); vc-tester re-run pending
 7	2026-11-26T02:30	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL confirm #2 (vc-tester): all 14 gates green after fix cycle 1 (be 12/98, fe 11/62, smoke 17/835 no 500s, e2e 30+5); AC-19 real SMTP pending Step F
+8	2026-11-26	0	0	0	0	SATURATED	HALTED_SUCCESS	Step F real SMTP delivery user-confirmed; AC-19 PASSED

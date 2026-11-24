@@ -1,13 +1,13 @@
 ---
 name: note:default-account-password
-description: "RESOLVED 26-11-26 by commit 1940ea6 (emailed single-use set-password links); only AC-19 real SMTP delivery remains, tracked in account-invites-real-smtp-verification"
+description: "RESOLVED 26-11-26 by commit 1940ea6 (emailed single-use set-password links); fully resolved incl. real SMTP delivery verified 26-11-26 (Step F)"
 date: 24-11-26
 feature: launch-readiness
 ---
 
 # Shared default password for admin-created accounts
 
-status: RESOLVED by commit 1940ea6 `feat(auth): replace shared default password with emailed invite links` (account-invites fix, 25/26-11-26). Remaining gap: AC-19 real SMTP delivery, see `account-invites-real-smtp-verification_NOTE_25-11-26.md`.
+status: RESOLVED by commit 1940ea6 `feat(auth): replace shared default password with emailed invite links` (account-invites fix, 25/26-11-26). Fully resolved: real SMTP delivery was verified on 26-11-26 (Step F passed, user-confirmed; see `account-invites-real-smtp-verification_NOTE_25-11-26.md`).
 item: Phase 03 reviewer finding M1 (pre-existing)
 priority: was HIGH
 
@@ -19,5 +19,5 @@ priority: was HIGH
 
 ## What is still open
 
-- First real SMTP send (Step F, user-gated): `account-invites-real-smtp-verification_NOTE_25-11-26.md`.
+- Nothing for this item. Real SMTP delivery passed on 26-11-26.
 - Related follow-ups: `manager-edit-team-member-403_NOTE_25-11-26.md`, `public-self-register-decision_NOTE_25-11-26.md`, `per-sender-invite-limit_NOTE_25-11-26.md`, `account-invites-review-residuals_NOTE_25-11-26.md`, `production-first-admin-bootstrap_NOTE_25-11-26.md`.

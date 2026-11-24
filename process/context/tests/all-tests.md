@@ -258,6 +258,6 @@ deliberate red run that exited 1).
 - Tests never send real mail. Smoke injects an array mailer and sets `MAIL_MAILER=array` with `NODE_ENV=test` (startup assertion); the Playwright backend runs `MAIL_MAILER=log`, `NODE_ENV=development`, `INVITE_RESEND_COOLDOWN_SECONDS=0`. `smtp` is refused under `NODE_ENV=test`, and CI must keep `MAIL_MAILER` unset or `log`.
 - Check ports 3000, 3100, and 4000 are free before `npm run e2e` (`netstat -ano | findstr ":3000 :3100 :4000"`).
 - A combined run (typecheck/lint in parallel with vitest) once timed out `beforeAll` hooks in app/contract/auth-lifecycle; isolated runs were green. Do not run them concurrently.
-- Real SMTP delivery (AC-19) is the only unproven acceptance item: user-gated Step F, backlog `account-invites-real-smtp-verification_NOTE_25-11-26.md`.
+- Real SMTP delivery (AC-19) was verified manually on 26-11-26 (user-gated Step F, passed): automated gates never send real mail, so a future change to the mail transport needs another user-approved manual send.
 
 2026-11-26 (account-invites fix, independent vc-tester EVL after review fix cycle 1, default `backend/.env`): `npm run db:migrate` no-op (`0007` applied); `npm run typecheck` and `npm run lint` exit 0; backend vitest 12 files / 98 tests; frontend vitest 11 files / 62 tests; `npm run smoke` 17/17 domains, 835 checks (invites 130, no 500s); `npm run e2e` 30 API + 5 demo; `git diff --check` clean; literal-removal and logging gates clean; `npm ci` + typecheck with a lockfile diff of only nodemailer.
