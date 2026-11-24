@@ -34,6 +34,7 @@ Pointers only (24-11-26); details live in `process/features/launch-readiness/bac
 - `trust-proxy-and-limiter-store_NOTE_24-11-26.md`: `trustProxy: true` is unconditional; decide env-driven `TRUST_PROXY` against the compose topology.
 - `auth-rate-limit-config_NOTE_24-11-26.md`: production cap for `AUTH_RATE_LIMIT_MAX` / `RATE_LIMIT_MAX`; assert `NODE_ENV=production` in compose and CI (it gates the CORS guard and the `Secure` cookie); `sameSite: lax` breaks split-origin deploys, so pick same-site or a reverse proxy; `Retry-After` on the ceiling 429.
 - `default-account-password_NOTE_24-11-26.md`: HIGH, should-fix before launch and before this phase packages a deployable stack (shared fixed default password for admin-created accounts).
+- `e2e-startup-timeout-flake_NOTE_24-11-26.md` (from Phase 04): one Playwright webServer 240 s startup timeout was seen once; watch for it in CI and consider a pre-built frontend or a longer timeout.
 - CI env: smoke and Playwright set `AUTH_RATE_LIMIT_MAX=100000` (`backend/scripts/smoke.ts` `loadEnv`, `frontend/playwright.config.ts` backend env); the workflow must do the same or auth routes return 429.
 
 ---

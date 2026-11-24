@@ -123,8 +123,8 @@ For most substantial tasks:
 | Folder | Scope |
 |---|---|
 | `process/features/backend-cutover/` | Frontend local-store to backend API cutover (Steps A-D, B3 domain slices) |
-| `process/features/curriculum/` | Courses, units, lesson plans, attachments; planned (not built) Curriculum Library |
-| `process/features/launch-readiness/` | 6-phase v1 finish program: dev DB 0004 alignment, upload scoping & staff credits, auth hardening, Curriculum Library, polish/Vitest, CI & Docker Compose |
+| `process/features/curriculum/` | Courses, units, lesson plans, attachments; the Curriculum Library (built in launch-readiness Phase 04) is documented in the database, auth, and uxui groups |
+| `process/features/launch-readiness/` | 6-phase v1 finish program (Phases 01-04 done): dev DB 0004 alignment, upload scoping & staff credits, auth hardening, Curriculum Library; remaining polish/Vitest, CI & Docker Compose |
 | `process/features/lessons-scheduling/` | Bookings, slot openings, lessons, ratings, room codes, homework/assignments, notifications |
 | `process/features/people-billing/` | Users/roles, managers, approvals/requests, enrollments, profiles, credits/billing |
 
@@ -197,7 +197,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
       plugins/                -- db.ts, auth.ts
       routes/                 -- auth users students teachers courses enrollments lessons
                                  bookings requests assignments credits notifications
-                                 uploads settings school
+                                 uploads settings school library
       lib/                    -- errors, roles, scope, time, password, pagination, activity
       db/                     -- schema.ts, migrations/, seed.ts, reset.ts
     tests/                    -- app / contract / password vitest files
@@ -218,7 +218,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 43 tests in 6 files); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 26 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 61 tests in 7 files); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 27 API-mode tests + 4 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -231,7 +231,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Manager scoping:** `backend/src/lib/scope.ts` (`managerOwnsStudent`, `managerOwnsTeacher`, `managerTeam`, `canAccessAttachment`/`assertCanAccessAttachment`). A manager's team = `managerId` on teacher/student profiles. Every manager-reachable route must apply it.
 
-**Backend bootstrap:** `GET /api/v1/school/bootstrap` returns the role-scoped dataset the frontend store hydrates from.
+**Backend bootstrap:** `GET /api/v1/school/bootstrap` returns the role-scoped dataset the frontend store hydrates from (18 collection keys since the Curriculum Library added `libraryItems` and `lessonLibraryItems`).
 
 **Frontend ServiceResult:** every service in `frontend/app/lib/school/services/` returns `ServiceResult<T> = {ok:true,value}|{ok:false,error}` (`ok()` / `fail()`; `run()` sync, `runAsync()` async convert ServiceError/PermissionError/ApiError).
 
@@ -282,7 +282,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 - `npm run db:reset` TRUNCATES all tables (refuses production). Destructive; never use it as a verification gate.
 - Meeting links live in `lessons.roomCode` (max 40 chars), NOT `meeting_url`.
 - Parents are not a login role: guardian fields on `student_profiles`; parent ratings go through the student account (`ratingSource: "parent"`).
-- Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`. Since Nov 23, 2026, `GET /uploads/:id{,/download}` re-derives per-record scope with `canAccessAttachment` (admin, uploader pre-attach, plan/course visibility, or request evidence); unreferenced uploads by another user return `403`.
+- Curriculum Library (built Nov 24, 2026, Phase 04): one global school-wide library (`library_items`, `lesson_library_items`, migrations `0005`/`0006`) curated by admin and managers (edit/archive by creator or admin, archive-only); only admin and managers attach materials to lessons (managers on their team's lessons); teachers and students/parents see and download materials on their own non-cancelled lessons, including completed ones. Plan-attach (`POST` on a lesson plan) now takes only `{ attachmentId }` of an existing upload; downloads are contained to `UPLOAD_DIR` by `backend/src/lib/upload-path.ts`. Demo seed has an empty library and the import excludes library data. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`. Since Nov 23, 2026, `GET /uploads/:id{,/download}` re-derives per-record scope with `canAccessAttachment` (admin, uploader pre-attach, plan/course visibility, or request evidence); unreferenced uploads by another user return `403`.
 - The bell is the activity feed merged with the role derivation (deduped by target, cap 30). Read ids and muted categories are per user in `notification_state` via `GET`/`PATCH /notifications/state`; demo mode still uses localStorage. Notification ids are stored server-side, so keep them short.
 - Storage keys are split by mode: `lumina-school:v1` is local/demo only, `lumina-school:api-cache` is API mode's offline cache (`API_CACHE_KEY` in `frontend/app/lib/school/store.ts`), and API mode never writes `v1`. `hydrateSchool()` routes API saves to the cache key; writing the bootstrap over `v1` is what used to destroy local-only data before it could be imported.
 - One-time import (D2): `POST /school/import` + `POST /school/import/preview`, admin only, `backend/src/lib/school-import.ts` (zod payload, pure `buildImportPlan`, `applyImportPlan`, one transaction). The browser captures `lumina-school:v1` into `lumina-school:pending-import` before the first bootstrap (`frontend/app/lib/school/import/capture.ts`), archives it to `lumina-school:imported:<seededAt>` after a run, and uploads attachment bytes through `POST /uploads` before the import (preview uploads nothing). Idempotency is one `activity` row `school.imported` / `targetId: source.seededAt`; a repeat is 409 unless `options.force`. Profiles are keyed by their user in the browser store, so profile ids are receipted but kept out of the flat `idMap`.
@@ -326,7 +326,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (15 domains, 463 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 26 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (16 domains, 656 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 27 API tests on :3000 + backend :4000, then 4 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
@@ -358,11 +358,12 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 - Booking credit races are closed (per-student advisory lock, Nov 20, 2026) and active-slot uniqueness
   (`lessons_active_teacher_date_time_uidx`, migration `0004`) plus debit-only refunds (`isLessonCharged`)
   are applied and verified on default dev `lumina` (Nov 23, 2026). Active launch-readiness program:
-  `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phases 01–03 done; Phases 04–06 cover
-  Curriculum Library, polish/Vitest, CI & Docker). Phase 03 (Nov 24, 2026) added password change and admin
+  `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phases 01–04 done; Phases 05–06 cover
+  polish/Vitest and CI & Docker). Phase 04 (Nov 24, 2026) built the Curriculum Library and closed a pre-existing
+  plan-attach path-traversal file read. Phase 03 (Nov 24, 2026) added password change and admin
   reset, refresh-token revocation and pruning, named auth rate limits, and the production CORS guard. Open
   auth gaps and a HIGH default-password item live in `process/features/launch-readiness/backlog/`.
-- Curriculum Library not built; no frontend unit or component tests; no CI.
+- No frontend unit or component tests (Phase 05); no CI (Phase 06). Library follow-ups (legacy `storage_key` audit, upload write-path hardening, `POST /requests` attachment ownership, orphaned uploads) are in `process/features/launch-readiness/backlog/`.
 
 ## Scan Metadata
 

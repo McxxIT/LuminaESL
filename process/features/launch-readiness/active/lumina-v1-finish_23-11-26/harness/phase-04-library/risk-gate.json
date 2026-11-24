@@ -1,0 +1,18 @@
+{
+  "task": "lumina-v1-finish Phase 04 — Curriculum Library",
+  "planPath": "process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-04-curriculum-library_PLAN_23-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": [
+    "schema/data migration or destructive data mutation",
+    "permission, secret, or trust-boundary logic",
+    "public API or external contract changes",
+    "permission, secret, or trust-boundary logic (file-system path containment for uploads)",
+    "public API or external contract changes (plan-attach body is now { attachmentId })"
+  ],
+  "riskClass": "permission, secret, or trust-boundary logic",
+  "workDescription": "Additive migration 0005 (library_items, lesson_library_items); 4 new routes (POST /library, PATCH /library/:id, POST and DELETE /lessons/:id/library-items) in routes/library.ts; a fall-through library block in canAccessAttachment that widens GET /uploads/:id{,/download} only for files linked to the caller's non-cancelled lessons (or published items for managers); role-filtered libraryItems/lessonLibraryItems bootstrap keys (16 -> 18); frontend types, dual-branch services, permissions (library.manage, library.edit, lesson.attachLibraryItem), Library tab, Materials dialog, teacher/student materials lists. Step F (24-11-26): plan attach takes only { attachmentId } of an existing upload (uploader-or-admin, request evidence 422, never inserts attachments rows); downloads go through resolveUploadPath containment (404 + id-only log on escape); manager bootstrap no longer pulls other managers' user rows (createdByName for admin/manager); attach race retry-once-then-409; additive migration 0006 CHECK on library_items.status; strict status mapper.",
+  "approver": "pending — reviewer (vc-code-reviewer or the user) records the decision in review-decision.json",
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Applies a migration to the shared dev database and changes who may download which files. A defect could expose one student's materials to another, re-open the Phase 02 request-evidence hole, or let teachers/students attach files. The migration is additive only (CREATE TABLE / CREATE INDEX / ADD CONSTRAINT); no existing table is altered."
+}

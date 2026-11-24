@@ -13,7 +13,7 @@ BLUF: Edit `backend/src/db/schema.ts`, run `npm run db:generate`, review the SQL
 ## Config and files
 
 - `backend/drizzle.config.ts`: schema `./src/db/schema.ts`, out `./src/db/migrations`, dialect postgresql, `strict: true`; reads `DATABASE_URL` from `backend/.env` via dotenv.
-- Migrations: `0000_material_jane_foster.sql` (baseline), `0001_fractional_credit_hours.sql` (`credit_entries.hours` -> `numeric(8,2)`), `0002_notification_state.sql` (bell read/mute table, additive), `0003_supreme_victor_mancha.sql` (`absences.lesson_id` unique), `0004_gorgeous_maverick.sql` (`lessons_active_teacher_date_time_uidx`, partial unique index on `(teacher_id, date, time)` where `status in ('scheduled','live')`), plus `meta/_journal.json` and snapshots. `_journal.json` and the snapshot move with the SQL; never hand-edit them.
+- Migrations: `0000_material_jane_foster.sql` (baseline), `0001_fractional_credit_hours.sql` (`credit_entries.hours` -> `numeric(8,2)`), `0002_notification_state.sql` (bell read/mute table, additive), `0003_supreme_victor_mancha.sql` (`absences.lesson_id` unique), `0004_gorgeous_maverick.sql` (`lessons_active_teacher_date_time_uidx`, partial unique index on `(teacher_id, date, time)` where `status in ('scheduled','live')`), `0005_zippy_thunderbolt_ross.sql` (`library_items`, `lesson_library_items`, additive), `0006_large_the_hand.sql` (`library_items_status_check` CHECK, additive), plus `meta/_journal.json` and snapshots. `_journal.json` and the snapshot move with the SQL; never hand-edit them.
 - Root scripts (run from repo root): `db:generate`, `db:migrate`, `db:push` (dev shortcut, skips migration files — avoid for shared schema work), `db:seed`, `db:reset`, `db:studio`.
 
 ## Keep-in-sync checklist (every schema change)
@@ -35,7 +35,7 @@ BLUF: Edit `backend/src/db/schema.ts`, run `npm run db:generate`, review the SQL
 - **Disposable review database & dev `lumina` alignment (Nov 23, 2026):** `0004` was first verified on a
   separate `lumina_review` clone, and then applied to dev `lumina` after a `pg_dump` backup and
   user-approved non-destructive cancellation of its 13 test-residue duplicate rows. Default `backend/.env`
-  (`lumina`) now carries all 5 migrations (`0000`–`0004`). Keep `lumina_review` as a disposable rehearsal
+  (`lumina`) now carried all 5 migrations (`0000`–`0004`) on Nov 23; `0005` and `0006` were applied in Phase 04 on Nov 24, 2026 (latest migration is now `0006`). Keep `lumina_review` as a disposable rehearsal
   target for risky future migrations (`$env:DATABASE_URL='postgres://lumina:<pw>@localhost:5432/lumina_review'`);
   the `lumina` role has no `CREATEDB`, so new review DBs are created via the local `postgres` superuser with
   `OWNER lumina`.

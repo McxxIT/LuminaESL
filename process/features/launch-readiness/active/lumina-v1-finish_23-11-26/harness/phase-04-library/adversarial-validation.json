@@ -1,0 +1,110 @@
+{
+  "task": "lumina-v1-finish Phase 04 — Curriculum Library",
+  "scenarios": [
+    {
+      "scenario": "Student guesses the attachment id of a library file not linked to their lessons",
+      "ruled_out": true,
+      "rationale": "canAccessAttachment grants a student only when the item is linked to a lesson with studentId = actor and status <> 'cancelled'; otherwise it falls through to the plan block, which returns false for a non-plan file. Smoke: unrelated student 403; e2e: disposable student 403."
+    },
+    {
+      "scenario": "Student of a cancelled lesson keeps downloading the material",
+      "ruled_out": true,
+      "rationale": "The student/teacher join requires lessons.status <> 'cancelled' and is evaluated per request; bootstrap drops the link too. Smoke: 200 before cancel, 403 after."
+    },
+    {
+      "scenario": "Manager turns a request-evidence file or another user's upload into a library item to widen its audience",
+      "ruled_out": true,
+      "rationale": "POST /library requires uploadedBy = actor unless admin (403) and rejects any attachment referenced by requests.attachmentId (422 ATTACHMENT_NOT_ELIGIBLE), even for admin. Smoke covers both."
+    },
+    {
+      "scenario": "Teacher attaches a file by calling the route directly",
+      "ruled_out": true,
+      "rationale": "All four library routes use requireRole(['admin','manager']); teacher and student get 403 before the handler. Smoke: teacher/student attach and detach 403."
+    },
+    {
+      "scenario": "PATCH mass-assignment of attachmentId or createdBy",
+      "ruled_out": true,
+      "rationale": "The PATCH schema is .strict() and has no attachmentId/createdBy keys; any unknown key is a 400. Smoke asserts all three plus an empty body."
+    },
+    {
+      "scenario": "Archived item re-exposed to managers outside its team",
+      "ruled_out": true,
+      "rationale": "The manager shortcut only applies to status 'published'; archived items need a link to a team teacher's lesson (or creator). Smoke: other manager 403 on an archived item, bootstrap omits it."
+    },
+    {
+      "scenario": "Library block shadows or bypasses the plan block",
+      "ruled_out": true,
+      "rationale": "The block only returns true and never returns false, so a file that is both a library item and a plan file still reaches the unchanged plan logic. The admin/uploader early return, request-evidence block, and plan block are byte-for-byte unchanged (diff shows only the import line and the inserted block)."
+    },
+    {
+      "scenario": "Teacher/student bootstrap leaks another student's links or manager user rows",
+      "ruled_out": true,
+      "rationale": "Links are filtered to visibleLessons (own lessons) minus cancelled; createdBy/attachedBy are added to referencedUserIds only for managers. Smoke checks every non-admin role's link rows against its lesson set and that a fresh creator (managerC) is absent."
+    },
+    {
+      "scenario": "Request evidence becomes student-visible because a library item exists",
+      "ruled_out": true,
+      "rationale": "Evidence cannot back a library item (422), and the request block still runs first and never grants students. Smoke: evidence download 403 for the student with library items present."
+    },
+    {
+      "scenario": "A request cites a library attachment id to reach it through the request-evidence audience",
+      "ruled_out": false,
+      "rationale": "Pre-existing: POST /requests stores any client attachmentId without ownership checks. A teacher could cite a library file id; this grants only the existing request-evidence audience (that teacher and their manager), who can usually see published library items anyway. Not introduced by this phase; tracked as backlog request-attachment-ownership_NOTE_24-11-26.md."
+    },
+    {
+      "scenario": "Race between archiving an item and attaching it",
+      "ruled_out": false,
+      "rationale": "Not asserted (documented in 'What This Coverage Does NOT Prove'). Worst case an item archived concurrently gets one extra link, which only grants the linked lesson's teacher/student access; archive never revokes existing links by design."
+    },
+    {
+      "scenario": "Step F: Client-supplied storageKey traversal via plan attach (e.g. '../.env')",
+      "ruled_out": true,
+      "rationale": "Plan attach is strict { attachmentId }; extra keys are 400 and the route never inserts attachments rows (smoke F5 c/f)."
+    },
+    {
+      "scenario": "Step F: Absolute, Windows-drive, UNC or alternate-data-stream storage keys",
+      "ruled_out": true,
+      "rationale": "resolveUploadPath rejects ':' and NUL and any key whose relative path is absolute or climbs out; asserted under path.win32 on every OS."
+    },
+    {
+      "scenario": "Step F: Sibling directory sharing the upload dir name prefix ('../up-evil/x')",
+      "ruled_out": true,
+      "rationale": "Segment-based relative check, not string prefix; unit case."
+    },
+    {
+      "scenario": "Step F: Empty or '.' key reading the upload directory itself",
+      "ruled_out": true,
+      "rationale": "rel === '' returns null -> 404."
+    },
+    {
+      "scenario": "Step F: Mass assignment of id/uploadedBy/name on plan attach",
+      "ruled_out": true,
+      "rationale": "Strict schema; metadata comes only from the stored upload row."
+    },
+    {
+      "scenario": "Step F: Manager attaches another manager's upload or request evidence to a plan",
+      "ruled_out": true,
+      "rationale": "Uploader-or-admin rule (403) and request-evidence rule (422), same as POST /library; smoke a/d."
+    },
+    {
+      "scenario": "Step F: Other managers' user rows leaking through the library in a manager bootstrap",
+      "ruled_out": true,
+      "rationale": "Manager-only referencedUserIds block removed; creator shown via createdByName only; smoke iv."
+    },
+    {
+      "scenario": "Step F: Attach racing detach returning 500",
+      "ruled_out": true,
+      "rationale": "Retry once then 409 CONFLICT; smoke 5 rounds never 500."
+    },
+    {
+      "scenario": "Step F: Bogus status persisted and silently coerced",
+      "ruled_out": true,
+      "rationale": "DB CHECK (23514) plus strict libraryStatus mapper that throws."
+    },
+    {
+      "scenario": "Step F: Pre-existing hostile storage_key rows in dev data",
+      "ruled_out": true,
+      "rationale": "Read-time containment makes them harmless to download. Residual: historical rows are not audited and admin school-import storageKey stays client-supplied (backlog)."
+    }
+  ]
+}

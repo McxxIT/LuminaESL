@@ -1,3 +1,8 @@
 iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
 0	2026-11-24T09:45	0	0	0	0	ACTIVE	baseline	phase-03 EVL baseline
 1	2026-11-24T09:55	0	0	0	0	SATURATED	HALTED_SUCCESS	phase-03 EVL confirm: typecheck,lint,vitest 43,smoke 463,e2e 26+3 all green; P3-13 probe known-gap
+2	2026-11-24T11:30	9	0	9	9	SATURATED	HALTED_SUCCESS	phase-04 PVL: Gate PASS first pass; 9 concerns fixed in-plan (P1-P10); 5 known-gaps to backlog
+3	2026-11-24T14:00	0	0	0	0	ACTIVE	baseline	phase-04 EVL baseline: execute-agent reports all exit gates green (vitest 44, smoke 16/594, e2e 27+4); independent vc-tester confirm pending
+4	2026-11-24T15:10	0	0	0	0	ACTIVE	RUNNING	phase-04 EVL confirm #1 (vc-tester): all 9 gates green (vitest 44, smoke 16/594, e2e 27+4), AC-11 demo ok w/ cosmetic notes; review found pre-existing HIGH path traversal + M/L items -> user chose review-supplement fix before commit
+5	2026-11-24T16:40	9	0	9	9	SATURATED	HALTED_SUCCESS	phase-04 Step F supplement PVL: Gate PASS (retry after stalled attempt); 9 concerns fixed as execute instructions
+6	2026-11-24T19:30	0	0	0	0	SATURATED	HALTED_SUCCESS	phase-04 EVL confirm #2 after Step F (vc-tester): all gates green (vitest 7/61, smoke 16/656, e2e 27+4, 0005 hashes match); re-review: findings 1/2/3/4/8 closed, approved-with-concerns recommended

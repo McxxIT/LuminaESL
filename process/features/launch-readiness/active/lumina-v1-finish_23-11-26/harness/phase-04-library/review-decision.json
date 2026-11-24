@@ -1,0 +1,17 @@
+{
+  "task": "lumina-v1-finish Phase 04 — Curriculum Library",
+  "reviewer": "user (decision) on two independent vc-code-reviewer passes, 24-11-26",
+  "decision": "approved-with-concerns",
+  "rationale": "Review findings 1/2/3/4/8 (pre-existing HIGH arbitrary file read via plan-attach storageKey, manager user-row exposure, attach race 500, missing status CHECK, smoke gaps) closed by Step F and confirmed by independent EVL #2 and re-review; remaining concerns are non-blocking, pre-existing or accepted, and tracked in backlog",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "C1 — legacy attachments.storage_key values written by the old plan-attach route or by admin school-import are not audited; read-time containment (resolveUploadPath) covers them, no data mutation done. Backlog: lesson-plan-attach-hardening_NOTE_24-11-26.md",
+    "C2 — upload write path not hardened: Windows reserved device names (CON, NUL...), symlink-safe resolution, extname sanitising. Backlog: upload-write-path-hardening_NOTE_24-11-26.md",
+    "C3 — cosmetic at 390px: material-name clipping and Remove button alignment in the lesson materials chips. Backlog: library-polish-followups_NOTE_24-11-26.md (Phase 05 polish)",
+    "C4 — API-mode visual probe and P3-13 (Phase 03 card/modal at 390px) still pending; AC-11 was probed in demo mode only (desktop + 390px)",
+    "C5 — creator names (createdByName) are visible to all managers; accepted by the user",
+    "C6 — one e2e webServer 240s startup timeout seen once during execute; rerun and independent EVL green. Backlog: e2e-startup-timeout-flake_NOTE_24-11-26.md"
+  ],
+  "notes": "User decision 24-11-26: approved-with-concerns. Known gaps on record per the validate contract: request-attachment-ownership, lesson-plan-attach-hardening, orphaned-upload-cleanup, library-import-and-demo-data, frontend-library-service-unit-tests (all backlog notes in process/features/launch-readiness/backlog/). Migrations 0005 and 0006 are additive and applied to dev lumina; 0005 hash unchanged at EVL #2.",
+  "timestamp": "2026-11-24T20:00:00Z"
+}

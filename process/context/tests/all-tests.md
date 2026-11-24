@@ -14,8 +14,8 @@ Last updated: 2026-11-24
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
-**BLUF:** The backend has automated tests (vitest, 43 tests, 6 files, no DB needed). The frontend has a
-committed browser parity suite (`@playwright/test`, 29 tests: 26 API mode + 3 demo) run by
+**BLUF:** The backend has automated tests (vitest, 61 tests, 7 files, no DB needed). The frontend has a
+committed browser parity suite (`@playwright/test`, 31 tests: 27 API mode + 4 demo) run by
 `npm run e2e`. `npm run smoke` is a separate hybrid per-domain API smoke. There is no frontend
 unit/component runner and no CI; authenticated business rules outside the parity suite are verified by
 `npm run smoke` or by hand against seeded local Postgres.
@@ -93,27 +93,28 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | Agent-probe | Agent drives or inspects a running stack | Use `vc-agent-browser` against `npm run dev` (demo mode is default; API mode needs `NEXT_PUBLIC_DEMO_MODE=false` + `NEXT_PUBLIC_DATA_SOURCE=api`); curl smoke against the seeded API; one-off investigations the suite does not cover |
 | Known-gap | Not verified automatically | See Known Gaps below |
 
-## Per-Test-File Coverage (backend/tests, 43 tests in 6 files)
+## Per-Test-File Coverage (backend/tests, 61 tests in 7 files)
 
 | File | Tests | Covers |
 |---|---|---|
 | `app.test.ts` | 4 | `/health` 200; unknown route 404 `NOT_FOUND`; `/api/v1/lessons` without token 401; bad login body 400 `VALIDATION_ERROR` |
-| `contract.test.ts` | 8 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes (including `uploads` and `notifications/state`); `/school/bootstrap` 401 without token; notification state + upload routes 401 without token; `POST /credits` 401 anonymous and 403 for a student token (staff-managed policy); change-password and reset-password routes exist and reject anonymous callers |
+| `contract.test.ts` | 9 | Cross-workspace contract: `SCHOOL_SCHEMA_VERSION` match; `BOOTSTRAP_COLLECTION_KEYS` and settings keys match `SchoolCollections`/`SchoolSettings`; `app.hasRoute` for adapter command routes (including `uploads` and `notifications/state`); `/school/bootstrap` 401 without token; notification state + upload routes 401 without token; `POST /credits` 401 anonymous and 403 for a student token (staff-managed policy); change-password and reset-password routes exist and reject anonymous callers; the 4 library routes exist and reject anonymous callers; bootstrap collection keys total 18 |
 | `password.test.ts` | 6 | scrypt hash/verify, salted uniqueness, `addMinutes` midnight wrap; password policy (min 10, max 128, new != current, strict reset schema) |
 | `db-types.test.ts` | 6 | DB-free: postgres `numeric` (OID 1700) parser registration and parsing; `RATE_LIMIT_MAX` env default 300; `AUTH_RATE_LIMIT_MAX` default 30; production `CORS_ORIGIN` guard rejects `*`, empty, and non-http(s) |
 | `auth-lifecycle.test.ts` | 6 | DB-free: `refreshCookieOptions` (`secure` only in production); total limiter key generators; 429 after `AUTH_RATE_LIMIT_MAX` with per-email buckets and per-IP ceiling; change-password keyed by `user.sub`; refresh limited by cookie |
 | `school-import.test.ts` | 13 | D2 one-time import: zod payload and pure `buildImportPlan` |
+| `upload-path.test.ts` | 17 | DB-free: `resolveUploadPath` containment (traversal, absolute paths, NUL, `:` drive letters and alternate data streams, the upload directory itself), with Windows path semantics injected so they run on any OS |
 
 (`app.test.ts` and `contract.test.ts` hardcode an Env that includes `RATE_LIMIT_MAX` and `AUTH_RATE_LIMIT_MAX`. `backend/scripts/` is excluded from `npm test`.)
 
 ## Smoke Gate (`npm run smoke`)
 
 - Command: `npm run smoke` (root alias of `npm run smoke --workspace @lumina/backend`; `backend/scripts/smoke.ts`). Needs local Postgres and the backend env file; about 1 minute.
-- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 15 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications, auth): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules plus the full attachment access matrix (pre-attach uploader/admin 200, cross-team/student 403; published plan enrolled roles 200, unrelated 403; draft course owner/admin 200, others 403; request evidence target teacher/manager 200, cross-team/student 403), staff-managed credits (student self-purchase 403 with unchanged balance, admin purchase 201, 101 still 400), notification feed scoping and state roundtrip, and the `auth` domain (58 checks on a dedicated fixture user: change-password happy path with cookie rotation, wrong current -> 400 `INVALID_CURRENT_PASSWORD`, other devices' refresh 401 while the current device's new cookie refreshes, admin reset 200 without echoing the password, self-reset 400, non-admin 403, unknown 404, extra fields 400, pause/archive revoke refresh, prune keeps fresh and 1-day-old revoked rows and deletes expired and 8-day-old revoked rows). 463 checks per run; last green: 2026-11-24. `loadEnv` sets `AUTH_RATE_LIMIT_MAX=100000`.
+- Starts a temporary backend on `127.0.0.1:4100` (`SMOKE_PORT`), creates its own fixtures (`smoke-{runId}-*@smoke.lumina.test`), and checks 16 domains (settings, slots, booking, on-behalf, rebook, lessons, requests, credits, refunds, homework, quality, profile, uploads, notifications, auth, library): allowed role OK, denied roles 403, cross-team manager 403, exact credit deltas, exactly one activity row per mutation, refund evidence on uncharged/reversed/charged lessons, upload 5 MB/MIME rules plus the full attachment access matrix (pre-attach uploader/admin 200, cross-team/student 403; published plan enrolled roles 200, unrelated 403; draft course owner/admin 200, others 403; request evidence target teacher/manager 200, cross-team/student 403), staff-managed credits (student self-purchase 403 with unchanged balance, admin purchase 201, 101 still 400), notification feed scoping and state roundtrip, and the `auth` domain (58 checks on a dedicated fixture user: change-password happy path with cookie rotation, wrong current -> 400 `INVALID_CURRENT_PASSWORD`, other devices' refresh 401 while the current device's new cookie refreshes, admin reset 200 without echoing the password, self-reset 400, non-admin 403, unknown 404, extra fields 400, pause/archive revoke refresh, prune keeps fresh and 1-day-old revoked rows and deletes expired and 8-day-old revoked rows). 656 checks per run (uploads 61, library 170, credits 68, auth 58); last green: 2026-11-24. The `library` domain (Phase 04) covers staff-only create/edit/archive (creator-or-admin edit), strict bodies and limits, attach/detach on own-team versus other-team lessons, cancelled-lesson and archived-item denial, the attach race (one winner, 409 for the rest), the `canAccessAttachment` library branch (student and teacher on their own non-cancelled lessons, including completed, get 200; other students and unattached published items get 403 for students and teachers), the plan-attach strict `{attachmentId}` contract (uploader or admin; request evidence 422), download containment (a poisoned `storage_key` returns 404), and that the manager bootstrap carries `createdByName` but no other managers' user rows. Smoke archives the library items it creates in `finally`. `loadEnv` sets `AUTH_RATE_LIMIT_MAX=100000`.
 - Guards: never resets/pushes/truncates; refuses `NODE_ENV=production`, non-local DB hosts (unless `SMOKE_ALLOW_REMOTE=1`), and port 4000; restores settings in `finally`/SIGINT; archives its users. Fixture rows stay behind in the dev DB (backlog: `smoke-ci-and-fixtures_NOTE_18-11-26.md`).
 - Not in CI. Port 4100 must be free. Next 16 allows one dev server per project folder, so browser checks cannot run next to `npm run dev` (use a temporary frontend copy inside the repo root).
 
-## Parity Suite (`frontend/e2e`, 29 tests: 26 API + 3 demo)
+## Parity Suite (`frontend/e2e`, 31 tests: 27 API + 4 demo)
 
 - Command: `npm run e2e` (root alias) = `e2e:api` then `e2e:demo`. Needs local Postgres, the backend
   env file, and a seeded DB; ports 3000, 3100, and 4000 must be free (the API config reuses an
@@ -131,6 +132,7 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 | `e2e/api/auth.spec.ts` | 3 | API login + bootstrap 200; no token/JWT in `localStorage`; wrong password keeps the form; logout then reload does not resume the session |
 | `e2e/api/uploads.spec.ts` | 2 | Test 1: `POST /uploads` 201 for a unique PDF, plan row appears, authenticated download returns byte-identical content. Test 2 (Phase 02): unattached manager upload is 200 for uploader/admin and 403 for another manager/student; student `POST /credits` is 403; API-mode Student Billing shows "School-managed credits", no "Buy credits" button, and no demo VISA card |
 | `e2e/api/notifications.spec.ts` | 2 | Mark-all-read persists to `/notifications/state` and survives reload; muting a category persists per user; original state restored in `finally` |
+| `e2e/api/curriculum-library.spec.ts` | 1 | Phase 04: a manager uploads a PDF, creates a library item, and attaches it to a lesson in the Materials dialog; the student and the teacher of that lesson download byte-identical content; credits restored and created items archived in `finally`. The demo regression spec gained `runs the Curriculum Library locally` (local happy path plus UI negatives: picker excludes archived items, no Materials on cancelled lessons, no teacher attach control) |
 | `e2e/api/booking.spec.ts` | 1 | Teacher opens a fresh future slot, student books it, credit balance delta is exactly `-1`, lesson reads `scheduled` for the right teacher; `finally` cancels the lesson (freeing the teacher/date/time key for the next run) and restores the balance so repeat runs never drain the seeded student |
 | `e2e/api/booking-collision.spec.ts` | 5 | Occupied-key 409s with no state change: student booking on a reopened slot (balance, lesson count, slot claim unchanged), reschedule onto an occupied time (lesson keeps its old time/status), reactivating a cancelled lesson into an occupied key, two concurrent `POST /lessons` (one 201 + one 409, one active row), and collision vs validation (400 `VALIDATION_ERROR`) vs insufficient credit (400 `BAD_REQUEST`) |
 | `e2e/api/cancellation-refund.spec.ts` | 1 | Manager books on behalf, teacher files a cancellation with PNG evidence, manager sees the evidence as a blob URL, approves, credit delta is exactly `+1`, lesson reads `cancelled` |
@@ -184,9 +186,10 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
 
 ## Known Gaps
 
-- No frontend unit or component tests; browser coverage is the Playwright parity suite (23 API tests
+- No frontend unit or component tests; browser coverage is the Playwright parity suite (27 API tests
   across auth, uploads, notifications, booking, booking collisions, cancellation/refund, credit races,
-  homework, API boot with no demo data, and import, plus 3 demo tests).
+  homework, API boot with no demo data, import, and the Curriculum Library, plus 4 demo tests).
+- Phase 04 gaps: the local-branch library service guards have no unit test until Phase 05 adds a frontend runner (`backlog/frontend-library-service-unit-tests_NOTE_24-11-26.md`); the AC-11 visual probe ran in demo mode only (the API-mode Library tab and Materials dialog, and the Phase 03 P3-13 card, are still unprobed); one e2e webServer 240 s startup timeout was seen once and not reproduced (`backlog/e2e-startup-timeout-flake_NOTE_24-11-26.md`).
 - Authenticated business rules not in the parity suite (course ownership, publish/archive, absences,
   ratings, rebook) are covered by `npm run smoke` and by hand only.
 - Credit races are covered: `e2e/api/credit-concurrency.spec.ts` fires two concurrent bookings, cancels, and
@@ -208,6 +211,8 @@ Single file: `npm run test --workspace @lumina/backend -- tests/app.test.ts`.
   `lumina_review`, a disposable clone used for migration and collision work.
 
 ## Last Verified Test Run
+
+2026-11-24 (Phase 04 Curriculum Library, independent vc-tester EVL #2 after the Step F review fixes, default `backend/.env`): `npm run db:migrate` no-op (`0005`, `0006` applied; `0005` hash unchanged); `npm run typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 7 files, 61 tests passed; `npm run smoke`: 16/16 domains, 656 checks (uploads 61, library 170, credits 68, auth 58), exit 0; `npm run e2e`: 27/27 API + 4/4 demo; `git diff --check` clean. One e2e webServer startup timeout (240 s) was seen once during execute and passed on rerun.
 
 2026-11-24 (Phase 03 auth lifecycle hardening, independent vc-tester EVL, default `backend/.env`): `npm run typecheck` and `npm run lint` exit 0; `npm run test --workspace @lumina/backend`: 6 files, 43 tests passed; `npm run smoke`: 15/15 domains, 463 checks (auth 58), exit 0; `npm run e2e`: 26/26 API + 3/3 demo, no 429; `git status --porcelain -- backend/src/db` empty. Known gap: the agent-probe visual check of `PasswordChangeCard` / `ResetPasswordModal` at 390px was not run. Limiter behavior at the real default (30/min) is proven by vitest only.
 

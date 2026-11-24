@@ -28,6 +28,17 @@ Retire the remaining parity, UI-polish, and test-coverage backlog items before f
 
 ---
 
+## Carried in from Phase 04
+
+Supplement note (24-11-26, UPDATE PROCESS; pointers only, plan structure unchanged). Details live in `process/features/launch-readiness/backlog/`. Resolve or explicitly accept each during Phase 05 PLAN-SUPPLEMENT and PVL:
+
+- `frontend-library-service-unit-tests_NOTE_24-11-26.md`: the new Vitest runner must cover `services/library.ts` local-branch guards and the library actions in `permissions.ts` (Phase 04 left these to this phase).
+- `library-polish-followups_NOTE_24-11-26.md`: 390px material-chip name clipping and Remove alignment (`TeacherLessons`, `StudentLessons`, manager Materials dialog); library notification navigation/category; extract one shared upload validator; API-mode visual probe of the Library tab and Materials dialog (plus Phase 03 P3-13) if browser tooling is available.
+- Shared surfaces changed by Phase 04: `StudentLessons.tsx`, `TeacherLessons.tsx` (materials lists), `backend/scripts/smoke.ts` (`library` domain), `frontend/e2e/demo/regression.spec.ts`. Counts to keep green or exceed: vitest 7 files/61 tests, smoke 16 domains/656 checks, e2e 27 API + 4 demo.
+- Not Phase 05 scope (unscheduled backlog): `lesson-plan-attach-hardening`, `upload-write-path-hardening`, `request-attachment-ownership`, `orphaned-upload-cleanup`, `library-bootstrap-scale-and-policy`, `library-import-and-demo-data`.
+
+---
+
 ## Entry Gate
 
 - Phase 04 complete (Curriculum Library landed and verified so copy polish and frontend unit tests cover all v1 domains)
@@ -142,7 +153,7 @@ npm run e2e
 - Selected plan file path: `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-05-parity-polish-and-unit-tests_PLAN_23-11-26.md`
 - Last completed step: not started
 - Validate-contract status: pending
-- Next step: Wait for Phase 04 exit gate, then start Phase 05 RESEARCH (Step 1).
+- Next step: Phase 04 is closed (24-11-26); start Phase 05 RESEARCH (Step 1). Read the "Carried in from Phase 04" section first.
 
 ---
 
