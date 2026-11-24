@@ -63,6 +63,14 @@ export async function updateUser(userId: string, input: { name: string; email?: 
   });
 }
 
+/** Admin-only password reset for another account; ends that account's refresh sessions. */
+export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
+  await request(`/users/${encodeURIComponent(userId)}/reset-password`, {
+    method: "POST",
+    body: { newPassword },
+  });
+}
+
 export async function setUserStatus(userId: string, status: "active" | "paused"): Promise<void> {
   await request(`/users/${encodeURIComponent(userId)}`, {
     method: "PATCH",

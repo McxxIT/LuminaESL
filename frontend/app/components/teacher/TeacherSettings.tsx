@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Icon from "../Icon";
+import PasswordChangeCard from "../shared/PasswordChangeCard";
 import Toggle from "../student/Toggle";
 import { isApiDataMode } from "../../lib/auth/mode";
 import { downloadTextFile } from "../../lib/student";
@@ -98,6 +99,8 @@ export default function TeacherSettingsPage({ profile, settings, onSaveSettings,
             <div><span className="metric-icon orange"><Icon name="shield" /></span><div><strong>Privacy policy</strong><small>Review how student and teaching data is stored and used.</small></div><button type="button" className="secondary-button" onClick={() => onNotice("Privacy policy opened in a new tab.")}>Read policy</button></div>
           </div>
         </section>
+
+        <PasswordChangeCard onNotice={onNotice} />
 
         <section className="panel student-panel danger-zone">
           <div><span className="eyebrow">ACCOUNT ACCESS</span><h2>Sign out</h2><p>You can sign back in at any time. Your lessons, students, and notes are saved.</p></div>

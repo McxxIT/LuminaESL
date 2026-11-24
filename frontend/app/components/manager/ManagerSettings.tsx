@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Icon from "../Icon";
+import PasswordChangeCard from "../shared/PasswordChangeCard";
 import Toggle from "../student/Toggle";
 import { isApiDataMode } from "../../lib/auth/mode";
 import { getNotificationState, saveNotificationState } from "../../lib/school/api/notifications";
@@ -67,6 +68,8 @@ export default function ManagerSettings({ user, onNavigate, onRequestLogout, onN
             {categories.map((category) => <Toggle key={category.key} checked={!prefs.mutedCategories.includes(category.key)} onChange={(on) => toggle(category.key, on)} title={category.title} description={category.description} />)}
           </div>
         </section>
+
+        <PasswordChangeCard onNotice={onNotice} />
 
         <section className="panel student-panel danger-zone">
           <div><span className="eyebrow">ACCOUNT ACCESS</span><h2>Sign out</h2><p>You can sign back in at any time.</p></div>

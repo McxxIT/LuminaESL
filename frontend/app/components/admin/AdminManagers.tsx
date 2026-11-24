@@ -2,7 +2,8 @@
 
 import { useCallback, useState } from "react";
 import Icon from "../Icon";
-import { ConfirmStatusModal, ManagerFormModal } from "../manager/PeopleForms";
+import { ConfirmStatusModal, ManagerFormModal, ResetPasswordModal } from "../manager/PeopleForms";
+import { isDemoMode } from "../../lib/auth/mode";
 import { PersonAvatar, ScorePill, UserStatusBadge } from "../manager/parts";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
@@ -16,7 +17,7 @@ import {
   type SchoolData,
   type SchoolUser,
 } from "../../lib/school";
-import { createManager, setPersonStatus, updateManager } from "../../lib/school/services";
+import { createManager, resetPersonPassword, setPersonStatus, updateManager } from "../../lib/school/services";
 import { todayISO } from "../../lib/student";
 
 function selectManagers(data: SchoolData) {
@@ -37,7 +38,7 @@ function selectManagers(data: SchoolData) {
   };
 }
 
-type Dialog = { kind: "create" } | { kind: "edit" | "status"; manager: SchoolUser } | null;
+type Dialog = { kind: "create" } | { kind: "edit" | "status" | "reset-password"; manager: SchoolUser } | null;
 
 /** Admin-only: managers, their teams, and teachers waiting for a manager. */
 export default function AdminManagers({ user, onNavigate, onNotice }: { user: SchoolUser; onNavigate: (page: string) => void; onNotice: (message: string) => void }) {
@@ -83,6 +84,7 @@ export default function AdminManagers({ user, onNavigate, onNotice }: { user: Sc
         </div>
         <footer className="manager-card-actions">
           <button type="button" className={row.manager.status === "active" ? "danger-outline-button compact-button" : "secondary-button compact-button"} onClick={() => setDialog({ kind: "status", manager: row.manager })}>{row.manager.status === "active" ? "Pause" : "Reactivate"}</button>
+          {!isDemoMode() && <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "reset-password", manager: row.manager })}><Icon name="lock" size={14} /> Reset password</button>}
           <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "edit", manager: row.manager })}><Icon name="edit" size={14} /> Edit</button>
         </footer>
       </article>)}
@@ -97,6 +99,11 @@ export default function AdminManagers({ user, onNavigate, onNotice }: { user: Sc
     {dialog?.kind === "edit" && <ManagerFormModal initial={{ name: dialog.manager.name, email: dialog.manager.email }} onClose={() => setDialog(null)} onSubmit={async (values) => {
       const result = await updateManager(user.id, dialog.manager.id, values);
       if (result.ok) onNotice(`${values.name} was updated.`);
+      return result;
+    }} />}
+    {dialog?.kind === "reset-password" && <ResetPasswordModal person={dialog.manager} onClose={() => setDialog(null)} onSubmit={async (password) => {
+      const result = await resetPersonPassword(user.id, dialog.manager.id, password);
+      if (result.ok) onNotice(`${dialog.manager.name}’s password was reset.`);
       return result;
     }} />}
     {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.manager} onClose={() => setDialog(null)} onConfirm={async () => {

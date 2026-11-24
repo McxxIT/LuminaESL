@@ -58,6 +58,7 @@ const env: Env = {
   CORS_ORIGIN: "http://localhost:3000",
   UPLOAD_DIR: "uploads",
   RATE_LIMIT_MAX: 300,
+  AUTH_RATE_LIMIT_MAX: 30,
 };
 
 describe("school contract", () => {
@@ -178,5 +179,38 @@ describe("school contract", () => {
       payload: { readIds: [] },
     });
     expect(patch.statusCode).toBe(401);
+  });
+
+  it("should return 401 anonymous and 403 for a student token on the new auth routes", async () => {
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/auth/change-password" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/users/:id/reset-password" })).toBe(true);
+
+    const change = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/change-password",
+      payload: { currentPassword: "Password123!", newPassword: "Different456!" },
+    });
+    expect(change.statusCode).toBe(401);
+
+    const target = "00000000-0000-0000-0000-000000000002";
+    const anonymous = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${target}/reset-password`,
+      payload: { newPassword: "Different456!" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const studentToken = app.jwt.sign({
+      sub: "00000000-0000-0000-0000-000000000001",
+      role: "student",
+      email: "student@example.test",
+    });
+    const student = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${target}/reset-password`,
+      headers: { authorization: `Bearer ${studentToken}` },
+      payload: { newPassword: "Different456!" },
+    });
+    expect(student.statusCode).toBe(403);
   });
 });

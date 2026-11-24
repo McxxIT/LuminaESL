@@ -10,7 +10,8 @@ import {
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { logActivity } from "../lib/activity";
 import { parsePagination } from "../lib/pagination";
-import { hashPassword } from "../lib/password";
+import { hashPassword, passwordSchema, resetPasswordSchema } from "../lib/password";
+import { revokeUserRefreshTokens } from "../lib/refresh-tokens";
 import {
   assertCanViewUser,
   managerOwnsStudent,
@@ -44,7 +45,7 @@ const createUserSchema = z.object({
     .trim()
     .email()
     .transform((value) => value.toLowerCase()),
-  password: z.string().min(8).max(128),
+  password: passwordSchema,
   role: z.enum(["admin", "manager", "teacher", "student"]),
   avatarColor: z
     .string()
@@ -273,6 +274,10 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
 
       const statusChanged =
         body.status !== undefined && before.status !== updated.status;
+      if (statusChanged && before.status === "active") {
+        // Defense in depth: /auth/refresh already rejects inactive accounts.
+        await revokeUserRefreshTokens(app.db, updated.id);
+      }
       if (statusChanged) {
         await logActivity(app.db, {
           actorId: request.user.sub,
@@ -307,6 +312,47 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  app.post(
+    "/:id/reset-password",
+    { preHandler: app.requireRole("admin") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      const body = resetPasswordSchema.parse(request.body);
+      if (request.user.sub === id) {
+        throw badRequest(
+          "You cannot reset your own password — use the change-password flow",
+        );
+      }
+
+      const [target] = await app.db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      if (!target) throw notFound("User not found");
+
+      const passwordHash = await hashPassword(body.newPassword);
+      await app.db.transaction(async (tx) => {
+        await tx
+          .update(users)
+          .set({ passwordHash, updatedAt: new Date() })
+          .where(eq(users.id, target.id));
+        await revokeUserRefreshTokens(tx, target.id);
+      });
+
+      await logActivity(app.db, {
+        actorId: request.user.sub,
+        action: "user.password_reset",
+        targetType: "user",
+        targetId: target.id,
+        summary: target.name,
+      });
+
+      // Never echo the password back.
+      return { id: target.id, success: true };
+    },
+  );
+
   app.delete(
     "/:id",
     { preHandler: app.requireRole("admin") },
@@ -318,6 +364,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(users.id, id))
         .returning({ id: users.id, status: users.status, name: users.name });
       if (!archived) throw notFound("User not found");
+      await revokeUserRefreshTokens(app.db, archived.id);
 
       await logActivity(app.db, {
         actorId: request.user.sub,

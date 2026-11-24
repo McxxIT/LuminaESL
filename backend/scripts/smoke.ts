@@ -13,18 +13,18 @@
  * SIGINT; smoke users are archived at the end. Fixture rows are left behind.
  */
 import "dotenv/config";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app";
 import { loadEnv } from "../src/config/env";
 import * as schema from "../src/db/schema";
-import { creditEntries, lessons, settings, users } from "../src/db/schema";
+import { creditEntries, lessons, refreshTokens, settings, users } from "../src/db/schema";
 import { hashPassword } from "../src/lib/password";
 import { addMinutes, LESSON_MINUTES } from "../src/lib/time";
 
@@ -64,6 +64,7 @@ const env = loadEnv({
   PORT: String(port),
   LOG_LEVEL: "error",
   RATE_LIMIT_MAX: "100000",
+  AUTH_RATE_LIMIT_MAX: "100000",
   UPLOAD_DIR: uploadDir,
 });
 
@@ -970,6 +971,210 @@ async function notificationsScenario(): Promise<void> {
   );
 }
 
+// The auth domain mutates passwords, so it runs on its own fixture user (never on
+// the shared fixtures whose `password` other domains reuse). The user is archived
+// with the other smoke users; fabricated refresh-token rows are removed in finally.
+type Session = { status: number; body: unknown; token: string; cookie: string; setCookie: string };
+
+async function authCall(input: { path: string; body?: unknown; token?: string; cookie?: string }): Promise<Session> {
+  const headers: Record<string, string> = {};
+  if (input.token) headers.Authorization = `Bearer ${input.token}`;
+  if (input.cookie) headers.Cookie = `refresh_token=${input.cookie}`;
+  if (input.body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(`${base}${input.path}`, {
+    method: "POST",
+    headers,
+    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+  });
+  const text = await response.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      body = text;
+    }
+  }
+  const setCookie = response.headers.getSetCookie().find((value) => value.startsWith("refresh_token=")) ?? "";
+  const cookie = setCookie ? (setCookie.split(";")[0] ?? "").slice("refresh_token=".length) : "";
+  const token = typeof body === "object" && body !== null && typeof (body as { accessToken?: unknown }).accessToken === "string"
+    ? (body as { accessToken: string }).accessToken
+    : "";
+  return { status: response.status, body, token, cookie, setCookie };
+}
+
+async function signIn(email: string, pw: string, label: string): Promise<Session> {
+  const session = await authCall({ path: "/auth/login", body: { email, password: pw } });
+  expectStatus(session, 200, label);
+  check(session.token !== "" && session.cookie !== "", `${label}: expected an access token and a refresh cookie`);
+  return session;
+}
+
+function errorCode(res: { body: unknown }): unknown {
+  const error = obj(res.body, "error body").error;
+  return typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+}
+
+async function activeTokenCount(userId: string): Promise<number> {
+  const rows = await db
+    .select({ id: refreshTokens.id })
+    .from(refreshTokens)
+    .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+  return rows.length;
+}
+
+async function authScenario(): Promise<void> {
+  const email = emailFor("pwuser");
+  const created = await call(tok("admin"), "POST", "/users", {
+    name: `Smoke pwuser ${runId}`,
+    email,
+    password,
+    role: "student",
+    managerId: uid("managerA"),
+  });
+  expectStatus(created, 201, "create password fixture user");
+  const userId = str(created.body, "id");
+  const changed = randomBytes(18).toString("base64url");
+  const reset = randomBytes(18).toString("base64url");
+  const fabricated: string[] = [];
+
+  try {
+    // ---- change-password
+    const a = await signIn(email, password, "pwuser signs in (device A)");
+    const b = await signIn(email, password, "pwuser signs in (device B)");
+
+    const wrong = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      cookie: a.cookie,
+      body: { currentPassword: `${password}-wrong`, newPassword: changed },
+    });
+    check(wrong.status !== 401, `wrong current password must not be 401 (client would refresh), got ${wrong.status}`);
+    expectStatus(wrong, 400, "wrong current password");
+    check(errorCode(wrong) === "INVALID_CURRENT_PASSWORD", `wrong current password code: ${JSON.stringify(wrong.body)}`);
+
+    const same = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      body: { currentPassword: password, newPassword: password },
+    });
+    expectStatus(same, 400, "new password equal to current");
+    check(errorCode(same) === "VALIDATION_ERROR", `same password code: ${JSON.stringify(same.body)}`);
+
+    const short = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      body: { currentPassword: password, newPassword: "short-pw" },
+    });
+    expectStatus(short, 400, "new password under 10 characters");
+
+    const ok = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      cookie: a.cookie,
+      body: { currentPassword: password, newPassword: changed },
+    });
+    expectStatus(ok, 200, "change password");
+    check(JSON.stringify(ok.body) === JSON.stringify({ success: true }), `change password body: ${JSON.stringify(ok.body)}`);
+    check(ok.cookie !== "" && ok.cookie !== a.cookie, "change password rotates the refresh cookie");
+    const attrs = ok.setCookie.toLowerCase();
+    check(attrs.includes("httponly"), `refresh cookie must be HttpOnly: ${ok.setCookie}`);
+    check(attrs.includes("samesite=lax"), `refresh cookie must be SameSite=Lax: ${ok.setCookie}`);
+    check(attrs.includes("path=/api/v1/auth"), `refresh cookie path: ${ok.setCookie}`);
+    check(!ok.setCookie.includes(changed), "the new password never appears in the cookie");
+    await expectOneActivity("user", userId, "user.password_changed");
+
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: b.cookie }), 401, "other device refresh after change");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: a.cookie }), 401, "old cookie refresh after change");
+    const rotated = await authCall({ path: "/auth/refresh", cookie: ok.cookie });
+    expectStatus(rotated, 200, "new cookie refresh after change (device A stays signed in)");
+
+    expectStatus(await authCall({ path: "/auth/login", body: { email, password } }), 401, "old password login after change");
+    const c = await signIn(email, changed, "new password login after change");
+
+    // ---- admin reset
+    expectStatus(await call(tok("managerA"), "POST", `/users/${userId}/reset-password`, { newPassword: reset }), 403, "manager resets password");
+    expectStatus(await call(tok("teacherA"), "POST", `/users/${userId}/reset-password`, { newPassword: reset }), 403, "teacher resets password");
+    expectStatus(await call(c.token, "POST", `/users/${userId}/reset-password`, { newPassword: reset }), 403, "student resets own password via admin route");
+    const selfReset = await call(tok("admin"), "POST", `/users/${uid("admin")}/reset-password`, { newPassword: reset });
+    expectStatus(selfReset, 400, "admin self-reset");
+    expectStatus(
+      await call(tok("admin"), "POST", "/users/00000000-0000-4000-8000-000000000000/reset-password", { newPassword: reset }),
+      404,
+      "reset unknown user",
+    );
+    expectStatus(await call(tok("admin"), "POST", `/users/${userId}/reset-password`, { newPassword: "short-pw" }), 400, "reset with a short password");
+    expectStatus(
+      await call(tok("admin"), "POST", `/users/${userId}/reset-password`, { newPassword: reset, role: "admin" }),
+      400,
+      "reset rejects extra fields",
+    );
+
+    const resetRes = await call(tok("admin"), "POST", `/users/${userId}/reset-password`, { newPassword: reset });
+    expectStatus(resetRes, 200, "admin resets password");
+    check(str(resetRes.body, "id") === userId && obj(resetRes.body, "reset").success === true, `reset body: ${JSON.stringify(resetRes.body)}`);
+    check(!JSON.stringify(resetRes.body).includes(reset), "reset response never echoes the password");
+    await expectOneActivity("user", userId, "user.password_reset");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: c.cookie }), 401, "target refresh after admin reset");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: rotated.cookie }), 401, "target device A refresh after admin reset");
+    check((await activeTokenCount(userId)) === 0, "admin reset revokes every target refresh token");
+    expectStatus(await authCall({ path: "/auth/login", body: { email, password: changed } }), 401, "pre-reset password login");
+
+    // ---- prune on login: expired + revoked > 7 days are deleted, fresh + recently revoked kept
+    const day = 86_400_000;
+    const now = Date.now();
+    const rows = [
+      { label: "expired", expiresAt: new Date(now - day), revokedAt: null },
+      { label: "oldRevoked", expiresAt: new Date(now + 10 * day), revokedAt: new Date(now - 8 * day) },
+      { label: "fresh", expiresAt: new Date(now + 10 * day), revokedAt: null },
+      { label: "recentRevoked", expiresAt: new Date(now + 10 * day), revokedAt: new Date(now - day) },
+    ];
+    const ids: Record<string, string> = {};
+    for (const row of rows) {
+      const [inserted] = await db
+        .insert(refreshTokens)
+        .values({
+          userId,
+          tokenHash: createHash("sha256").update(`smoke-${runId}-${row.label}-${randomBytes(8).toString("hex")}`).digest("hex"),
+          expiresAt: row.expiresAt,
+          revokedAt: row.revokedAt,
+        })
+        .returning({ id: refreshTokens.id });
+      if (!inserted) throw new Error(`could not insert the ${row.label} refresh token`);
+      ids[row.label] = inserted.id;
+      fabricated.push(inserted.id);
+    }
+    const d = await signIn(email, reset, "reset password login (runs the prune)");
+    const left = await db
+      .select({ id: refreshTokens.id })
+      .from(refreshTokens)
+      .where(inArray(refreshTokens.id, fabricated));
+    const remaining = new Set(left.map((row) => row.id));
+    check(!remaining.has(ids.expired ?? ""), "prune deletes the expired token");
+    check(!remaining.has(ids.oldRevoked ?? ""), "prune deletes the token revoked 8 days ago");
+    check(remaining.has(ids.fresh ?? ""), "prune keeps the fresh token");
+    check(remaining.has(ids.recentRevoked ?? ""), "prune keeps the token revoked 1 day ago");
+
+    // ---- pause and archive revoke the target's tokens
+    expectStatus(await call(tok("admin"), "PATCH", `/users/${userId}`, { status: "paused" }), 200, "admin pauses the password user");
+    check((await activeTokenCount(userId)) === 0, "pause revokes every refresh token");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: d.cookie }), 401, "refresh after pause");
+    expectStatus(await call(tok("admin"), "PATCH", `/users/${userId}`, { status: "active" }), 200, "admin reactivates the password user");
+    const e = await signIn(email, reset, "login after reactivation");
+    expectStatus(await call(tok("admin"), "DELETE", `/users/${userId}`), 200, "admin archives the password user");
+    check((await activeTokenCount(userId)) === 0, "archive revokes every refresh token");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: e.cookie }), 401, "refresh after archive");
+    expectStatus(await authCall({ path: "/auth/login", body: { email, password: reset } }), 401, "login after archive");
+  } finally {
+    if (fabricated.length) {
+      await db.delete(refreshTokens).where(inArray(refreshTokens.id, fabricated)).catch((error: unknown) => {
+        console.error("Could not remove fabricated refresh tokens (best effort):", error);
+      });
+    }
+    await db.update(users).set({ status: "archived" }).where(eq(users.id, userId)).catch(() => undefined);
+  }
+}
+
 // ---------------------------------------------------------------- runner
 
 type Outcome = { domain: string; checks: number; error?: string };
@@ -1019,6 +1224,7 @@ async function main(): Promise<number> {
   await scenario("profile", profileScenario);
   await scenario("uploads", uploadsScenario);
   await scenario("notifications", notificationsScenario);
+  await scenario("auth", authScenario);
 
   const failed = outcomes.filter((outcome) => outcome.error);
   const total = outcomes.reduce((sum, outcome) => sum + outcome.checks, 0);

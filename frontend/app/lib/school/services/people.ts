@@ -7,6 +7,7 @@ import {
   enrollStudent as enrollStudentApi,
   recordCreditAdjustment,
   refreshSchoolAfterCommand,
+  resetUserPassword,
   setUserStatus,
   updateUser,
   updateStudent as updateStudentApi,
@@ -18,7 +19,7 @@ import { managerIdForTeacher } from "../selectors";
 import { updateSchool } from "../store";
 import type { Guardian, SchoolData, SchoolRole, SchoolUser, UserStatus } from "../types";
 import { changeCredits, requireUser } from "./common";
-import { run, runAsync, ServiceError, type ServiceResult } from "./result";
+import { fail, run, runAsync, ServiceError, type ServiceResult } from "./result";
 
 /** People management: managers (admin only), teachers, students, enrollments, and credits. */
 
@@ -336,6 +337,18 @@ export function setPersonStatus(actorId: string, userId: string, status: Exclude
     patch(draft, "users", userId, { status });
     recordActivity(draft, { actorId, action: `user.${status}`, targetType: "user", targetId: userId, summary: person.name });
   }));
+}
+
+/**
+ * Admin reset of another account's password (API auth only). Demo/local accounts
+ * have no real passwords, so the local branch refuses; the UI hides the action there.
+ */
+export function resetPersonPassword(actorId: string, userId: string, newPassword: string): ServiceResult | Promise<ServiceResult> {
+  if (!isApiDataMode()) return fail("Passwords can only be reset when Lumina is connected to the school server.");
+  if (actorId === userId) return fail("You cannot reset your own password. Change it from Settings instead.");
+  return runAsync(async () => {
+    await resetUserPassword(userId, newPassword);
+  });
 }
 
 export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult | Promise<ServiceResult> {

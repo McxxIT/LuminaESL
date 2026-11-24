@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { hashPassword, verifyPassword } from "../src/lib/password";
+import {
+  PASSWORD_MIN_LENGTH,
+  changePasswordSchema,
+  hashPassword,
+  passwordSchema,
+  resetPasswordSchema,
+  verifyPassword,
+} from "../src/lib/password";
 import { addMinutes } from "../src/lib/time";
 
 describe("password hashing", () => {
@@ -23,5 +30,38 @@ describe("time helpers", () => {
   it("adds minutes and wraps around midnight", () => {
     expect(addMinutes("09:00", 25)).toBe("09:25");
     expect(addMinutes("23:50", 25)).toBe("00:15");
+  });
+});
+
+describe("password policy", () => {
+  it("should accept 10-128 char passwords and reject 9", () => {
+    expect(PASSWORD_MIN_LENGTH).toBe(10);
+    expect(passwordSchema.safeParse("Password123!").success).toBe(true);
+    // Same shape as the smoke password: 18 random bytes as base64url, no symbols.
+    expect(passwordSchema.safeParse("aB3dE6gH9jK2mN5pQ8sT1vW4").success).toBe(true);
+    expect(passwordSchema.safeParse("a".repeat(10)).success).toBe(true);
+    expect(passwordSchema.safeParse("a".repeat(128)).success).toBe(true);
+    expect(passwordSchema.safeParse("a".repeat(9)).success).toBe(false);
+    expect(passwordSchema.safeParse("a".repeat(129)).success).toBe(false);
+  });
+
+  it("should reject a new password equal to the current one", () => {
+    expect(
+      changePasswordSchema.safeParse({ currentPassword: "Password123!", newPassword: "Password123!" }).success,
+    ).toBe(false);
+    expect(
+      changePasswordSchema.safeParse({ currentPassword: "Password123!", newPassword: "Different456!" }).success,
+    ).toBe(true);
+    expect(
+      changePasswordSchema.safeParse({ currentPassword: "Password123!", newPassword: "short" }).success,
+    ).toBe(false);
+  });
+
+  it("should accept only newPassword on admin reset", () => {
+    expect(resetPasswordSchema.safeParse({ newPassword: "Password123!" }).success).toBe(true);
+    expect(
+      resetPasswordSchema.safeParse({ newPassword: "Password123!", role: "admin" }).success,
+    ).toBe(false);
+    expect(resetPasswordSchema.safeParse({}).success).toBe(false);
   });
 });

@@ -170,6 +170,8 @@ const ACTION_TITLES: Record<string, string> = {
   "teacher.updated": "Teacher updated",
   "user.archived": "Account archived",
   "user.created": "Account created",
+  "user.password_changed": "Password changed",
+  "user.password_reset": "Password reset",
   "user.inactive": "Account paused",
   "user.paused": "Account paused",
   "user.renamed": "Name updated",

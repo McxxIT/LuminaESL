@@ -3,7 +3,8 @@
 import { useCallback, useMemo, useState } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
-import { AbsenceModal, ConfirmStatusModal, TeacherFormModal, type TeacherFormValues } from "./PeopleForms";
+import { AbsenceModal, ConfirmStatusModal, ResetPasswordModal, TeacherFormModal, type TeacherFormValues } from "./PeopleForms";
+import { isDemoMode } from "../../lib/auth/mode";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   absencesForTeacher,
@@ -20,7 +21,7 @@ import {
   type SchoolData,
   type SchoolUser,
 } from "../../lib/school";
-import { assignTeacherToManager, createTeacher, recordTeacherAbsence, setPersonStatus, updateTeacher } from "../../lib/school/services";
+import { assignTeacherToManager, createTeacher, recordTeacherAbsence, resetPersonPassword, setPersonStatus, updateTeacher } from "../../lib/school/services";
 import { slotStartDate } from "../../lib/scheduling";
 import { formatLessonDate, isoDaysFromNow, todayISO } from "../../lib/student";
 import { LessonStatusBadge, PersonAvatar, ScorePill, UserStatusBadge } from "./parts";
@@ -54,7 +55,7 @@ function selectTeachers(data: SchoolData, user: SchoolUser) {
 }
 
 type TeacherRow = ReturnType<typeof selectTeachers>[number];
-type Dialog = { kind: "create" } | { kind: "edit"; row: TeacherRow } | { kind: "status"; row: TeacherRow } | { kind: "absence"; lesson: Lesson; label: string } | null;
+type Dialog = { kind: "create" } | { kind: "edit"; row: TeacherRow } | { kind: "status" | "reset-password"; row: TeacherRow } | { kind: "absence"; lesson: Lesson; label: string } | null;
 
 export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; onNotice: (message: string) => void }) {
   const select = useCallback((data: SchoolData) => selectTeachers(data, user), [user]);
@@ -134,6 +135,7 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
       footer={<>
         <button type="button" className="cancel-button" onClick={() => setSelectedId(null)}>Close</button>
         {selected.canManage && <>
+          {isAdmin && !isDemoMode() && <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "reset-password", row: selected })}><Icon name="lock" size={14} /> Reset password</button>}
           <button type="button" className={selected.teacher.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.teacher.status === "active" ? "Pause" : "Reactivate"}</button>
           <button type="button" className="primary-button" onClick={() => setDialog({ kind: "edit", row: selected })}><Icon name="edit" size={14} /> Edit</button>
         </>}
@@ -183,6 +185,11 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
       const pausing = dialog.row.teacher.status === "active";
       const result = await setPersonStatus(user.id, dialog.row.teacher.id, pausing ? "paused" : "active");
       if (result.ok) onNotice(`${dialog.row.teacher.name} was ${pausing ? "paused" : "reactivated"}.`);
+      return result;
+    }} />}
+    {dialog?.kind === "reset-password" && <ResetPasswordModal person={dialog.row.teacher} onClose={() => setDialog(null)} onSubmit={async (password) => {
+      const result = await resetPersonPassword(user.id, dialog.row.teacher.id, password);
+      if (result.ok) onNotice(`${dialog.row.teacher.name}’s password was reset.`);
       return result;
     }} />}
     {dialog?.kind === "absence" && <AbsenceModal lessonLabel={dialog.label} onClose={() => setDialog(null)} onSubmit={async (note) => {

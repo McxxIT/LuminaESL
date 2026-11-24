@@ -246,3 +246,19 @@ export function cancellationRequestFor(
   }
   return request;
 }
+
+/**
+ * Disposable account for specs that change a password, so no seeded account's
+ * password is ever touched. Pair with `archiveUser` in `finally`.
+ */
+export async function createDisposableUser(
+  adminToken: string,
+  input: { name: string; email: string; password: string; role: "manager" | "teacher" | "student" },
+): Promise<ApiUser> {
+  return apiPost<ApiUser>("/users", adminToken, input);
+}
+
+/** Archives an account through the admin API (the standard e2e/smoke clean-up). */
+export async function archiveUser(adminToken: string, userId: string): Promise<void> {
+  await apiRequest(`/users/${encodeURIComponent(userId)}`, { method: "DELETE", token: adminToken });
+}

@@ -32,4 +32,33 @@ describe("env defaults", () => {
     });
     expect(env.RATE_LIMIT_MAX).toBe(300);
   });
+
+  const base = {
+    DATABASE_URL: "postgres://x@localhost/x",
+    JWT_SECRET: "test-secret-that-is-long-enough-to-pass",
+  };
+
+  it("should default AUTH_RATE_LIMIT_MAX to 30 and reject wildcard CORS_ORIGIN in production", () => {
+    expect(envSchema.parse(base).AUTH_RATE_LIMIT_MAX).toBe(30);
+    expect(envSchema.parse({ ...base, AUTH_RATE_LIMIT_MAX: "100000" }).AUTH_RATE_LIMIT_MAX).toBe(100000);
+
+    for (const CORS_ORIGIN of ["*", "", " , ", "http://a.example,*", "ftp://files.example"]) {
+      const result = envSchema.safeParse({ ...base, NODE_ENV: "production", CORS_ORIGIN });
+      expect(result.success, `CORS_ORIGIN=${JSON.stringify(CORS_ORIGIN)}`).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.path.includes("CORS_ORIGIN"))).toBe(true);
+      }
+    }
+  });
+
+  it("should accept explicit CORS origins in production and wildcard outside production", () => {
+    expect(
+      envSchema.safeParse({
+        ...base,
+        NODE_ENV: "production",
+        CORS_ORIGIN: "https://app.lumina.school, https://admin.lumina.school",
+      }).success,
+    ).toBe(true);
+    expect(envSchema.safeParse({ ...base, NODE_ENV: "development", CORS_ORIGIN: "*" }).success).toBe(true);
+  });
 });

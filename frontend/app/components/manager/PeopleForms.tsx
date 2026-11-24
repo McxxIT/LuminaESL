@@ -197,6 +197,25 @@ export function ConfirmStatusModal({ person, onConfirm, onClose }: { person: Sch
   </FormModal>;
 }
 
+export function ResetPasswordModal({ person, onSubmit, onClose }: { person: SchoolUser; onSubmit: Submit<string>; onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  return <FormModal id="reset-password-form" eyebrow="RESET PASSWORD" title={`Set a new password for ${person.name}`}
+    description={person.email} submitLabel="Reset password" danger onClose={onClose}
+    onSubmit={() => {
+      if (password.length < 10 || password.length > 128) return { ok: false, error: "The new password must be 10 to 128 characters." };
+      if (password !== confirm) return { ok: false, error: "The passwords do not match." };
+      return onSubmit(password);
+    }}>
+    <label>New password<input type="password" name="new-password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} maxLength={128} autoFocus /><small>At least 10 characters. Share it with them privately.</small></label>
+    <label>Confirm new password<input type="password" name="confirm-password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} maxLength={128} /></label>
+    <div className="lesson-callout warning full-field"><Icon name="lock" size={16} /><div>
+      <strong>Their old password stops working right away</strong>
+      <p>Devices where they are already signed in lose access within 15 minutes, when their current session expires. They then sign in with the new password.</p>
+    </div></div>
+  </FormModal>;
+}
+
 export function AbsenceModal({ lessonLabel, onSubmit, onClose }: { lessonLabel: string; onSubmit: Submit<string>; onClose: () => void }) {
   const [note, setNote] = useState("");
   return <FormModal id="absence-form" eyebrow="RECORD ABSENCE" title="Teacher missed this lesson?" description={lessonLabel}

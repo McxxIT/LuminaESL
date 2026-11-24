@@ -1,4 +1,34 @@
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
+
+/** Minimum password length for every route that sets a password (no composition rules). */
+export const PASSWORD_MIN_LENGTH = 10;
+/** Maximum password length; bounds scrypt work per request. */
+export const PASSWORD_MAX_LENGTH = 128;
+
+/**
+ * Shared password policy for register, create-user, change-password, and admin
+ * reset. Length only: composition rules add churn without much benefit at this
+ * scale, and the smoke script uses base64url passwords without symbols.
+ */
+export const passwordSchema = z
+  .string()
+  .min(PASSWORD_MIN_LENGTH, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`)
+  .max(PASSWORD_MAX_LENGTH, `Password must be at most ${PASSWORD_MAX_LENGTH} characters`);
+
+/** Body for `POST /auth/change-password`; the new password must differ from the current one. */
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+    newPassword: passwordSchema,
+  })
+  .refine((body) => body.newPassword !== body.currentPassword, {
+    message: "New password must be different from the current password",
+    path: ["newPassword"],
+  });
+
+/** Body for `POST /users/:id/reset-password` (admin): only the new password is accepted. */
+export const resetPasswordSchema = z.object({ newPassword: passwordSchema }).strict();
 
 const KEY_LENGTH = 64;
 const SALT_LENGTH = 16;

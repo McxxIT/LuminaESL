@@ -46,6 +46,8 @@ export type ActivityAction =
   | "teacher.reassigned"
   | "teacher.updated"
   | "user.created"
+  | "user.password_changed"
+  | "user.password_reset"
   | "user.renamed"
   | "user.updated"
   | `user.${UserStatus}`;

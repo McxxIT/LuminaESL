@@ -99,6 +99,11 @@ test.describe("Demo mode regression", () => {
     await nav(page, "Settings");
     await expect(muteRow()).not.toBeChecked();
 
+    // Passwords are an API-auth concern: demo Settings shows only the explainer.
+    await expect(page.getByTestId("password-demo-card")).toContainText("Demo mode — passwords are not enforced");
+    await expect(page.getByTestId("password-change-card")).toHaveCount(0);
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+
     expect(apiCalls, "demo mode must not call the API").toEqual([]);
     assertNoPageErrors(pageErrors);
   });
