@@ -27,6 +27,17 @@ Package Lumina ESL so anyone can boot the full stack cleanly in containers and r
 
 ---
 
+## Carried in from Phase 03
+
+Pointers only (24-11-26); details live in `process/features/launch-readiness/backlog/`. Resolve or explicitly accept each during Phase 06 PLAN-SUPPLEMENT and PVL:
+
+- `trust-proxy-and-limiter-store_NOTE_24-11-26.md`: `trustProxy: true` is unconditional; decide env-driven `TRUST_PROXY` against the compose topology.
+- `auth-rate-limit-config_NOTE_24-11-26.md`: production cap for `AUTH_RATE_LIMIT_MAX` / `RATE_LIMIT_MAX`; assert `NODE_ENV=production` in compose and CI (it gates the CORS guard and the `Secure` cookie); `sameSite: lax` breaks split-origin deploys, so pick same-site or a reverse proxy; `Retry-After` on the ceiling 429.
+- `default-account-password_NOTE_24-11-26.md`: HIGH, should-fix before launch and before this phase packages a deployable stack (shared fixed default password for admin-created accounts).
+- CI env: smoke and Playwright set `AUTH_RATE_LIMIT_MAX=100000` (`backend/scripts/smoke.ts` `loadEnv`, `frontend/playwright.config.ts` backend env); the workflow must do the same or auth routes return 429.
+
+---
+
 ## Entry Gate
 
 - Phases 01–05 all complete and verified (final schema, security, auth, Curriculum Library, polish, and Vitest suites all in place)

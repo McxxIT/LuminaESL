@@ -16,3 +16,9 @@ Umbrella plan: `process/features/launch-readiness/active/lumina-v1-finish_23-11-
 1. Phases execute strictly sequentially (`01 -> 02 -> 03 -> 04 -> 05 -> 06`); never edit two phases in the same uncommitted worktree.
 2. Whenever a later phase touches a shared surface (e.g., `uploads.ts` in Phase 04 after Phase 02, `lessons.ts` in Phase 05 after Phase 04), EVL MUST run a targeted regression check on the earlier phase's proving tests.
 3. Every schema edit (`schema.ts` in Phase 04) must update generated migrations, bootstrap, `frontend/app/lib/school/types.ts`, and `backend/tests/contract.test.ts` in the same phase.
+
+## Phase Status
+
+- Phase 01 — status: DONE
+- Phase 02 — status: DONE
+- Phase 03 — status: DONE (24-11-26; VERIFIED with gaps, review approved-with-concerns; shared surfaces `backend/scripts/smoke.ts`, `frontend/playwright.config.ts` (backend env `AUTH_RATE_LIMIT_MAX`), `frontend/e2e/support/api.ts` changed, so Phase 04-06 EVL must keep them green)

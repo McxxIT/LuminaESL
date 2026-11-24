@@ -1,0 +1,137 @@
+{
+  "task": "lumina-v1-finish Phase 03 — auth & account lifecycle hardening",
+  "result": "PASS (executor run and independent vc-tester EVL re-run, 24-11-26)",
+  "commands": [
+    {
+      "command": "npm run typecheck",
+      "result": "PASS",
+      "notes": "exit 0, both workspaces; re-confirmed by independent EVL run 24-11-26"
+    },
+    {
+      "command": "npm run lint",
+      "result": "PASS",
+      "notes": "exit 0, both workspaces; re-confirmed by independent EVL run 24-11-26"
+    },
+    {
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "6 files, 43 tests (was 5 files / 31 tests); new auth-lifecycle.test.ts; re-confirmed by independent EVL run 24-11-26"
+    },
+    {
+      "command": "npm run smoke",
+      "result": "PASS",
+      "notes": "15/15 domains, 463 checks (auth domain 58); run twice, both green; uploads 38 and credits 68 still green; re-confirmed by independent EVL run 24-11-26"
+    },
+    {
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "26 API tests (2 new in auth.spec.ts) + 3 demo tests; no auth 429; re-confirmed by independent EVL run 24-11-26"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS",
+      "notes": "exit 0; re-confirmed by independent EVL run 24-11-26"
+    },
+    {
+      "command": "git status --porcelain -- backend/src/db",
+      "result": "PASS",
+      "notes": "empty: no migration, no schema change; re-confirmed by independent EVL run 24-11-26"
+    }
+  ],
+  "steps": [
+    {
+      "step": "Change password happy path rotates the refresh cookie (HttpOnly, SameSite=Lax, Path=/api/v1/auth)",
+      "command": "npm run smoke (auth)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Wrong current password returns 400 INVALID_CURRENT_PASSWORD, not 401",
+      "command": "npm run smoke (auth); npm run e2e (auth.spec)",
+      "result": "PASS",
+      "notes": "e2e also asserts no extra /auth/refresh and the user stays signed in"
+    },
+    {
+      "step": "Other devices' refresh tokens return 401 after change; the current device's new cookie refreshes 200",
+      "command": "npm run smoke (auth)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Old password rejected and new password accepted at login after change and after admin reset",
+      "command": "npm run smoke (auth); npm run e2e (auth.spec)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Admin reset: 200 {id, success}, password never echoed, target refresh tokens revoked (0 active)",
+      "command": "npm run smoke (auth); npm run e2e (ResetPasswordModal)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Admin self-reset 400; manager/teacher/student 403; unknown id 404; extra fields 400",
+      "command": "npm run smoke (auth); vitest contract.test.ts",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Pause and archive revoke all refresh tokens; refresh 401 afterwards",
+      "command": "npm run smoke (auth)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Prune on login deletes expired and 8-day-old revoked rows, keeps fresh and 1-day-old revoked rows",
+      "command": "npm run smoke (auth)",
+      "result": "PASS",
+      "notes": "fabricated rows on the dedicated fixture user, removed in finally"
+    },
+    {
+      "step": "Limiter: 429 after AUTH_RATE_LIMIT_MAX, per-email buckets, case-insensitive email key, per-IP ceiling across rotating emails, change-password keyed by user.sub, refresh keyed by cookie",
+      "command": "npm run test --workspace @lumina/backend (auth-lifecycle.test.ts)",
+      "result": "PASS",
+      "notes": "DB-free, invalid bodies"
+    },
+    {
+      "step": "Production CORS guard rejects '*', empty, and non-http(s); AUTH_RATE_LIMIT_MAX defaults to 30",
+      "command": "npm run test --workspace @lumina/backend (db-types.test.ts)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "refreshCookieOptions secure only in production",
+      "command": "npm run test --workspace @lumina/backend (auth-lifecycle.test.ts)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Demo mode: explainer card only, no password inputs, zero /api/v1/ requests",
+      "command": "npm run e2e (demo regression.spec)",
+      "result": "PASS",
+      "notes": ""
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "E5 read-only refresh_tokens count before the first smoke run (dev lumina)",
+      "result": "1090 rows total; 0 expired; 0 revoked >7 days; 0 matching the retention rule — the global sweep had nothing to delete",
+      "timestamp": "2026-11-24T01:41:50Z"
+    },
+    {
+      "check": "E5 count after both smoke runs and e2e",
+      "result": "1166 rows total; 0 matching the retention rule",
+      "timestamp": "2026-11-24T01:46:11Z"
+    },
+    {
+      "check": "Agent-probe P3-13 (Settings card + reset modal layout/copy via vc-agent-browser)",
+      "result": "NOT RUN: no browser tooling available and the user did not request a manual check; recorded as known gap P3-13 (copy asserted by e2e only)",
+      "timestamp": null
+    },
+    {
+      "check": "Independent EVL re-run (vc-tester): typecheck, lint, vitest 6 files/43 tests, git diff --check, backend/src/db clean, smoke 15/15 domains 463 checks (auth 58), e2e 26 API + 3 demo with no 429, seeded admin login 200",
+      "result": "PASS",
+      "timestamp": "2026-11-24T09:55:00Z"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "task": "lumina-v1-finish Phase 03 — auth & account lifecycle hardening",
+  "snippets": [
+    { "file": "backend/src/lib/password.ts", "lines": "4-31", "description": "Shared passwordSchema (min 10, max 128, length only), changePasswordSchema (rejects new == current), resetPasswordSchema (strict: newPassword only)" },
+    { "file": "backend/src/lib/refresh-tokens.ts", "lines": "25-35", "description": "refreshCookieOptions(env): httpOnly, sameSite lax, secure only in production, path /api/v1/auth, maxAge" },
+    { "file": "backend/src/lib/refresh-tokens.ts", "lines": "42-53", "description": "revokeUserRefreshTokens: sets revoked_at on every non-revoked token of a user" },
+    { "file": "backend/src/lib/refresh-tokens.ts", "lines": "61-81", "description": "pruneRefreshTokens: deletes expired rows and rows revoked more than 7 days ago; per-user when userId given" },
+    { "file": "backend/src/routes/auth.ts", "lines": "88-122", "description": "Total, never-throwing limiter key generators: login ip+sha256(email), refresh ip+sha256(cookie) prefix, change-password ip+sha256(user.sub)" },
+    { "file": "backend/src/routes/auth.ts", "lines": "124-150", "description": "issueSession: inserts the hashed refresh token, then setCookie with refreshCookieOptions" },
+    { "file": "backend/src/routes/auth.ts", "lines": "155-172", "description": "pruneAfterAuth: awaited per-user prune in try/catch; hourly global sweep fire-and-forget with caught error" },
+    { "file": "backend/src/routes/auth.ts", "lines": "175-208", "description": "Per-IP ceiling via app.createRateLimit (RATE_LIMIT_MAX) run first in preHandler; route-level config.rateLimit with hook preHandler and AUTH_RATE_LIMIT_MAX" },
+    { "file": "backend/src/routes/auth.ts", "lines": "309-365", "description": "POST /auth/change-password: authenticate, caller active, verify current (400 INVALID_CURRENT_PASSWORD), one transaction update+revoke, issueSession after commit, activity user.password_changed" },
+    { "file": "backend/src/routes/users.ts", "lines": "275-280", "description": "PATCH /users/:id revokes refresh tokens when status moves away from active" },
+    { "file": "backend/src/routes/users.ts", "lines": "314-352", "description": "POST /users/:id/reset-password: admin only, self-reset 400, unknown 404, transaction update+revoke, activity user.password_reset, never echoes password" },
+    { "file": "backend/src/routes/users.ts", "lines": "366-368", "description": "DELETE /users/:id (archive) revokes refresh tokens" },
+    { "file": "backend/src/config/env.ts", "lines": "29-55", "description": "AUTH_RATE_LIMIT_MAX default 30; superRefine rejects empty, '*', or non-http(s) CORS_ORIGIN when NODE_ENV=production" },
+    { "file": "frontend/app/components/shared/PasswordChangeCard.tsx", "lines": "27-35", "description": "isDemoMode() renders a static explainer card; the form (and any API call) only mounts outside demo mode" },
+    { "file": "frontend/app/components/admin/AdminManagers.tsx", "lines": "87", "description": "Reset password action hidden in demo mode (admin-only page)" },
+    { "file": "frontend/app/components/manager/ManagerTeachers.tsx", "lines": "138", "description": "Reset password action: admin and !isDemoMode() only" },
+    { "file": "frontend/app/components/manager/ManagerStudents.tsx", "lines": "152", "description": "Reset password action: admin and !isDemoMode() only" },
+    { "file": "frontend/app/lib/school/services/people.ts", "lines": "343-352", "description": "resetPersonPassword: local branch returns fail(...), API branch calls resetUserPassword" }
+  ]
+}

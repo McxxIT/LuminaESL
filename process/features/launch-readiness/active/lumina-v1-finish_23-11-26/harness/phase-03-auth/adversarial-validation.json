@@ -1,0 +1,65 @@
+{
+  "task": "lumina-v1-finish Phase 03 — auth & account lifecycle hardening",
+  "scenarios": [
+    {
+      "scenario": "Stolen access token tries change-password without knowing the current password",
+      "ruled_out": true,
+      "rationale": "The handler verifies currentPassword with scrypt before any write and returns 400 INVALID_CURRENT_PASSWORD; attempts are limited per user.sub (AUTH_RATE_LIMIT_MAX) and per IP. Smoke: wrong current -> 400, not 401."
+    },
+    {
+      "scenario": "Hijacked admin session resets the admin's own password to take over the account",
+      "ruled_out": true,
+      "rationale": "POST /users/:id/reset-password returns 400 when request.user.sub === id (smoke 'admin self-reset'); the admin must use change-password, which needs the current password."
+    },
+    {
+      "scenario": "Refresh-token replay after a password change, admin reset, pause, or archive",
+      "ruled_out": true,
+      "rationale": "All of the user's refresh tokens are revoked (in the same transaction for change/reset). Smoke asserts /auth/refresh 401 for old cookies after change, reset, pause, and archive, and 0 active tokens in the DB."
+    },
+    {
+      "scenario": "Already-issued access JWT keeps working after reset/change/pause/archive",
+      "ruled_out": false,
+      "rationale": "Known gap: access tokens are stateless and stay valid up to ACCESS_TOKEN_TTL (15 min). Documented in UI copy and carried by backlog note access-token-revocation_NOTE_24-11-26.md."
+    },
+    {
+      "scenario": "Limiter evasion by rotating emails (login) or random cookies (refresh)",
+      "ruled_out": true,
+      "rationale": "Per-account buckets are backed by a per-IP ceiling (RATE_LIMIT_MAX) applied via app.createRateLimit on all three routes. Vitest proves the ceiling trips across distinct emails."
+    },
+    {
+      "scenario": "X-Forwarded-For spoofing to get a fresh IP bucket per request",
+      "ruled_out": false,
+      "rationale": "Known gap: trustProxy is unconditionally true in buildApp, so the header is trusted when the API is reachable without a trusted proxy. Carried by backlog note trust-proxy-and-limiter-store_NOTE_24-11-26.md (Phase 06 deploy topology)."
+    },
+    {
+      "scenario": "Limiter key generator crash or memory blow-up from a hostile body/cookie",
+      "ruled_out": true,
+      "rationale": "Key generators type-check inputs, cap user-controlled parts at 256 chars, and hash them; vitest feeds null, strings, numbers, arrays, and a 100k-char email without a throw and with a short key."
+    },
+    {
+      "scenario": "Wildcard or empty CORS_ORIGIN shipped to production with credentials: true",
+      "ruled_out": true,
+      "rationale": "envSchema.superRefine rejects empty, '*', and non-http(s) origins when NODE_ENV=production, so the app fails to start. Vitest covers '*', '', ' , ', mixed '*', and ftp://."
+    },
+    {
+      "scenario": "Demo-mode code reaching the API with password data",
+      "ruled_out": true,
+      "rationale": "PasswordChangeCard returns the static explainer before the form mounts when isDemoMode(); reset actions are hidden in demo mode and resetPersonPassword's local branch returns fail(). The demo regression e2e asserts no password inputs and zero /api/v1/ requests."
+    },
+    {
+      "scenario": "Mass assignment on reset (e.g. sending role or status with newPassword)",
+      "ruled_out": true,
+      "rationale": "resetPasswordSchema is .strict(): extra keys return 400 (vitest + smoke 'reset rejects extra fields'); the update sets only passwordHash and updatedAt."
+    },
+    {
+      "scenario": "Wrong-current-password 401 triggers a refresh loop that signs the user out",
+      "ruled_out": true,
+      "rationale": "Wrong current is a 400; the client only refreshes on 401. The e2e asserts no extra /auth/refresh call and the user stays signed in."
+    },
+    {
+      "scenario": "Admin resets a different admin's password (hijacked admin session takes over another admin account)",
+      "ruled_out": false,
+      "rationale": "Known gap (reviewer M2): POST /users/:id/reset-password only blocks self-reset; any admin session can reset another admin with no step-up. Tracked in backlog note admin-password-recovery_NOTE_24-11-26.md (refuse admin targets via API plus recovery script, or require the acting admin's current password)."
+    }
+  ]
+}

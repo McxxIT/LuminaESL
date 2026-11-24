@@ -9,7 +9,7 @@ date: 18-11-26
 ---
 # lumina-esl - All Context
 
-Last updated: 2026-11-23
+Last updated: 2026-11-24
 
 **Lumina ESL is a real ESL (English as a second language) school management platform** for institution admins, managers, teachers, and students (parents act through the student account; they are not a login role). Lessons are **1:1 and 25 minutes**; each student is enrolled with one teacher in a curriculum course, and each booked lesson consumes the next lesson plan. No group classes. Billing is **credit-based**. Staff is two-level: admin creates managers and assigns teachers; each manager sees only their own teachers, students, and approvals; admin sees everything. Virtual classrooms use flexible meeting links (ClassIn / Zoom / Google Meet, no paid SDKs) stored in `lessons.roomCode`.
 
@@ -218,7 +218,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 31 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 24 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 43 tests in 6 files); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 26 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
 | Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
@@ -276,6 +276,8 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Other gotchas:**
 
+- Auth lifecycle (Phase 03, Nov 24, 2026): the password policy is 10-128 characters (length only); a wrong current password on `POST /auth/change-password` is `400 INVALID_CURRENT_PASSWORD`, never 401; admin reset is admin-only with no self-reset; password change/reset/pause/archive revoke refresh tokens but an issued access token lives up to 15 minutes. Known open items (all in `process/features/launch-readiness/backlog/`): every admin-created account shares one fixed default password with no forced change (HIGH, should-fix before launch), `trustProxy` is unconditional, and admin-on-admin reset has no step-up. See `auth/jwt-cookie-flow.md`.
+
 - `frontend/AGENTS.md` is auto-managed by `next dev` - do not edit or remove. Next 16 differs from training data; read `node_modules/next/dist/docs/` before writing Next code.
 - `npm run db:reset` TRUNCATES all tables (refuses production). Destructive; never use it as a verification gate.
 - Meeting links live in `lessons.roomCode` (max 40 chars), NOT `meeting_url`.
@@ -294,7 +296,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Env var names (never values):**
 
-- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs)
+- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs), `AUTH_RATE_LIMIT_MAX` (optional, default 30 per minute for login/refresh/change-password; smoke and Playwright set 100000; no production cap yet). In production `CORS_ORIGIN` must be an explicit http(s) list (empty, `*`, or non-http(s) fails startup)
 - Frontend: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE`, `NEXT_PUBLIC_DATA_SOURCE`
 
 **Mode flag semantics (`frontend/app/lib/auth/mode.ts`):**
@@ -324,7 +326,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (14 domains, 405 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 24 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (15 domains, 463 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 26 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
@@ -356,8 +358,10 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 - Booking credit races are closed (per-student advisory lock, Nov 20, 2026) and active-slot uniqueness
   (`lessons_active_teacher_date_time_uidx`, migration `0004`) plus debit-only refunds (`isLessonCharged`)
   are applied and verified on default dev `lumina` (Nov 23, 2026). Active launch-readiness program:
-  `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phase 01 done; Phases 02–06 cover
-  upload scoping, staff-managed credits, auth lifecycle, Curriculum Library, polish/Vitest, CI & Docker).
+  `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phases 01–03 done; Phases 04–06 cover
+  Curriculum Library, polish/Vitest, CI & Docker). Phase 03 (Nov 24, 2026) added password change and admin
+  reset, refresh-token revocation and pruning, named auth rate limits, and the production CORS guard. Open
+  auth gaps and a HIGH default-password item live in `process/features/launch-readiness/backlog/`.
 - Curriculum Library not built; no frontend unit or component tests; no CI.
 
 ## Scan Metadata

@@ -205,7 +205,7 @@ Each phase executes the canonical 7-step inner loop `R → I → P → PVL → E
 | 0 (pre-program) | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md` (this file) |
 | 01 — Dev DB Migration 0004 Alignment | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-01-dev-db-migration-0004_REPORT_23-11-26.md` |
 | 02 — Security & Staff-Managed Credits | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-02-security-and-credits-policy_REPORT_23-11-26.md` |
-| 03 — Auth & Account Lifecycle Hardening | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-03-auth-lifecycle-hardening_REPORT_23-11-26.md` |
+| 03 — Auth & Account Lifecycle Hardening | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-03-auth-lifecycle-hardening_REPORT_24-11-26.md` |
 | 04 — Curriculum Library | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-04-curriculum-library_REPORT_23-11-26.md` |
 | 05 — Parity Polish & Frontend Unit Tests | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-05-parity-polish-and-unit-tests_REPORT_23-11-26.md` |
 | 06 — CI & Docker Compose Packaging | `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-06-ci-and-docker-compose_REPORT_23-11-26.md` |
@@ -219,7 +219,7 @@ Each phase executes the canonical 7-step inner loop `R → I → P → PVL → E
 | 0 — Pre-program (scaffold & baseline) | ✅ COMPLETE |
 | 01 — Dev DB Migration 0004 Alignment | ✅ VERIFIED |
 | 02 — Security & Staff-Managed Credits | ✅ VERIFIED |
-| 03 — Auth & Account Lifecycle Hardening | ⏳ PLANNED |
+| 03 — Auth & Account Lifecycle Hardening | ✅ VERIFIED (with gaps: P3-13; review approved-with-concerns) |
 | 04 — Curriculum Library | ⏳ PLANNED |
 | 05 — Parity Polish & Frontend Unit Tests | ⏳ PLANNED |
 | 06 — CI & Docker Compose Packaging | ⏳ PLANNED |
@@ -270,24 +270,29 @@ node .claude/skills/vc-generate-context/scripts/validate-all-context.mjs
 ## Resume and Execution Handoff
 
 - Selected plan file path: `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md`
-- Last completed phase: Phase 02 (Security & Staff-Managed Credits)
-- Validate-contract status: Phase 01 PASS, Phase 02 PASS; Phase 03 pending
-- Next step for a fresh agent: Read this umbrella plan, read `phase-03-auth-lifecycle-hardening_PLAN_23-11-26.md`, and run Phase 03 RESEARCH (read-only auth lifecycle mapping).
-- Current phase: Phase 03 — Auth & Account Lifecycle Hardening
-- Next action: Run Phase 03 RESEARCH (Step 1 of 7-step inner loop)
-- Execute-agent start instruction: Do NOT enter EXECUTE until Phase 03 RESEARCH, INNOVATE, PLAN-SUPPLEMENT, PVL validate-contract, and explicit user approval are complete.
+- Last completed phase: Phase 03 (Auth & Account Lifecycle Hardening), 24-11-26
+- Validate-contract status: Phase 01 PASS, Phase 02 PASS, Phase 03 PASS; Phase 04 pending
+- Next step for a fresh agent: Read this umbrella plan, read `phase-04-curriculum-library_PLAN_23-11-26.md`, and run Phase 04 Step 1 RESEARCH. Read the Phase 03 report and the `launch-readiness/backlog/` notes first (M1 default-account-password is should-fix before launch).
+- Current phase: Phase 04 — Curriculum Library
+- Next action: Phase 04 Step 1 RESEARCH (vc-research-agent)
+- Execute-agent start instruction: Do NOT enter EXECUTE until Phase 04 PVL validate-contract and explicit user approval are complete.
 
 ---
 
 ## Current Execution State
 
-Last updated: 23-11-26
-Completed phases: Phase 0 (Program Scaffold), Phase 01 (Dev DB Migration 0004 Alignment), Phase 02 (Security & Staff-Managed Credits)
-Current phase: Phase 03 — Auth & Account Lifecycle Hardening
-Current loop step: RESEARCH
-Validate-contract status: Phase 01 PASS; Phase 02 PASS; Phase 03 pending
+Last updated: 24-11-26
+Current phase: 3 of 6 closed (Phase 03 done; Phase 04 is next)
+Phase 3 name: Auth & Account Lifecycle Hardening
+Phase 3 status: ✅ VERIFIED (with gaps) — review decision approved-with-concerns (user, 24-11-26); known gap P3-13 (visual agent-probe not run)
+Phase 3 EVL: green 24-11-26 (independent vc-tester: typecheck, lint, vitest 6 files/43 tests, smoke 15/15 domains 463 checks, e2e 26 API + 3 demo, no 429); results.tsv HALTED_SUCCESS
+Phase 3 report: process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-03-auth-lifecycle-hardening_REPORT_24-11-26.md
+Next phase: Phase 04 — Curriculum Library (process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-04-curriculum-library_PLAN_23-11-26.md)
+Current loop step: RESEARCH (Phase 04 Step 1)
+Validate-contract status: Phase 01 PASS; Phase 02 PASS; Phase 03 PASS; Phase 04 pending
 Program Net Gate: IN_PROGRESS
-Latest validator run: 23-11-26 — Phase 02 gates all green on default lumina (smoke 14/14 405, e2e 24 API + 3 demo, 0 active duplicates)
+Latest validator run: 24-11-26 — Phase 03 gates all green on default lumina (smoke 15/15 463 checks, e2e 26 API + 3 demo, vitest 43)
+Carry-ins for later phases: default-account-password note is should-fix before launch / before Phase 06 (HIGH); Phase 06 carries trust-proxy, NODE_ENV/limiter-cap, sameSite items (see Phase 06 plan "Carried in from Phase 03")
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any subagent. Never spawn execute-agent when loop step is RESEARCH, INNOVATE, PLAN-SUPPLEMENT, or PVL.
