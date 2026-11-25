@@ -1,0 +1,16 @@
+{
+  "task": "B3 domain smoke, parity fixes, 1-credit-per-lesson unit, numeric-hours crash fix",
+  "reviewer": "vc-execute-agent self-review (independent EVL review by vc-tester still required)",
+  "decision": "approved-with-concerns",
+  "rationale": "All standing gates, two consecutive smoke runs, the deliberate red run, and the demo and API browser checks are green. The concerns are the user-accepted known gaps, which this change does not fix.",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "Known gap (accepted): booking/credit race. The balance read and the debit are not row-locked; two concurrent bookings by one student could both pass.",
+    "Known gap (accepted): no unique constraint on lessons (teacher, date, time); POST /lessons can create overlapping lessons.",
+    "Known gap (accepted): a student may self-purchase up to 100 credits with no payment check (smoke asserts current behavior; 101 is refused).",
+    "Observation (new, not fixed): backend POST /lessons does not debit a credit, while the demo teacher/manager add-lesson path does; a student who cancels such a lesson early gains +1. Pre-existing divergence outside this plan; backlog note written.",
+    "Observation: backend lesson-cancellation requests do not require the lesson to be scheduled at creation (local branch does); left as is per E12."
+  ],
+  "notes": "Leave-behind smoke and browser-probe fixtures (archived users, courses, lessons, ledger rows) grow the dev DB; accepted gap.",
+  "timestamp": "2026-11-18T02:30:00Z"
+}

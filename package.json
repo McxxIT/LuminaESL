@@ -1,26 +1,32 @@
 {
-  "name": "esl",
+  "name": "lumina-esl",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.4.6",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "dev": "concurrently -n web,api -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "npm run dev --workspace @lumina/frontend",
+    "dev:api": "npm run dev --workspace @lumina/backend",
+    "build": "npm run build --workspace @lumina/frontend && npm run build --workspace @lumina/backend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "smoke": "npm run smoke --workspace @lumina/backend",
+    "e2e": "npm run e2e --workspace @lumina/frontend",
+    "db:generate": "npm run db:generate --workspace @lumina/backend",
+    "db:migrate": "npm run db:migrate --workspace @lumina/backend",
+    "db:push": "npm run db:push --workspace @lumina/backend",
+    "db:seed": "npm run db:seed --workspace @lumina/backend",
+    "db:reset": "npm run db:reset --workspace @lumina/backend",
+    "db:studio": "npm run db:studio --workspace @lumina/backend"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "4.3.3",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.6",
-    "tailwindcss": "4.3.3",
-    "typescript": "^5"
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
