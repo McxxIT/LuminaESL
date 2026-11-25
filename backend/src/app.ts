@@ -133,6 +133,8 @@ export async function buildApp({ env, mailer }: BuildAppOptions) {
 
   await app.register(apiRoutes, { prefix: "/api/v1" });
 
+  await app.ready();
+
   return app;
 }
 
