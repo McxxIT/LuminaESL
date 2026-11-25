@@ -7,13 +7,13 @@ import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import { ZodError } from "zod";
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
-import type { Env } from "./config/env";
-import { corsOrigins } from "./config/env";
-import { AppError } from "./lib/errors";
-import { createMailer, type Mailer } from "./lib/mailer";
-import authPlugin from "./plugins/auth";
-import dbPlugin from "./plugins/db";
-import { apiRoutes } from "./routes";
+import type { Env } from "./config/env.js";
+import { corsOrigins } from "./config/env.js";
+import { AppError } from "./lib/errors.js";
+import { createMailer, type Mailer } from "./lib/mailer.js";
+import authPlugin from "./plugins/auth.js";
+import dbPlugin from "./plugins/db.js";
+import { apiRoutes } from "./routes/index.js";
 
 export type BuildAppOptions = {
   env: Env;
