@@ -9,6 +9,10 @@ import type { ServiceResult } from "../../lib/school/services";
 import { isApiDataMode } from "../../lib/auth/mode";
 
 const INVITE_NOTE = "We'll email them a link to set their password.";
+/** A manager may rename a team member but not touch the address. */
+export const EMAIL_ADMIN_ONLY_NOTE = "Only an admin can change an email address.";
+/** An admin changing an invited person's email re-issues the invitation. */
+export const EMAIL_INVITED_NOTE = "Changing the email sends a new invitation to the new address.";
 
 /**
  * Create/edit forms for people management. Each form calls `onSubmit`, shows a service error
@@ -50,8 +54,10 @@ function LevelSelect({ label, value, onChange }: { label: string; value: string;
 
 // Managers --------------------------------------------------------------------------------
 
-export function ManagerFormModal({ initial, onSubmit, onClose }: {
+export function ManagerFormModal({ initial, emailNote, onSubmit, onClose }: {
   initial?: { name: string; email: string };
+  /** Shown under the Email field (an invited manager's email change re-invites). */
+  emailNote?: string;
   onSubmit: Submit<{ name: string; email: string }>;
   onClose: () => void;
 }) {
@@ -60,7 +66,7 @@ export function ManagerFormModal({ initial, onSubmit, onClose }: {
     description={initial ? undefined : (isApiDataMode() ? `${INVITE_NOTE} They will look after the teachers you assign them.` : "They can sign in right away with this email and look after the teachers you assign them.")}
     submitLabel={initial ? "Save changes" : "Add manager"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Dana Cruz" autoFocus /></label>
-    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" /></label>
+    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" />{emailNote && <small data-testid="email-invite-note">{emailNote}</small>}</label>
   </FormModal>;
 }
 
@@ -68,10 +74,13 @@ export function ManagerFormModal({ initial, onSubmit, onClose }: {
 
 export type TeacherFormValues = { name: string; email: string; headline: string; specializations: string; bio: string; managerId: string };
 
-export function TeacherFormModal({ initial, managers, onSubmit, onClose }: {
+export function TeacherFormModal({ initial, managers, lockEmail, emailNote, onSubmit, onClose }: {
   initial?: TeacherFormValues;
   /** Pass to let the admin choose the manager (create only). */
   managers?: SchoolUser[];
+  /** Edit mode: a manager may not change the address. */
+  lockEmail?: boolean;
+  emailNote?: string;
   onSubmit: Submit<TeacherFormValues>;
   onClose: () => void;
 }) {
@@ -80,7 +89,7 @@ export function TeacherFormModal({ initial, managers, onSubmit, onClose }: {
     description={initial ? undefined : (isApiDataMode() ? `${INVITE_NOTE} Then they can start opening booking slots.` : "The teacher can sign in right away with this email and start opening booking slots.")}
     submitLabel={initial ? "Save changes" : "Add teacher"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Ana Lopez" autoFocus /></label>
-    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" /></label>
+    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" disabled={lockEmail} />{emailNote && <small data-testid={lockEmail ? "email-locked-note" : "email-invite-note"}>{emailNote}</small>}</label>
     <label className="full-field">Headline<input value={form.headline} onChange={(event) => setForm({ ...form, headline: event.target.value })} placeholder="e.g. Business English and interview coach" /></label>
     <label className="full-field">Specialties<input value={form.specializations} onChange={(event) => setForm({ ...form, specializations: event.target.value })} placeholder="Comma separated, e.g. IELTS, Pronunciation" /></label>
     {managers && <label className="full-field">Manager<select value={form.managerId} onChange={(event) => setForm({ ...form, managerId: event.target.value })}>
@@ -110,11 +119,14 @@ export function toGuardian(values: StudentFormValues): Guardian | null {
   return values.guardianName.trim() ? { name: values.guardianName, email: values.guardianEmail, relationship: "Parent" } : null;
 }
 
-export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose }: {
+export function StudentFormModal({ initial, teachers, courses, lockEmail, emailNote, onSubmit, onClose }: {
   initial?: StudentFormValues;
   /** Create mode: teachers and courses to enroll the new student with. */
   teachers?: SchoolUser[];
   courses?: Course[];
+  /** Edit mode: a manager may not change the address. */
+  lockEmail?: boolean;
+  emailNote?: string;
   onSubmit: Submit<StudentFormValues>;
   onClose: () => void;
 }) {
@@ -127,7 +139,7 @@ export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose
     description={creating ? (isApiDataMode() ? `${INVITE_NOTE} Then they can book with the teacher you choose.` : "The student can sign in right away and book with the teacher you choose.") : undefined}
     submitLabel={creating ? "Add student" : "Save changes"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Sam Rivera" autoFocus /></label>
-    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" /></label>
+    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" disabled={lockEmail} />{emailNote && <small data-testid={lockEmail ? "email-locked-note" : "email-invite-note"}>{emailNote}</small>}</label>
     <LevelSelect label="Current level" value={form.level} onChange={(level) => setForm({ ...form, level })} />
     <LevelSelect label="Target level" value={form.targetLevel} onChange={(targetLevel) => setForm({ ...form, targetLevel })} />
     <label className="full-field">Learning goal<input value={form.goal} onChange={(event) => setForm({ ...form, goal: event.target.value })} placeholder="e.g. Speak confidently in client meetings" /></label>

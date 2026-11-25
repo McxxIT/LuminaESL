@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
-import { AbsenceModal, ConfirmStatusModal, ResetPasswordModal, TeacherFormModal, type TeacherFormValues } from "./PeopleForms";
+import { AbsenceModal, ConfirmStatusModal, EMAIL_ADMIN_ONLY_NOTE, EMAIL_INVITED_NOTE, ResetPasswordModal, TeacherFormModal, type TeacherFormValues } from "./PeopleForms";
 import { isDemoMode } from "../../lib/auth/mode";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
@@ -99,7 +99,14 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
 
   async function submitEdit(row: TeacherRow, values: TeacherFormValues) {
     const result = await updateTeacher(user.id, row.teacher.id, values);
-    if (result.ok) onNotice(`${values.name} was updated.`);
+    if (result.ok) {
+      // A partial two-call edit reports exactly what was saved; the invite still opens.
+      onNotice(result.value.warning ?? `${values.name} was updated.`);
+      // An admin editing an invited teacher's email mails a new invitation.
+      if (result.value.invite) {
+        setInviteResult({ person: { ...row.teacher, email: values.email.trim().toLowerCase() }, invite: result.value.invite });
+      }
+    }
     return result;
   }
 
@@ -202,6 +209,8 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
     {dialog?.kind === "create" && <TeacherFormModal managers={isAdmin ? managers : undefined} onSubmit={submitCreate} onClose={() => setDialog(null)} />}
     {dialog?.kind === "edit" && <TeacherFormModal
       initial={{ name: dialog.row.teacher.name, email: dialog.row.teacher.email, headline: dialog.row.profile?.headline ?? "", specializations: dialog.row.profile?.specializations.join(", ") ?? "", bio: dialog.row.profile?.bio ?? "", managerId: dialog.row.managerId ?? "" }}
+      lockEmail={!isAdmin}
+      emailNote={!isAdmin ? EMAIL_ADMIN_ONLY_NOTE : dialog.row.teacher.status === "invited" ? EMAIL_INVITED_NOTE : undefined}
       onSubmit={(values) => submitEdit(dialog.row, values)} onClose={() => setDialog(null)} />}
     {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.teacher} onClose={() => setDialog(null)} onConfirm={async () => {
       const pausing = dialog.row.teacher.status === "active";

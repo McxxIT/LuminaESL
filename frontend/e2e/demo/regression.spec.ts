@@ -327,4 +327,42 @@ test.describe("Demo mode regression", () => {
     expect(apiCalls, "demo mode must not call the API").toEqual([]);
     assertNoPageErrors(pageErrors);
   });
+
+  /**
+   * A demo manager edits a team member: the Email field is locked with the
+   * admin-only note, the rename lands in the local store, and nothing calls the API.
+   */
+  test("a demo manager edits a team member with the email locked", async ({ page }) => {
+    const pageErrors = collectPageErrors(page);
+    const apiCalls: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/")) apiCalls.push(request.url());
+    });
+    const renamed = `Grace Lee Demo ${runId()}`;
+
+    await page.goto("/");
+    await page.locator('input[type="email"]').fill("manager@lumina.school");
+    await page.locator('input[type="password"]').fill("demo-pass");
+    await page.locator('button[type="submit"]').click();
+    await expect(page.locator("button.nav-item").first()).toBeVisible();
+
+    await nav(page, "Teachers");
+    const row = page.locator("button.manager-table-row", { hasText: "Grace Lee" }).first();
+    await expect(row).toBeVisible();
+    await row.click();
+    await page.locator('.modal-footer button:has-text("Edit")').click();
+
+    const form = page.locator("#teacher-form");
+    await expect(form.locator('input[type="email"]').first(), "the demo form locks the email too").toBeDisabled();
+    await expect(page.getByTestId("email-locked-note")).toContainText("Only an admin can change an email address.");
+
+    await form.getByLabel("Full name").fill(renamed);
+    await page.locator('button[type="submit"][form="teacher-form"]').click();
+    await expectNotice(page, /was updated/);
+    await expect(page.getByRole("dialog", { name: renamed })).toBeVisible();
+    await expect(page.locator("button.manager-table-row", { hasText: renamed })).toBeVisible();
+
+    expect(apiCalls, "demo mode must not call the API").toEqual([]);
+    assertNoPageErrors(pageErrors);
+  });
 });

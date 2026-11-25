@@ -104,6 +104,39 @@ describe("account.invite", () => {
   });
 });
 
+describe("teacher.manage and student.manage", () => {
+  test("admin any person; a manager only their own team; teachers and students never", () => {
+    expect(allowed("admin-jamie", "teacher.manage", { teacherId: "teacher-grace" })).toBe(true);
+    expect(allowed("admin-jamie", "student.manage", { studentId: "student-kenji" })).toBe(true);
+    expect(allowed("manager-priya", "teacher.manage", { teacherId: "teacher-grace" })).toBe(true);
+    expect(allowed("manager-priya", "student.manage", { studentId: "student-leo" })).toBe(true);
+    expect(allowed("manager-priya", "teacher.manage", { teacherId: "teacher-daniel" })).toBe(false);
+    expect(allowed("manager-marco", "student.manage", { studentId: "student-leo" })).toBe(false);
+    expect(allowed("teacher-alex", "teacher.manage", { teacherId: "teacher-grace" })).toBe(false);
+    expect(allowed("teacher-alex", "student.manage", { studentId: "student-leo" })).toBe(false);
+    expect(allowed("student-ava", "student.manage", { studentId: "student-ava" })).toBe(false);
+  });
+
+  test("intentional asymmetry: enrollment with a team teacher is not enough in the frontend", () => {
+    // student-kenji is on manager-marco's roster. Enrolled with teacher-grace (manager-priya's
+    // team), the backend `managerOwnsStudent` would answer true for manager-priya; the frontend
+    // roster-only scope answers false, so it is never looser than the backend.
+    updateSchool((draft) => {
+      upsert(draft, "enrollments", {
+        id: "enrollment-kenji-grace-manage",
+        studentId: "student-kenji",
+        teacherId: "teacher-grace",
+        courseId: Object.keys(draft.collections.courses)[0] ?? "course",
+        nextPlanIndex: 0,
+        status: "active",
+        startedAt: new Date().toISOString(),
+      });
+    });
+    expect(allowed("manager-priya", "student.manage", { studentId: "student-kenji" })).toBe(false);
+    expect(allowed("manager-marco", "student.manage", { studentId: "student-kenji" })).toBe(true);
+  });
+});
+
 describe("invited accounts", () => {
   test("an invited person can do nothing until they set a password", () => {
     updateSchool((draft) => {

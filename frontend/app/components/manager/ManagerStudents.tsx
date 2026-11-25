@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
-import { ConfirmStatusModal, CreditAdjustModal, EnrollmentModal, ResetPasswordModal, StudentFormModal, toGuardian, type StudentFormValues } from "./PeopleForms";
+import { ConfirmStatusModal, CreditAdjustModal, EMAIL_ADMIN_ONLY_NOTE, EMAIL_INVITED_NOTE, EnrollmentModal, ResetPasswordModal, StudentFormModal, toGuardian, type StudentFormValues } from "./PeopleForms";
 import { isDemoMode } from "../../lib/auth/mode";
 import { PlanPickerModal } from "./CurriculumForms";
 import { LibraryPickerModal } from "./LibraryForms";
@@ -221,9 +221,17 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
     </Modal>}
 
     {dialog?.kind === "create" && <StudentFormModal teachers={teachers} courses={courses} onSubmit={submitCreate} onClose={() => setDialog(null)} />}
-    {dialog?.kind === "edit" && <StudentFormModal initial={formValues(dialog.row)} onClose={() => setDialog(null)} onSubmit={async (values) => {
+    {dialog?.kind === "edit" && <StudentFormModal initial={formValues(dialog.row)}
+      lockEmail={user.role !== "admin"}
+      emailNote={user.role !== "admin" ? EMAIL_ADMIN_ONLY_NOTE : dialog.row.student.status === "invited" ? EMAIL_INVITED_NOTE : undefined}
+      onClose={() => setDialog(null)} onSubmit={async (values) => {
       const result = await updateStudent(user.id, dialog.row.student.id, { ...values, guardian: toGuardian(values) });
-      if (result.ok) onNotice(`${values.name} was updated.`);
+      if (result.ok) {
+        onNotice(result.value.warning ?? `${values.name} was updated.`);
+        if (result.value.invite) {
+          setInviteResult({ person: { ...dialog.row.student, email: values.email.trim().toLowerCase() }, invite: result.value.invite });
+        }
+      }
       return result;
     }} />}
     {dialog?.kind === "enroll" && <EnrollmentModal studentName={dialog.row.student.name} teachers={teachers} courses={courses} initialTeacherId={dialog.row.teacherId} initialCourseId={dialog.row.courseId} onClose={() => setDialog(null)} onSubmit={async ({ teacherId, courseId }) => {

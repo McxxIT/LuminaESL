@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import Icon from "../Icon";
-import { ConfirmStatusModal, ManagerFormModal, ResetPasswordModal } from "../manager/PeopleForms";
+import { ConfirmStatusModal, EMAIL_INVITED_NOTE, ManagerFormModal, ResetPasswordModal } from "../manager/PeopleForms";
 import { isDemoMode } from "../../lib/auth/mode";
 import { PersonAvatar, ScorePill, UserStatusBadge } from "../manager/parts";
 import { InviteResultModal, ResendInviteButton, canResendInvite, type InviteResult } from "../manager/InviteForms";
@@ -112,9 +112,16 @@ export default function AdminManagers({ user, onNavigate, onNotice }: { user: Sc
       }
       return result;
     }} />}
-    {dialog?.kind === "edit" && <ManagerFormModal initial={{ name: dialog.manager.name, email: dialog.manager.email }} onClose={() => setDialog(null)} onSubmit={async (values) => {
+    {dialog?.kind === "edit" && <ManagerFormModal initial={{ name: dialog.manager.name, email: dialog.manager.email }}
+      emailNote={dialog.manager.status === "invited" ? EMAIL_INVITED_NOTE : undefined}
+      onClose={() => setDialog(null)} onSubmit={async (values) => {
       const result = await updateManager(user.id, dialog.manager.id, values);
-      if (result.ok) onNotice(`${values.name} was updated.`);
+      if (result.ok) {
+        onNotice(result.value.warning ?? `${values.name} was updated.`);
+        if (result.value.invite) {
+          setInviteResult({ person: { ...dialog.manager, email: values.email.trim().toLowerCase() }, invite: result.value.invite });
+        }
+      }
       return result;
     }} />}
     {dialog?.kind === "reset-password" && <ResetPasswordModal person={dialog.manager} onClose={() => setDialog(null)} onSubmit={async (password) => {

@@ -14,11 +14,12 @@ import {
   updateUser,
   updateStudent as updateStudentApi,
   updateTeacher as updateTeacherApi,
+  type PersonEditResult,
 } from "../api/school";
 import { assertCan } from "../permissions";
 import { createId, get, list, patch, query, recordActivity, upsert } from "../repositories";
 import { managerIdForTeacher } from "../selectors";
-import { updateSchool } from "../store";
+import { updateSchool, getSchoolSnapshot } from "../store";
 import type { InviteOutcome } from "../../api/types";
 import type { Guardian, SchoolData, SchoolRole, SchoolUser } from "../types";
 import { changeCredits, requireUser } from "./common";
@@ -154,11 +155,41 @@ export function createTeacher(actorId: string, input: TeacherInput): ServiceResu
   }));
 }
 
-export function updateTeacher(actorId: string, teacherId: string, input: Omit<TeacherInput, "managerId">): ServiceResult | Promise<ServiceResult> {
+/** Managers may rename a team member but never change the address (admin-only). */
+function assertManagerKeepsEmail(actor: SchoolUser, currentEmail: string, nextEmail: string) {
+  if (actor.role !== "manager") return;
+  if (nextEmail.trim().toLowerCase() !== currentEmail.toLowerCase()) {
+    throw new ServiceError("Only an admin can change an email address.");
+  }
+}
+
+/**
+ * API-mode counterpart of the local guard: the browser store holds the current
+ * users, so the address can be checked before the account patch. An unknown
+ * actor or target falls through to the server, which enforces the same rule.
+ */
+function assertManagerKeepsStoredEmail(actorId: string, userId: string, nextEmail: string) {
+  const snapshot = getSchoolSnapshot();
+  const actor = get(snapshot, "users", actorId);
+  if (!actor) return;
+  const target = get(snapshot, "users", userId);
+  if (!target) return;
+  assertManagerKeepsEmail(actor, target.email, nextEmail);
+}
+
+export function updateTeacher(actorId: string, teacherId: string, input: Omit<TeacherInput, "managerId">): ServiceResult<PersonEditResult> | Promise<ServiceResult<PersonEditResult>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      await updateTeacherApi(teacherId, input);
-      await refreshSchoolAfterCommand();
+      // The form submits the (disabled) email even for a manager; refuse a real change here
+      // so the API layer never silently drops it while the UI reports success.
+      assertManagerKeepsStoredEmail(actorId, teacherId, input.email);
+      try {
+        // The account PATCH carries the likely failures; the profile follows.
+        return await updateTeacherApi(teacherId, { ...input, name: cleanName(input.name) });
+      } finally {
+        // Show what was saved even when the second call failed.
+        await refreshSchoolAfterCommand().catch(() => undefined);
+      }
     });
   }
   return run(() => updateSchool((draft) => {
@@ -167,6 +198,7 @@ export function updateTeacher(actorId: string, teacherId: string, input: Omit<Te
     const teacher = get(draft, "users", teacherId);
     const profile = get(draft, "teacherProfiles", teacherId);
     if (!teacher || teacher.role !== "teacher" || !profile) throw new ServiceError("That teacher no longer exists.");
+    assertManagerKeepsEmail(actor, teacher.email, input.email);
     patch(draft, "users", teacherId, { name: cleanName(input.name), email: cleanEmail(draft, input.email, teacherId) });
     patch(draft, "teacherProfiles", teacherId, {
       headline: input.headline.trim() || profile.headline,
@@ -175,6 +207,7 @@ export function updateTeacher(actorId: string, teacherId: string, input: Omit<Te
       bio: input.bio !== undefined ? input.bio.trim() : profile.bio,
     });
     recordActivity(draft, { actorId, action: "teacher.updated", targetType: "user", targetId: teacherId, summary: input.name });
+    return {};
   }));
 }
 
@@ -262,11 +295,16 @@ function cleanGuardian(guardian: Guardian | null | undefined): Guardian | undefi
   return { name: guardian.name.trim(), email, phone: guardian.phone?.trim() || undefined, relationship: guardian.relationship?.trim() || undefined };
 }
 
-export function updateStudent(actorId: string, studentId: string, input: StudentInput): ServiceResult | Promise<ServiceResult> {
+export function updateStudent(actorId: string, studentId: string, input: StudentInput): ServiceResult<PersonEditResult> | Promise<ServiceResult<PersonEditResult>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      await updateStudentApi(studentId, input);
-      await refreshSchoolAfterCommand();
+      // Same guard as the local branch: a manager may rename but not re-address.
+      assertManagerKeepsStoredEmail(actorId, studentId, input.email);
+      try {
+        return await updateStudentApi(studentId, { ...input, name: cleanName(input.name) });
+      } finally {
+        await refreshSchoolAfterCommand().catch(() => undefined);
+      }
     });
   }
   return run(() => updateSchool((draft) => {
@@ -274,9 +312,11 @@ export function updateStudent(actorId: string, studentId: string, input: Student
     assertCan(draft, actor, "student.manage", { studentId });
     const student = get(draft, "users", studentId);
     if (!student || student.role !== "student") throw new ServiceError("That student no longer exists.");
+    assertManagerKeepsEmail(actor, student.email, input.email);
     patch(draft, "users", studentId, { name: cleanName(input.name), email: cleanEmail(draft, input.email, studentId) });
     patch(draft, "studentProfiles", studentId, { level: input.level, targetLevel: input.targetLevel, goal: input.goal.trim(), guardian: cleanGuardian(input.guardian) });
     recordActivity(draft, { actorId, action: "student.updated", targetType: "user", targetId: studentId, summary: input.name });
+    return {};
   }));
 }
 
@@ -374,11 +414,15 @@ export function resetPersonPassword(actorId: string, userId: string, newPassword
   });
 }
 
-export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult | Promise<ServiceResult> {
+export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult<PersonEditResult> | Promise<ServiceResult<PersonEditResult>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      await updateUser(managerId, { name: cleanName(input.name), email: input.email });
-      await refreshSchoolAfterCommand();
+      try {
+        // Admin-only path: an invited manager's email change re-invites.
+        return await updateUser(managerId, { name: cleanName(input.name), email: input.email });
+      } finally {
+        await refreshSchoolAfterCommand().catch(() => undefined);
+      }
     });
   }
   return run(() => updateSchool((draft) => {
@@ -386,5 +430,6 @@ export function updateManager(actorId: string, managerId: string, input: { name:
     assertCan(draft, actor, "manager.manage");
     if (get(draft, "users", managerId)?.role !== "manager") throw new ServiceError("That manager no longer exists.");
     patch(draft, "users", managerId, { name: cleanName(input.name), email: cleanEmail(draft, input.email, managerId) });
+    return {};
   }));
 }
