@@ -47,7 +47,9 @@ npm run dev
 - `backend/.env` - `DATABASE_URL` for the local `lumina` role/database plus a generated `JWT_SECRET`.
 - `frontend/.env.local` - `NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1`.
 
-One account set works in both modes (`npm run db:seed` also creates these in PostgreSQL):
+One account set works in both modes (`npm run db:seed` also creates these in PostgreSQL). The API
+password below is for these seeded dev accounts only; accounts created in the app are `invited` and
+set their own password from an emailed single-use link:
 
 | Where | Role | Email | Password |
 | --- | --- | --- | --- |

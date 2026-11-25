@@ -1,0 +1,17 @@
+{
+  "task": "lumina-v1-finish Phase 03 — auth & account lifecycle hardening",
+  "reviewer": "user (decision) on independent vc-code-reviewer static review 24-11-26",
+  "decision": "approved-with-concerns",
+  "rationale": "core controls verified by static review and independent EVL re-run green; concerns pre-existing or design-accepted, tracked in backlog",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "M1 — every admin-created account gets the same fixed default password (frontend/app/lib/school/api/school.ts), no forced change on first login; pre-existing; should-fix before launch / before Phase 06. Backlog: default-account-password_NOTE_24-11-26.md",
+    "M2 — an admin can reset a different admin's password with no step-up check. Backlog: admin-password-recovery_NOTE_24-11-26.md",
+    "L3 — /auth/refresh claim is not atomic (backend/src/routes/auth.ts). Backlog: refresh-and-password-change-atomicity_NOTE_24-11-26.md",
+    "L4 — change-password issues the session and logs activity outside the transaction. Backlog: refresh-and-password-change-atomicity_NOTE_24-11-26.md",
+    "L5 — AUTH_RATE_LIMIT_MAX / RATE_LIMIT_MAX have no production cap; production CORS guard and Secure cookie depend on NODE_ENV=production. Backlog: auth-rate-limit-config_NOTE_24-11-26.md",
+    "L6 — cookieless refresh shares one per-IP bucket; ceiling 429 lacks Retry-After. Backlog: auth-rate-limit-config_NOTE_24-11-26.md"
+  ],
+  "notes": "Known gaps on record (not blockers per the validate contract): stateless access JWT window up to 15 min (access-token-revocation_NOTE_24-11-26.md); trustProxy/X-Forwarded-For and per-process limiter store (trust-proxy-and-limiter-store_NOTE_24-11-26.md); single-admin recovery (admin-password-recovery_NOTE_24-11-26.md); no refresh_tokens.expires_at index (refresh-token-expiry-index_NOTE_24-11-26.md); P3-13 visual agent-probe not run. User chose option A: no fixes now, all concerns to backlog.",
+  "timestamp": "2026-11-24T10:00:00Z"
+}

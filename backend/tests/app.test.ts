@@ -15,6 +15,7 @@ const env: Env = {
   CORS_ORIGIN: "http://localhost:3000",
   UPLOAD_DIR: "uploads",
   RATE_LIMIT_MAX: 300,
+  AUTH_RATE_LIMIT_MAX: 30,
 };
 
 describe("Lumina API", () => {

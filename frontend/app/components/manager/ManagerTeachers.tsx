@@ -3,7 +3,8 @@
 import { useCallback, useMemo, useState } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
-import { AbsenceModal, ConfirmStatusModal, TeacherFormModal, type TeacherFormValues } from "./PeopleForms";
+import { AbsenceModal, ConfirmStatusModal, EMAIL_ADMIN_ONLY_NOTE, EMAIL_INVITED_NOTE, ResetPasswordModal, TeacherFormModal, type TeacherFormValues } from "./PeopleForms";
+import { isDemoMode } from "../../lib/auth/mode";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   absencesForTeacher,
@@ -20,10 +21,12 @@ import {
   type SchoolData,
   type SchoolUser,
 } from "../../lib/school";
-import { assignTeacherToManager, createTeacher, recordTeacherAbsence, setPersonStatus, updateTeacher } from "../../lib/school/services";
+import { assignTeacherToManager, createTeacher, recordTeacherAbsence, resetPersonPassword, setPersonStatus, updateTeacher } from "../../lib/school/services";
 import { slotStartDate } from "../../lib/scheduling";
 import { formatLessonDate, isoDaysFromNow, todayISO } from "../../lib/student";
 import { LessonStatusBadge, PersonAvatar, ScorePill, UserStatusBadge } from "./parts";
+import { InviteResultModal, ResendInviteButton, canResendInvite, type InviteResult } from "./InviteForms";
+import type { InviteOutcome } from "../../lib/api/types";
 
 function selectTeachers(data: SchoolData, user: SchoolUser) {
   const today = todayISO();
@@ -54,7 +57,7 @@ function selectTeachers(data: SchoolData, user: SchoolUser) {
 }
 
 type TeacherRow = ReturnType<typeof selectTeachers>[number];
-type Dialog = { kind: "create" } | { kind: "edit"; row: TeacherRow } | { kind: "status"; row: TeacherRow } | { kind: "absence"; lesson: Lesson; label: string } | null;
+type Dialog = { kind: "create" } | { kind: "edit"; row: TeacherRow } | { kind: "status" | "reset-password"; row: TeacherRow } | { kind: "absence"; lesson: Lesson; label: string } | null;
 
 export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; onNotice: (message: string) => void }) {
   const select = useCallback((data: SchoolData) => selectTeachers(data, user), [user]);
@@ -66,6 +69,7 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
   const [managerFilter, setManagerFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [inviteResult, setInviteResult] = useState<InviteResult>(null);
 
   const filtered = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -76,13 +80,33 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
 
   async function submitCreate(values: TeacherFormValues) {
     const result = await createTeacher(user.id, { ...values, managerId: values.managerId || null });
-    if (result.ok) onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
+    if (result.ok) {
+      // API mode: the person is invited by email; demo keeps its sign-in notice.
+      if (result.value.invite) setInviteResult({ person: result.value, invite: result.value.invite });
+      else onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
+    }
     return result;
+  }
+
+  function showResend(person: SchoolUser, result: { ok: true; value: InviteOutcome } | { ok: false; error: string }) {
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
+    setSelectedId(null);
+    setInviteResult({ person, invite: result.value });
   }
 
   async function submitEdit(row: TeacherRow, values: TeacherFormValues) {
     const result = await updateTeacher(user.id, row.teacher.id, values);
-    if (result.ok) onNotice(`${values.name} was updated.`);
+    if (result.ok) {
+      // A partial two-call edit reports exactly what was saved; the invite still opens.
+      onNotice(result.value.warning ?? `${values.name} was updated.`);
+      // An admin editing an invited teacher's email mails a new invitation.
+      if (result.value.invite) {
+        setInviteResult({ person: { ...row.teacher, email: values.email.trim().toLowerCase() }, invite: result.value.invite });
+      }
+    }
     return result;
   }
 
@@ -134,7 +158,12 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
       footer={<>
         <button type="button" className="cancel-button" onClick={() => setSelectedId(null)}>Close</button>
         {selected.canManage && <>
-          <button type="button" className={selected.teacher.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.teacher.status === "active" ? "Pause" : "Reactivate"}</button>
+          {selected.teacher.status === "invited" ? <>
+            {canResendInvite(user, selected.teacher) && <ResendInviteButton actorId={user.id} person={selected.teacher} onResult={showResend} />}
+          </> : <>
+            {isAdmin && !isDemoMode() && <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "reset-password", row: selected })}><Icon name="lock" size={14} /> Reset password</button>}
+            <button type="button" className={selected.teacher.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.teacher.status === "active" ? "Pause" : "Reactivate"}</button>
+          </>}
           <button type="button" className="primary-button" onClick={() => setDialog({ kind: "edit", row: selected })}><Icon name="edit" size={14} /> Edit</button>
         </>}
       </>}>
@@ -175,14 +204,23 @@ export default function ManagerTeachers({ user, onNotice }: { user: SchoolUser; 
       </div>}
     </Modal>}
 
+    {inviteResult && <InviteResultModal actorId={user.id} person={inviteResult.person} invite={inviteResult.invite}
+      canResend={canResendInvite(user, { ...inviteResult.person, status: "invited", avatarColor: "", createdAt: "" })} onClose={() => setInviteResult(null)} />}
     {dialog?.kind === "create" && <TeacherFormModal managers={isAdmin ? managers : undefined} onSubmit={submitCreate} onClose={() => setDialog(null)} />}
     {dialog?.kind === "edit" && <TeacherFormModal
       initial={{ name: dialog.row.teacher.name, email: dialog.row.teacher.email, headline: dialog.row.profile?.headline ?? "", specializations: dialog.row.profile?.specializations.join(", ") ?? "", bio: dialog.row.profile?.bio ?? "", managerId: dialog.row.managerId ?? "" }}
+      lockEmail={!isAdmin}
+      emailNote={!isAdmin ? EMAIL_ADMIN_ONLY_NOTE : dialog.row.teacher.status === "invited" ? EMAIL_INVITED_NOTE : undefined}
       onSubmit={(values) => submitEdit(dialog.row, values)} onClose={() => setDialog(null)} />}
     {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.teacher} onClose={() => setDialog(null)} onConfirm={async () => {
       const pausing = dialog.row.teacher.status === "active";
       const result = await setPersonStatus(user.id, dialog.row.teacher.id, pausing ? "paused" : "active");
       if (result.ok) onNotice(`${dialog.row.teacher.name} was ${pausing ? "paused" : "reactivated"}.`);
+      return result;
+    }} />}
+    {dialog?.kind === "reset-password" && <ResetPasswordModal person={dialog.row.teacher} onClose={() => setDialog(null)} onSubmit={async (password) => {
+      const result = await resetPersonPassword(user.id, dialog.row.teacher.id, password);
+      if (result.ok) onNotice(`${dialog.row.teacher.name}’s password was reset.`);
       return result;
     }} />}
     {dialog?.kind === "absence" && <AbsenceModal lessonLabel={dialog.label} onClose={() => setDialog(null)} onSubmit={async (note) => {

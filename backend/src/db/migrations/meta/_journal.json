@@ -22,6 +22,41 @@
       "when": 1794979348778,
       "tag": "0002_notification_state",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795137629721,
+      "tag": "0003_supreme_victor_mancha",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795392691249,
+      "tag": "0004_gorgeous_maverick",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795488933089,
+      "tag": "0005_zippy_thunderbolt_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795500901226,
+      "tag": "0006_large_the_hand",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795519280504,
+      "tag": "0007_windy_grandmaster",
+      "breakpoints": true
     }
   ]
 }

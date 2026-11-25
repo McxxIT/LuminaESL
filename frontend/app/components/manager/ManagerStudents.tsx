@@ -3,8 +3,10 @@
 import { useCallback, useMemo, useState } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
-import { ConfirmStatusModal, CreditAdjustModal, EnrollmentModal, StudentFormModal, toGuardian, type StudentFormValues } from "./PeopleForms";
+import { ConfirmStatusModal, CreditAdjustModal, EMAIL_ADMIN_ONLY_NOTE, EMAIL_INVITED_NOTE, EnrollmentModal, ResetPasswordModal, StudentFormModal, toGuardian, type StudentFormValues } from "./PeopleForms";
+import { isDemoMode } from "../../lib/auth/mode";
 import { PlanPickerModal } from "./CurriculumForms";
+import { LibraryPickerModal } from "./LibraryForms";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   activeCourseProgress,
@@ -12,6 +14,7 @@ import {
   can,
   courseById,
   lessonPlanForLesson,
+  libraryForLesson,
   creditBalance,
   enrollmentsForStudent,
   lessonsForStudent,
@@ -25,9 +28,11 @@ import {
   type SchoolData,
   type SchoolUser,
 } from "../../lib/school";
-import { adjustCredits, assignPlanToLesson, createStudent, enrollStudent, setPersonStatus, updateStudent } from "../../lib/school/services";
+import { adjustCredits, assignPlanToLesson, createStudent, enrollStudent, resetPersonPassword, setPersonStatus, updateStudent } from "../../lib/school/services";
 import { formatLessonDate, todayISO } from "../../lib/student";
 import { LessonStatusBadge, PersonAvatar, UserStatusBadge } from "./parts";
+import { InviteResultModal, ResendInviteButton, canResendInvite, type InviteResult } from "./InviteForms";
+import type { InviteOutcome } from "../../lib/api/types";
 
 function selectStudents(data: SchoolData, user: SchoolUser) {
   const today = todayISO();
@@ -48,7 +53,13 @@ function selectStudents(data: SchoolData, user: SchoolUser) {
       progress: activeCourseProgress(data, student.id),
       completedCount: completed.length,
       attendance: completed.length ? Math.round((attended / completed.length) * 100) : null,
-      upcoming: upcoming.slice(0, 4).map((lesson) => ({ lesson, teacher: nameOf(data, lesson.teacherId), planTitle: lessonPlanForLesson(data, lesson)?.title })),
+      upcoming: upcoming.slice(0, 4).map((lesson) => ({
+        lesson,
+        teacher: nameOf(data, lesson.teacherId),
+        planTitle: lessonPlanForLesson(data, lesson)?.title,
+        materials: libraryForLesson(data, lesson.id).length,
+        canAttachLibrary: can(data, user, "lesson.attachLibraryItem", { lessonId: lesson.id }),
+      })),
       recent: completed.slice(-3).reverse().map((lesson) => ({ lesson, teacher: nameOf(data, lesson.teacherId) })),
       canManage: can(data, user, "student.manage", { studentId: student.id }),
     };
@@ -56,7 +67,7 @@ function selectStudents(data: SchoolData, user: SchoolUser) {
 }
 
 type StudentRow = ReturnType<typeof selectStudents>[number];
-type Dialog = { kind: "create" } | { kind: "edit" | "enroll" | "credits" | "status"; row: StudentRow } | { kind: "plan"; row: StudentRow; lesson: Lesson; teacher: string } | null;
+type Dialog = { kind: "create" } | { kind: "edit" | "enroll" | "credits" | "status" | "reset-password"; row: StudentRow } | { kind: "plan" | "library"; row: StudentRow; lesson: Lesson; teacher: string } | null;
 
 function formValues(row: StudentRow): StudentFormValues {
   return {
@@ -87,6 +98,7 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
   const [teacherFilter, setTeacherFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [inviteResult, setInviteResult] = useState<InviteResult>(null);
 
   const filtered = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -94,6 +106,15 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       && (!search || `${row.student.name} ${row.student.email} ${row.profile?.goal ?? ""}`.toLowerCase().includes(search)));
   }, [rows, query, teacherFilter]);
   const selected: StudentRow | undefined = rows.find((row) => row.student.id === selectedId);
+
+  function showResend(person: SchoolUser, result: { ok: true; value: InviteOutcome } | { ok: false; error: string }) {
+    if (!result.ok) {
+      onNotice(result.error);
+      return;
+    }
+    setSelectedId(null);
+    setInviteResult({ person, invite: result.value });
+  }
 
   async function submitCreate(values: StudentFormValues) {
     const result = await createStudent(user.id, {
@@ -103,7 +124,11 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       courseId: values.teacherId ? values.courseId : undefined,
       startingCredits: Number(values.startingCredits) || 0,
     });
-    if (result.ok) onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
+    if (result.ok) {
+      // API mode: the person is invited by email; demo keeps its sign-in notice.
+      if (result.value.invite) setInviteResult({ person: result.value, invite: result.value.invite });
+      else onNotice(`${result.value.name} was added. They can sign in with ${result.value.email}.`);
+    }
     return result;
   }
 
@@ -137,18 +162,25 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
           <span className="manager-person" role="cell"><PersonAvatar name={row.student.name} color={row.student.avatarColor} /><span><strong>{row.student.name}</strong><small>{row.profile ? `${row.profile.level} → ${row.profile.targetLevel}` : row.student.email}</small></span></span>
           <span role="cell" className="manager-cell" data-label="Teacher">{row.teacherName}</span>
           <span role="cell" className="manager-cell" data-label="Course">{row.courseTitle}{row.progress && row.progress.total > 0 && <small className="manager-progress-inline">{row.progress.completed}/{row.progress.total} lessons</small>}</span>
-          <span role="cell" className={`manager-cell ${row.credits < 2 ? "manager-low" : ""}`} data-label="Credits">{row.credits.toFixed(1)} hrs</span>
+          <span role="cell" className={`manager-cell ${row.credits < 2 ? "manager-low" : ""}`} data-label="Credits">{row.credits.toFixed(1)} credits</span>
           <span role="cell" className="manager-cell" data-label="Status"><UserStatusBadge status={row.student.status} /></span>
         </button>)}
         {filtered.length === 0 && <div className="student-empty-inline"><Icon name="user" /><p>{rows.length ? "No students match your search." : "No students yet. Add your first student."}</p></div>}
       </div>
     </section>
 
+    {inviteResult && <InviteResultModal actorId={user.id} person={inviteResult.person} invite={inviteResult.invite}
+      canResend={canResendInvite(user, { ...inviteResult.person, status: "invited", avatarColor: "", createdAt: "" })} onClose={() => setInviteResult(null)} />}
     {selected && !dialog && <Modal eyebrow="STUDENT" title={selected.student.name} description={`${selected.student.email}${selected.profile?.goal ? ` · ${selected.profile.goal}` : ""}`} onClose={() => setSelectedId(null)} size="wide"
       footer={<>
         <button type="button" className="cancel-button" onClick={() => setSelectedId(null)}>Close</button>
         {selected.canManage && <>
-          <button type="button" className={selected.student.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.student.status === "active" ? "Pause" : "Reactivate"}</button>
+          {selected.student.status === "invited" ? <>
+            {canResendInvite(user, selected.student) && <ResendInviteButton actorId={user.id} person={selected.student} onResult={showResend} />}
+          </> : <>
+            {user.role === "admin" && !isDemoMode() && <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "reset-password", row: selected })}><Icon name="lock" size={14} /> Reset password</button>}
+            <button type="button" className={selected.student.status === "active" ? "danger-outline-button" : "secondary-button"} onClick={() => setDialog({ kind: "status", row: selected })}>{selected.student.status === "active" ? "Pause" : "Reactivate"}</button>
+          </>}
           <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "credits", row: selected })}><Icon name="wallet" size={14} /> Credits</button>
           <button type="button" className="secondary-button" onClick={() => setDialog({ kind: "enroll", row: selected })}><Icon name="users" size={14} /> Teacher &amp; course</button>
           <button type="button" className="primary-button" onClick={() => setDialog({ kind: "edit", row: selected })}><Icon name="edit" size={14} /> Edit</button>
@@ -157,7 +189,7 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       <div className="manager-detail-stats">
         <div><span className="eyebrow">LEVEL</span><strong>{selected.profile?.level ?? "—"}</strong></div>
         <div><span className="eyebrow">TEACHER</span><strong>{selected.teacherName}</strong></div>
-        <div><span className="eyebrow">CREDITS</span><strong className={selected.credits < 2 ? "manager-low" : ""}>{selected.credits.toFixed(2)} hrs</strong></div>
+        <div><span className="eyebrow">CREDITS</span><strong className={selected.credits < 2 ? "manager-low" : ""}>{selected.credits.toFixed(2)} credits</strong></div>
         <div><span className="eyebrow">ATTENDANCE</span><strong>{selected.attendance === null ? "—" : `${selected.attendance}%`}</strong></div>
       </div>
       <div className="lesson-detail-section">
@@ -172,7 +204,8 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
       <div className="lesson-detail-section">
         <span className="eyebrow">UPCOMING</span>
         <div className="manager-mini-list">
-          {selected.upcoming.map(({ lesson, teacher, planTitle }) => <div key={lesson.id}><span>{formatLessonDate(lesson.date)} · {lesson.time}</span><strong>{lesson.title}<small className="manager-plan-line">{planTitle ? `Plan: ${planTitle}` : "No plan yet"}</small></strong><small>{teacher}</small>
+          {selected.upcoming.map(({ lesson, teacher, planTitle, materials, canAttachLibrary }) => <div key={lesson.id}><span>{formatLessonDate(lesson.date)} · {lesson.time}</span><strong>{lesson.title}<small className="manager-plan-line">{planTitle ? `Plan: ${planTitle}` : "No plan yet"}{materials > 0 ? ` · ${materials} material${materials === 1 ? "" : "s"}` : ""}</small></strong><small>{teacher}</small>
+            {canAttachLibrary && <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "library", row: selected, lesson, teacher })}>Materials</button>}
             {selected.canManage ? <button type="button" className="secondary-button compact-button" onClick={() => setDialog({ kind: "plan", row: selected, lesson, teacher })}>Change plan</button> : <LessonStatusBadge status={lesson.status} />}
           </div>)}
           {selected.upcoming.length === 0 && <p>No upcoming lessons.</p>}
@@ -188,9 +221,17 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
     </Modal>}
 
     {dialog?.kind === "create" && <StudentFormModal teachers={teachers} courses={courses} onSubmit={submitCreate} onClose={() => setDialog(null)} />}
-    {dialog?.kind === "edit" && <StudentFormModal initial={formValues(dialog.row)} onClose={() => setDialog(null)} onSubmit={async (values) => {
+    {dialog?.kind === "edit" && <StudentFormModal initial={formValues(dialog.row)}
+      lockEmail={user.role !== "admin"}
+      emailNote={user.role !== "admin" ? EMAIL_ADMIN_ONLY_NOTE : dialog.row.student.status === "invited" ? EMAIL_INVITED_NOTE : undefined}
+      onClose={() => setDialog(null)} onSubmit={async (values) => {
       const result = await updateStudent(user.id, dialog.row.student.id, { ...values, guardian: toGuardian(values) });
-      if (result.ok) onNotice(`${values.name} was updated.`);
+      if (result.ok) {
+        onNotice(result.value.warning ?? `${values.name} was updated.`);
+        if (result.value.invite) {
+          setInviteResult({ person: { ...dialog.row.student, email: values.email.trim().toLowerCase() }, invite: result.value.invite });
+        }
+      }
       return result;
     }} />}
     {dialog?.kind === "enroll" && <EnrollmentModal studentName={dialog.row.student.name} teachers={teachers} courses={courses} initialTeacherId={dialog.row.teacherId} initialCourseId={dialog.row.courseId} onClose={() => setDialog(null)} onSubmit={async ({ teacherId, courseId }) => {
@@ -214,6 +255,15 @@ export default function ManagerStudents({ user, onNotice }: { user: SchoolUser; 
         if (result.ok) onNotice(planId ? "Plan updated. The teacher and student see it now." : "Plan removed from the lesson.");
         return result;
       }} />}
+    {dialog?.kind === "library" && <LibraryPickerModal user={user} lessonId={dialog.lesson.id}
+      lessonLabel={`${dialog.lesson.title} with ${dialog.teacher} · ${formatLessonDate(dialog.lesson.date)} ${dialog.lesson.time}`}
+      lessonOpen={dialog.lesson.status === "scheduled" || dialog.lesson.status === "live"}
+      onNotice={onNotice} onClose={() => setDialog(null)} />}
+    {dialog?.kind === "reset-password" && <ResetPasswordModal person={dialog.row.student} onClose={() => setDialog(null)} onSubmit={async (password) => {
+      const result = await resetPersonPassword(user.id, dialog.row.student.id, password);
+      if (result.ok) onNotice(`${dialog.row.student.name}’s password was reset.`);
+      return result;
+    }} />}
     {dialog?.kind === "status" && <ConfirmStatusModal person={dialog.row.student} onClose={() => setDialog(null)} onConfirm={async () => {
       const pausing = dialog.row.student.status === "active";
       const result = await setPersonStatus(user.id, dialog.row.student.id, pausing ? "paused" : "active");

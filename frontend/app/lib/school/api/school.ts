@@ -2,7 +2,7 @@ import { ApiError, request } from "../../api/client";
 import { getSessionSnapshot } from "../../auth/session";
 import { refreshSchoolFromApi } from "./bootstrap";
 import type { Guardian, SchoolRole, SchoolSettings } from "../types";
-import type { ApiUser } from "../../api/types";
+import type { ApiUser, InviteOutcome } from "../../api/types";
 
 export type SchoolSettingsCommand = Partial<
   Pick<
@@ -14,8 +14,6 @@ export type SchoolSettingsCommand = Partial<
     | "refundTeacherCancellations"
   >
 >;
-
-const DEFAULT_ACCOUNT_PASSWORD = "Password123!";
 
 export type UserCommandInput = {
   name: string;
@@ -49,17 +47,74 @@ function splitList(value: string[] | string | undefined, fallback = "English"): 
   return items.map((item) => item.trim()).filter(Boolean);
 }
 
-export async function createUser(input: UserCommandInput): Promise<ApiUser> {
+/** A created account (status `invited`) plus the outcome of its invitation email. */
+export type CreatedUser = ApiUser & { invite?: InviteOutcome };
+
+/**
+ * Create an account without a password: the server creates it `invited` and
+ * emails a single-use set-password link. Managers create on their own team.
+ */
+export async function createUser(input: UserCommandInput): Promise<CreatedUser> {
   return request("/users", {
     method: "POST",
-    body: { ...input, managerId: input.managerId ?? undefined, password: DEFAULT_ACCOUNT_PASSWORD },
+    body: { ...input, managerId: input.managerId ?? undefined },
   });
 }
 
-export async function updateUser(userId: string, input: { name: string; email?: string }): Promise<void> {
-  await request(`/users/${encodeURIComponent(userId)}`, {
+/** Send a fresh invitation (the previous link stops working). */
+export async function resendInvite(userId: string): Promise<InviteOutcome> {
+  const result = await request<{ invite: InviteOutcome }>(`/users/${encodeURIComponent(userId)}/invite`, {
+    method: "POST",
+  });
+  return result.invite;
+}
+
+function isAdminSession(): boolean {
+  return getSessionSnapshot().user?.role === "admin";
+}
+
+/**
+ * Update a person's account record. Managers may only send a name (email is
+ * admin-only); an admin's email is normalised. An admin changing an INVITED
+ * person's email returns the outcome of the new invitation that was mailed.
+ */
+export async function updateUser(
+  userId: string,
+  input: { name: string; email?: string },
+): Promise<{ invite?: InviteOutcome }> {
+  const email = input.email?.trim().toLowerCase();
+  const body = isAdminSession()
+    ? { name: input.name, ...(email ? { email } : {}) }
+    : { name: input.name };
+  const result = await request<CreatedUser>(`/users/${encodeURIComponent(userId)}`, {
     method: "PATCH",
-    body: { name: input.name, ...(input.email ? { email: input.email.trim().toLowerCase() } : {}) },
+    body,
+  });
+  return result?.invite ? { invite: result.invite } : {};
+}
+
+/**
+ * Outcome of a person edit. `invite` is present when an admin changed an invited
+ * person's email and a new invitation was mailed; `warning` is present when the
+ * account patch committed but the follow-up profile patch did not.
+ */
+export type PersonEditResult = { invite?: InviteOutcome; warning?: string };
+
+/**
+ * The account patch of a two-call edit already committed; say exactly which part
+ * was saved. The invite (if any) is kept so the screen can still show the link.
+ */
+function profileSaveWarning(error: unknown): string {
+  const detail = error instanceof Error ? error.message : "the request failed";
+  return `The account was saved, but the profile details were not: ${detail}. Try again.`;
+}
+
+
+/** Admin-only password reset for another account; ends that account's refresh sessions. */
+export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
+  await request(`/users/${encodeURIComponent(userId)}/reset-password`, {
+    method: "POST",
+    body: { newPassword },
   });
 }
 
@@ -70,7 +125,7 @@ export async function setUserStatus(userId: string, status: "active" | "paused")
   });
 }
 
-export async function createTeacher(input: TeacherCommandInput): Promise<string> {
+export async function createTeacher(input: TeacherCommandInput): Promise<{ userId: string; invite?: InviteOutcome }> {
   const user = await createUser({ name: input.name, email: input.email, role: "teacher", managerId: input.managerId });
   const userId = user.id;
   await request(`/teachers/${encodeURIComponent(userId)}`, {
@@ -82,20 +137,25 @@ export async function createTeacher(input: TeacherCommandInput): Promise<string>
       bio: input.bio?.trim() ?? "",
     },
   });
-  return userId;
+  return { userId, invite: user.invite };
 }
 
-export async function updateTeacher(userId: string, input: TeacherCommandInput): Promise<void> {
-  await updateUser(userId, input);
-  await request(`/teachers/${encodeURIComponent(userId)}`, {
-    method: "PATCH",
-    body: {
-      headline: input.headline.trim(),
-      specializations: splitList(input.specializations, ""),
-      languages: splitList(input.languages),
-      bio: input.bio?.trim() ?? "",
-    },
-  });
+export async function updateTeacher(userId: string, input: TeacherCommandInput): Promise<PersonEditResult> {
+  const saved = await updateUser(userId, { name: input.name, email: input.email });
+  try {
+    await request(`/teachers/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: {
+        headline: input.headline.trim(),
+        specializations: splitList(input.specializations, ""),
+        languages: splitList(input.languages),
+        bio: input.bio?.trim() ?? "",
+      },
+    });
+  } catch (error) {
+    return { ...saved, warning: profileSaveWarning(error) };
+  }
+  return saved;
 }
 
 export async function assignTeacherToManager(teacherId: string, managerId: string | null): Promise<void> {
@@ -105,16 +165,21 @@ export async function assignTeacherToManager(teacherId: string, managerId: strin
   });
 }
 
-export async function createStudent(input: StudentCommandInput): Promise<string> {
+export async function createStudent(input: StudentCommandInput): Promise<{ userId: string; invite?: InviteOutcome }> {
   const user = await createUser({ name: input.name, email: input.email, role: "student", managerId: input.managerId });
   const userId = user.id;
   await updateStudentProfile(userId, input);
-  return userId;
+  return { userId, invite: user.invite };
 }
 
-export async function updateStudent(userId: string, input: StudentCommandInput): Promise<void> {
-  await updateUser(userId, input);
-  await updateStudentProfile(userId, input);
+export async function updateStudent(userId: string, input: StudentCommandInput): Promise<PersonEditResult> {
+  const saved = await updateUser(userId, { name: input.name, email: input.email });
+  try {
+    await updateStudentProfile(userId, input);
+  } catch (error) {
+    return { ...saved, warning: profileSaveWarning(error) };
+  }
+  return saved;
 }
 
 async function updateStudentProfile(userId: string, input: StudentCommandInput): Promise<void> {
@@ -125,7 +190,9 @@ async function updateStudentProfile(userId: string, input: StudentCommandInput):
       level: input.level,
       targetLevel: input.targetLevel,
       goal: input.goal.trim(),
-      managerId: input.managerId,
+      // Only an admin may move a student between managers; the backend rejects
+      // a manager sending managerId (the team was set atomically on create).
+      ...(isAdminSession() ? { managerId: input.managerId } : {}),
       guardianName: guardian?.name?.trim() || null,
       guardianEmail: guardian?.email?.trim().toLowerCase() || null,
       guardianPhone: guardian?.phone?.trim() || null,

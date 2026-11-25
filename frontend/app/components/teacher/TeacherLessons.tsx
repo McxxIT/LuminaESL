@@ -407,8 +407,7 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
         <div><span className="lesson-detail-icon"><Icon name="clock" size={15} /></span><span className="lesson-detail-copy"><span className="eyebrow">TIME</span><strong>{selected.time}–{selected.endTime}</strong></span></div>
         <div><span className="lesson-detail-icon"><Icon name="video" size={15} /></span><span className="lesson-detail-copy"><span className="eyebrow">ROOM</span><strong>{selected.roomCode ?? "Not assigned"}</strong></span></div>
       </div>
-      {selected.material
-        ? <div className="lesson-material">
+      {selected.material && <div className="lesson-material">
           <span className="lesson-material-icon"><Icon name="file" size={18} /></span>
           <div className="lesson-material-copy">
             <span className="eyebrow">LESSON MATERIAL · ASSIGNED BY MANAGER</span>
@@ -421,15 +420,27 @@ export default function TeacherLessons({ lessons, students, closedSlots, openedS
               <Icon name="file" size={14} /><span>{file.name}</span><small>{file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`}</small><Icon name="download" size={14} />
             </button>)}
           </div>}
-        </div>
-        : <div className="lesson-material empty">
-          <span className="lesson-material-icon"><Icon name="file" size={18} /></span>
-          <div className="lesson-material-copy">
-            <span className="eyebrow">LESSON MATERIAL</span>
-            <strong>No material assigned yet</strong>
-            <small>Your manager will attach the lesson plan before class.</small>
-          </div>
         </div>}
+      {selected.libraryMaterials && selected.libraryMaterials.length > 0 && <div className="lesson-material" data-testid="teacher-library-materials">
+        <span className="lesson-material-icon"><Icon name="book" size={18} /></span>
+        <div className="lesson-material-copy">
+          <span className="eyebrow">LIBRARY MATERIALS · ATTACHED BY MANAGER</span>
+          <strong>{selected.libraryMaterials.length} file{selected.libraryMaterials.length === 1 ? "" : "s"} for this lesson</strong>
+        </div>
+        <div className="lesson-material-files">
+          {selected.libraryMaterials.map((item) => <button type="button" className="lesson-material-file" key={item.id} onClick={() => void downloadPlanFile({ id: item.attachmentId, name: item.fileName, type: item.type, size: item.size, storageKey: item.storageKey ?? "" })}>
+            <Icon name="file" size={14} /><span>{item.title} · {item.category}</span><small>{item.size > 1048576 ? `${(item.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(item.size / 1024))} KB`}</small><Icon name="download" size={14} />
+          </button>)}
+        </div>
+      </div>}
+      {!selected.material && !selected.libraryMaterials?.length && <div className="lesson-material empty">
+        <span className="lesson-material-icon"><Icon name="file" size={18} /></span>
+        <div className="lesson-material-copy">
+          <span className="eyebrow">LESSON MATERIAL</span>
+          <strong>No material assigned yet</strong>
+          <small>Your manager will attach the lesson plan and materials before class.</small>
+        </div>
+      </div>}
       <div className="lesson-detail-section"><span className="eyebrow">FOCUS</span><div className="lesson-tags">{selected.focus.map((focus) => <span key={focus}>{focus}</span>)}</div></div>
       {selected.notes && <div className="lesson-detail-section"><span className="eyebrow">LESSON NOTES</span><p>{selected.notes}</p></div>}
       {selected.attendance && <div className="lesson-detail-section"><span className="eyebrow">ATTENDANCE</span><p>{selected.attendance === "attended" ? "Attended" : "No-show"}</p></div>}

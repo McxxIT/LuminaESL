@@ -25,6 +25,7 @@ export type ApiLesson = {
   title: string;
   status: string;
   cancelReason?: string;
+  createdAt: string;
 };
 
 export type ApiRequest = {
@@ -98,6 +99,62 @@ export function apiPatch<T>(path: string, token: string, body: unknown): Promise
   return apiRequest<T>(path, { method: "PATCH", token, body });
 }
 
+export type ApiCallResult<T> = { status: number; body: T };
+
+/**
+ * Non-throwing call for expected failures. `apiRequest` throws on any non-2xx
+ * response, which hides the status a collision or credit assertion needs.
+ */
+export async function apiCall<T = unknown>(
+  path: string,
+  options: { method?: string; token?: string; body?: unknown } = {},
+): Promise<ApiCallResult<T>> {
+  const headers: Record<string, string> = {};
+  if (options.token) headers.authorization = `Bearer ${options.token}`;
+  if (options.body !== undefined) headers["content-type"] = "application/json";
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+
+  const text = await response.text().catch(() => "");
+  let body: unknown;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+  return { status: response.status, body: body as T };
+}
+
+export type ApiSlot = {
+  id: string;
+  teacherId: string;
+  date: string;
+  time: string;
+};
+
+/** Opens a booking slot through the API (admin may name any teacher). */
+export function openSlot(
+  token: string,
+  input: { teacherId?: string; date: string; time: string },
+): Promise<ApiSlot> {
+  return apiPost<ApiSlot>("/bookings/slots", token, input);
+}
+
+/** Open slots for one teacher in a date range. */
+export function slotsFor(
+  token: string,
+  input: { teacherId: string; from: string; to: string },
+): Promise<ApiSlot[]> {
+  const query = new URLSearchParams(input).toString();
+  return apiGet<ApiSlot[]>(`/bookings/slots?${query}`, token);
+}
+
 export function bootstrap(token: string): Promise<Bootstrap> {
   return apiGet<Bootstrap>("/school/bootstrap", token);
 }
@@ -118,6 +175,29 @@ export async function creditBalance(token: string, studentId: string): Promise<n
   return body.balance;
 }
 
+/**
+ * Moves a student's ledger to `target` with one `adjustment` entry and returns
+ * the balance it replaced. Specs that spend credits use this in `finally` so a
+ * repeated run never drains the seeded account.
+ */
+export async function setCreditBalance(
+  token: string,
+  studentId: string,
+  target: number,
+): Promise<number> {
+  const current = await creditBalance(token, studentId);
+  const delta = Number((target - current).toFixed(2));
+  if (delta !== 0) {
+    await apiPost("/credits", token, {
+      studentId,
+      hours: delta,
+      reason: "adjustment",
+      description: "e2e balance restore",
+    });
+  }
+  return current;
+}
+
 export function notificationState(token: string): Promise<NotificationState> {
   return apiGet<NotificationState>("/notifications/state", token);
 }
@@ -129,23 +209,27 @@ export function saveNotificationState(
   return apiPatch<NotificationState>("/notifications/state", token, patch);
 }
 
-/** The single lesson a spec created, identified by the slot it booked. */
+/**
+ * The lesson a spec created, identified by the slot it booked. The shared dev DB
+ * keeps residue from earlier runs at the same student/date/time key, so when
+ * several rows match, the newest (`createdAt`) is the one this run created.
+ */
 export function lessonAt(
   data: Bootstrap,
   match: { studentId: string; date: string; time: string },
 ): ApiLesson {
-  const lesson = Object.values(data.collections.lessons).find(
+  const matches = Object.values(data.collections.lessons).filter(
     (candidate) =>
       candidate.studentId === match.studentId &&
       candidate.date === match.date &&
       candidate.time === match.time,
   );
-  if (!lesson) {
+  if (matches.length === 0) {
     throw new Error(
       `No lesson found for student ${match.studentId} on ${match.date} at ${match.time}`,
     );
   }
-  return lesson;
+  return matches.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
 /** Cancellation request whose comment carries this run's unique marker. */
@@ -161,4 +245,20 @@ export function cancellationRequestFor(
     throw new Error(`No lesson-cancellation request carrying marker ${marker}`);
   }
   return request;
+}
+
+/**
+ * Disposable account for specs that change a password, so no seeded account's
+ * password is ever touched. Pair with `archiveUser` in `finally`.
+ */
+export async function createDisposableUser(
+  adminToken: string,
+  input: { name: string; email: string; password: string; role: "manager" | "teacher" | "student" },
+): Promise<ApiUser> {
+  return apiPost<ApiUser>("/users", adminToken, input);
+}
+
+/** Archives an account through the admin API (the standard e2e/smoke clean-up). */
+export async function archiveUser(adminToken: string, userId: string): Promise<void> {
+  await apiRequest(`/users/${encodeURIComponent(userId)}`, { method: "DELETE", token: adminToken });
 }

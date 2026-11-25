@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import LoginScreen from "./LoginScreen";
+import SetPasswordScreen from "./SetPasswordScreen";
 import ManagerWorkspace from "./manager/ManagerWorkspace";
 import TeacherDashboard from "./teacher/TeacherDashboard";
 import StudentDashboard from "./student/StudentDashboard";
@@ -11,6 +12,7 @@ import { useNotifications } from "../lib/hooks/useNotifications";
 import { useAuth } from "../lib/hooks/useAuth";
 import { accountForUser, restoreSession, signOut } from "../lib/auth/session";
 import { isApiDataMode, isDemoMode } from "../lib/auth/mode";
+import { readSetPasswordToken } from "../lib/auth/invite-hash";
 import { loadSchoolFromApi, refreshSchoolFromApi } from "../lib/school/api/bootstrap";
 import { captureLocalSnapshot } from "../lib/school/import/capture";
 import { clearSchoolSnapshot } from "../lib/school/store";
@@ -39,6 +41,25 @@ export default function LuminaApp() {
   const effectiveAccount = isDemoMode() ? account : authUser ? accountForUser(authUser) : null;
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications(effectiveAccount);
   const noticeTimer = useRef<number | null>(null);
+  // Invitation token from `/#set-password=<token>` (API auth only; demo ignores the hash).
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+
+  // Read in an effect, not a state initializer, so server and client render the same
+  // markup. Idempotent (StrictMode-safe); `hashchange` picks up a link pasted into an
+  // already-open tab. The token stays in state; the screen clears the hash on submit.
+  useEffect(() => {
+    if (isDemoMode()) return;
+    const read = () => {
+      const token = readSetPasswordToken(window.location.hash);
+      if (token) setInviteToken(token);
+    };
+    const initial = window.setTimeout(read, 0);
+    window.addEventListener("hashchange", read);
+    return () => {
+      window.clearTimeout(initial);
+      window.removeEventListener("hashchange", read);
+    };
+  }, []);
 
   useEffect(() => {
     if (isDemoMode()) {
@@ -197,6 +218,11 @@ export default function LuminaApp() {
     navigate("Settings");
   }
 
+  // Checked before the session restore and the bootstrap, so an existing session cannot redirect first.
+  if (inviteToken && !isDemoMode()) {
+    return <SetPasswordScreen token={inviteToken} onDone={() => setInviteToken(null)} />;
+  }
+
   if (booting) return <main className="auth-shell"><section className="auth-card">
     <div className="auth-brand"><div className="brand-mark">L</div><strong>Lumina <span>ESL</span></strong></div>
     <div className="auth-heading"><p className="eyebrow">WELCOME BACK</p><h1>Restoring your session</h1><p>Checking your Lumina account.</p></div>
@@ -245,7 +271,7 @@ export default function LuminaApp() {
       <header className="topbar">
         <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>{activeNav}</strong></div>
         <div className="topbar-actions">
-          {effectiveAccount.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} hrs</strong></button>}
+          {effectiveAccount.role === "student" && <button type="button" className="student-credit-chip" onClick={() => navigate("Billing")}><span>LESSON CREDITS</span><strong>{studentCredits.toFixed(1)} credits</strong></button>}
           <div className="popover-anchor">
             <button type="button" className="icon-button notification-button" aria-label="Notifications" onClick={() => setOpenPopover(openPopover === "notifications" ? null : "notifications")}><Icon name="bell" /><span className={`notification-dot ${unreadCount > 0 ? "" : "hidden-dot"}`} /></button>
             {openPopover === "notifications" && <NotificationPanel notifications={notifications} onOpen={openNotification} onMarkAllRead={markAllRead} onClose={() => setOpenPopover(null)} />}

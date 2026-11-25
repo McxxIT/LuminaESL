@@ -1,0 +1,18 @@
+{
+  "task": "lumina-v1-finish Phase 05 — rebook enrichment (parity polish and unit tests)",
+  "reviewer": "user (decision) on an independent vc-code-reviewer pass, 25-11-26",
+  "decision": "approved",
+  "rationale": "vc-code-reviewer found 0 Critical, 0 High and 0 Medium findings and recommended approval; the rebook transaction keeps the lock order (lockStudentCredits, slot lookup, balance, resolveLessonDefaults, insert, slot delete, one debit, activity), ownership checks still precede the live refusal, and the independent vc-tester EVL run was green on the first try",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "L1 — TOCTOU between the live-status read and the rebook insert if a lesson goes live concurrently; benign (a live lesson is only refused, the debit and slot claim stay atomic), accepted",
+    "L2 — the API still accepts a rebook of a scheduled original by direct call; this matches the user decision (any non-live original) and the UI never offers it",
+    "N1 — singular wording ('1 credit') exists only in the billing transactions table; other quantities read as plural",
+    "N2 — about 1 in 9000 chance the smoke room-code inequality assertion collides on a random ESL-#### code; rerun once before treating it as a defect",
+    "N3 — test hygiene: vi.unstubAllEnvs is called in a test body, not an afterEach",
+    "N4 — frontend vitest is pinned at 3.2.7 while backend uses ^3.0.5 (both resolve to one hoisted copy today)",
+    "N5 — the credit-copy guard file list is fixed; extend it when new screens are added"
+  ],
+  "notes": "Backlog candidates recorded in process/features/launch-readiness/backlog/phase-05-review-residuals_NOTE_25-11-26.md (includes smoke rebook 409 and other-student 403 cases). No schema, auth or response-shape change; migration 0007 unused. Execution commit 5c1b4b9.",
+  "timestamp": "2026-11-25T14:00:00Z"
+}

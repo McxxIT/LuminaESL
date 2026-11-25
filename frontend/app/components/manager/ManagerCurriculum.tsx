@@ -4,6 +4,7 @@ import { useCallback, useState, type FormEvent } from "react";
 import Icon from "../Icon";
 import Modal from "../shared/Modal";
 import { CourseFormModal, LessonPlanModal, type CourseFormValues } from "./CurriculumForms";
+import ManagerLibrary from "./ManagerLibrary";
 import { useSchool } from "../../lib/hooks/useSchool";
 import {
   activeEnrollmentCount,
@@ -109,6 +110,7 @@ export default function ManagerCurriculum({ user, onNotice }: { user: SchoolUser
   const [courseId, setCourseId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | CourseStatus>("all");
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [section, setSection] = useState<"courses" | "library">("courses");
   const selectLib = useCallback((data: SchoolData) => selectLibrary(data, user), [user]);
   const library = useSchool(selectLib);
   const selectOpen = useCallback((data: SchoolData) => selectCourse(data, courseId), [courseId]);
@@ -224,7 +226,13 @@ export default function ManagerCurriculum({ user, onNotice }: { user: SchoolUser
     </div>;
   }
 
-  // Library ---------------------------------------------------------------------------------
+  // Courses / Library toggle ----------------------------------------------------------------
+  const toggle = <div className="segmented-control" role="tablist" aria-label="Curriculum section">
+    {(["courses", "library"] as const).map((key) => <button type="button" role="tab" aria-selected={section === key} className={section === key ? "selected" : ""} key={key} onClick={() => setSection(key)}>{key === "courses" ? "Courses" : "Library"}</button>)}
+  </div>;
+  if (section === "library") return <ManagerLibrary user={user} onNotice={onNotice} toggle={toggle} />;
+
+  // Course list ------------------------------------------------------------------------------
   const counts = { all: library.length, published: 0, draft: 0, archived: 0 } as Record<"all" | CourseStatus, number>;
   library.forEach((row) => { counts[row.course.status] += 1; });
   const shown = library.filter((row) => filter === "all" || row.course.status === filter);
@@ -238,6 +246,7 @@ export default function ManagerCurriculum({ user, onNotice }: { user: SchoolUser
         <p className="subheading">Build courses from 25-minute lesson plans. Booked lessons get the next plan of the student&apos;s course automatically.</p>
       </div>
       <div className="page-heading-actions">
+        {toggle}
         <button type="button" className="primary-button" onClick={() => setDialog({ kind: "create" })}><Icon name="plus" size={15} /> New course</button>
       </div>
     </section>

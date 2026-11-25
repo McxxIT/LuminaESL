@@ -1,11 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 import { logActivity } from "../lib/activity";
 import { conflict } from "../lib/errors";
-import { hashPassword } from "../lib/password";
 import {
   applyImportPlan,
   buildImportPlan,
-  DEFAULT_IMPORT_PASSWORD,
   findImportMarker,
   importPayloadSchema,
   loadExistingSchool,
@@ -50,7 +48,6 @@ export const schoolImportRoutes: FastifyPluginAsync = async (app) => {
       const existing = await loadExistingSchool(app.db);
       const plan = buildImportPlan(payload, existing, {
         actorId: request.user.sub,
-        defaultPasswordHash: "preview-only",
         dryRun: true,
       });
       const alreadyImported = await findImportMarker(app.db, plan.marker);
@@ -63,8 +60,6 @@ export const schoolImportRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: app.requireRole("admin"), bodyLimit: BODY_LIMIT },
     async (request, reply) => {
       const payload = importPayloadSchema.parse(request.body);
-      // Hash once for every new account rather than once per user.
-      const defaultPasswordHash = await hashPassword(DEFAULT_IMPORT_PASSWORD);
 
       const plan = await app.db.transaction(async (tx) => {
         if (!payload.options.force && (await findImportMarker(tx, payload.source.seededAt))) {
@@ -73,7 +68,6 @@ export const schoolImportRoutes: FastifyPluginAsync = async (app) => {
         const existing = await loadExistingSchool(tx);
         const built = buildImportPlan(payload, existing, {
           actorId: request.user.sub,
-          defaultPasswordHash,
           dryRun: false,
         });
         await applyImportPlan(tx, built);

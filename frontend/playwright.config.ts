@@ -44,6 +44,18 @@ export default defineConfig({
       command: "npm run start --workspace @lumina/backend",
       cwd: repoRoot,
       url: BACKEND_HEALTH_URL,
+      // The suite is a high-volume API client: the default 300/min limit rejects
+      // later specs with 429 on `/health`. `scripts/smoke.ts` raises it the same way.
+      // Mail guards: these values win over the backend env file (dotenv never
+      // overrides variables that are already set), so the suite can never send
+      // real mail. Invite links come back in admin responses in log mode.
+      env: {
+        RATE_LIMIT_MAX: "100000",
+        AUTH_RATE_LIMIT_MAX: "100000",
+        NODE_ENV: "development",
+        MAIL_MAILER: "log",
+        INVITE_RESEND_COOLDOWN_SECONDS: "0",
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

@@ -1,0 +1,188 @@
+{
+  "task": "account-invites (pre-Phase-06 fix)",
+  "result": "PASS (executor run 25-11-26; independent vc-tester EVL #1 and #2 PASS 26-11-26; AC-19 real SMTP delivery PASSED 26-11-26, user-confirmed Step F)",
+  "steps": [
+    {
+      "step": "Generate and review migration 0007",
+      "command": "npm run db:generate",
+      "result": "PASS",
+      "notes": "0007_windy_grandmaster.sql: only ALTER TYPE ... ADD VALUE 'invited', CREATE TABLE auth_tokens (unique + CHECK), FK, index. No DROP/ALTER COLUMN; 'invited' not referenced elsewhere; 0005/0006 untouched."
+    },
+    {
+      "step": "Apply 0007 to dev lumina, then re-run",
+      "command": "npm run db:migrate (x3 over the session)",
+      "result": "PASS",
+      "notes": "first run applied; later runs no-op (benign 'already exists, skipping' notices)"
+    },
+    {
+      "step": "Backend unit tests",
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "12 files / 98 tests (baseline 7/61). New: invites, mailer, invite-email, env-mail, seed-guard; extended: password, school-import, contract, db-types (production mail keys added)."
+    },
+    {
+      "step": "Frontend unit tests",
+      "command": "npm run test --workspace @lumina/frontend",
+      "result": "PASS",
+      "notes": "11 files / 62 tests (baseline 10/54): invite-hash.test.ts, account.invite truth table, asymmetry and invited-actor cases"
+    },
+    {
+      "step": "Smoke incl. new invites domain (array mailer)",
+      "command": "npm run smoke",
+      "result": "PASS",
+      "notes": "17/17 domains, 817 checks (baseline 16/705); invites domain 112 checks: create/accept, token edge cases + parallel accept, resend/cooldown/parallel resend, manager create/resend (never a link), mail failure, admin-only password, status safety, forced profile-insert rollback"
+    },
+    {
+      "step": "Pre-e2e port check",
+      "command": "netstat -ano | findstr \":3000 :3100 :4000\"",
+      "result": "PASS",
+      "notes": "no listeners before each Playwright run"
+    },
+    {
+      "step": "Playwright parity suite (log mailer)",
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "30 API + 5 demo passed (baseline 27 + 4); new account-invites.spec.ts (3 tests), import.spec invited + 401, demo regression invite fence"
+    },
+    {
+      "step": "Static gates",
+      "command": "npm run typecheck; npm run lint; git diff --check",
+      "result": "PASS",
+      "notes": "clean"
+    },
+    {
+      "step": "Literal-removal gate (pinned c6d2e19 pattern, scratch file, never printed, incl. untracked files)",
+      "command": "git grep --untracked -l -F -f <scratch>/pattern.txt -- frontend/app backend/src",
+      "result": "PASS",
+      "notes": "only backend/src/db/seed.ts"
+    },
+    {
+      "step": "Logging gate vs c6d2e19 baseline",
+      "command": "git grep --untracked -nE \"(log|logger)\\.(info|warn|error|debug)\\([^)]*(token|link|html|text|MAIL_PASSWORD)\" -- <5 files>",
+      "result": "PASS",
+      "notes": "2 matches, both pre-existing baseline lines in routes/auth.ts ('refresh-token prune/sweep failed'); no new matches. Spy-logger unit assertions in invites.test.ts and mailer.test.ts."
+    },
+    {
+      "step": "Lockfile gate",
+      "command": "npm ci (no node processes) then npm run typecheck",
+      "result": "PASS",
+      "notes": "lockfile diff limited to nodemailer 10.6.1 and @types/nodemailer 8.0.2"
+    },
+    {
+      "step": "Agent-probe screenshots (AC-18)",
+      "command": "temporary Playwright probe (deleted after the run)",
+      "result": "PASS",
+      "notes": "set-password screen, invite result modal, Invited badge row, detail with Resend invite at 1440 px and 390 px: no overflow; link field truncates with a Copy button"
+    },
+    {
+      "step": "Real SMTP delivery (AC-19)",
+      "command": "Step F manual send (user-approved, one recipient)",
+      "result": "PASS",
+      "notes": "26-11-26: backend run manually with the real env (smtp, port 587, tls, NODE_ENV=development); one invited test student created with the user's chosen address (201, invite sent:true mode smtp, no link returned to admin); user confirmed the email arrived, the link opened the set-password screen, the password was set and sign-in worked; test account archived (200); servers stopped"
+    },
+    {
+      "step": "EVL fix cycle 1 (26-11-26): set-password lock order (user row then token) + mode-aware PeopleForms copy",
+      "command": "npm run typecheck; npm run lint; npm run test --workspace @lumina/backend; npm run test --workspace @lumina/frontend; npm run smoke; npm run e2e; git diff --check",
+      "result": "PASS",
+      "notes": "typecheck+lint clean; backend 12 files/98 tests; frontend 11/62; smoke 17/17 domains, 835 checks (invites 130, incl. 3 rounds set-password vs resend and vs PATCH archived: no 500, consistent end state); e2e 30 API + 5 demo; diff --check clean; no new log calls"
+    },
+    {
+      "step": "Independent EVL #1 (vc-tester), before fix cycle 1",
+      "command": "all validate-contract gates (db:migrate, typecheck, lint, backend vitest, frontend vitest, smoke, e2e, diff --check, literal-removal, logging, lockfile, npm ci)",
+      "result": "PASS",
+      "notes": "14 gates green: backend 12/98, frontend 11/62, smoke 17 domains/817, e2e 30 API + 5 demo; only expected failure was review-decision.json missing"
+    },
+    {
+      "step": "Independent EVL #2 (vc-tester), after fix cycle 1 (final)",
+      "command": "db:migrate (no-op); typecheck; lint; backend vitest; frontend vitest; smoke; e2e; git diff --check; db status; literal-removal; logging; lockfile; npm ci + typecheck",
+      "result": "PASS",
+      "notes": "backend 12/98, frontend 11/62, smoke 17 domains/835 (invites 130, no 500s), e2e 30 API + 5 demo, literal only in seed.ts, logging gate clean, lockfile only nodemailer"
+    },
+    {
+      "step": "Step F real SMTP delivery (AC-19)",
+      "command": "manual, user-approved",
+      "result": "PASS",
+      "notes": "user-confirmed 26-11-26; see account-invites_REPORT_25-11-26.md Step F result"
+    }
+  ],
+  "commands": [
+    {
+      "command": "npm run db:migrate (x3 over the session)",
+      "result": "PASS",
+      "notes": "first run applied; later runs no-op (benign 'already exists, skipping' notices)"
+    },
+    {
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "12 files / 98 tests (baseline 7/61). New: invites, mailer, invite-email, env-mail, seed-guard; extended: password, school-import, contract, db-types (production mail keys added)."
+    },
+    {
+      "command": "npm run test --workspace @lumina/frontend",
+      "result": "PASS",
+      "notes": "11 files / 62 tests (baseline 10/54): invite-hash.test.ts, account.invite truth table, asymmetry and invited-actor cases"
+    },
+    {
+      "command": "npm run smoke",
+      "result": "PASS",
+      "notes": "17/17 domains, 817 checks (baseline 16/705); invites domain 112 checks: create/accept, token edge cases + parallel accept, resend/cooldown/parallel resend, manager create/resend (never a link), mail failure, admin-only password, status safety, forced profile-insert rollback"
+    },
+    {
+      "command": "netstat -ano | findstr \":3000 :3100 :4000\"",
+      "result": "PASS",
+      "notes": "no listeners before each Playwright run"
+    },
+    {
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "30 API + 5 demo passed (baseline 27 + 4); new account-invites.spec.ts (3 tests), import.spec invited + 401, demo regression invite fence"
+    },
+    {
+      "command": "npm run typecheck; npm run lint; git diff --check",
+      "result": "PASS",
+      "notes": "clean"
+    },
+    {
+      "command": "git grep --untracked -l -F -f <scratch>/pattern.txt -- frontend/app backend/src",
+      "result": "PASS",
+      "notes": "only backend/src/db/seed.ts"
+    },
+    {
+      "command": "git grep --untracked -nE \"(log|logger)\\.(info|warn|error|debug)\\([^)]*(token|link|html|text|MAIL_PASSWORD)\" -- <5 files>",
+      "result": "PASS",
+      "notes": "2 matches, both pre-existing baseline lines in routes/auth.ts ('refresh-token prune/sweep failed'); no new matches. Spy-logger unit assertions in invites.test.ts and mailer.test.ts."
+    },
+    {
+      "command": "npm ci (no node processes) then npm run typecheck",
+      "result": "PASS",
+      "notes": "lockfile diff limited to nodemailer 10.6.1 and @types/nodemailer 8.0.2"
+    },
+    {
+      "command": "all validate-contract gates (db:migrate, typecheck, lint, backend vitest, frontend vitest, smoke, e2e, diff --check, literal-removal, logging, lockfile, npm ci)",
+      "result": "PASS",
+      "notes": "14 gates green: backend 12/98, frontend 11/62, smoke 17 domains/817, e2e 30 API + 5 demo; only expected failure was review-decision.json missing"
+    },
+    {
+      "command": "db:migrate (no-op); typecheck; lint; backend vitest; frontend vitest; smoke; e2e; git diff --check; db status; literal-removal; logging; lockfile; npm ci + typecheck",
+      "result": "PASS",
+      "notes": "backend 12/98, frontend 11/62, smoke 17 domains/835 (invites 130, no 500s), e2e 30 API + 5 demo, literal only in seed.ts, logging gate clean, lockfile only nodemailer"
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "Generate and review migration 0007",
+      "result": "PASS",
+      "notes": "0007_windy_grandmaster.sql: only ALTER TYPE ... ADD VALUE 'invited', CREATE TABLE auth_tokens (unique + CHECK), FK, index. No DROP/ALTER COLUMN; 'invited' not referenced elsewhere; 0005/0006 untouched."
+    },
+    {
+      "check": "Agent-probe screenshots (AC-18)",
+      "result": "PASS",
+      "notes": "set-password screen, invite result modal, Invited badge row, detail with Resend invite at 1440 px and 390 px: no overflow; link field truncates with a Copy button"
+    },
+    {
+      "check": "Real SMTP delivery (AC-19)",
+      "result": "PASS",
+      "notes": "26-11-26: backend run manually with the real env (smtp, port 587, tls, NODE_ENV=development); one invited test student created with the user's chosen address (201, invite sent:true mode smtp, no link returned to admin); user confirmed the email arrived, the link opened the set-password screen, the password was set and sign-in worked; test account archived (200); servers stopped",
+      "command": "Step F manual send (user-approved, one recipient)"
+    }
+  ]
+}

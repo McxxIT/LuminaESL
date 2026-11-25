@@ -7,6 +7,7 @@ import { courseRoutes } from "./courses";
 import { creditRoutes } from "./credits";
 import { enrollmentRoutes } from "./enrollments";
 import { lessonRoutes } from "./lessons";
+import { libraryRoutes } from "./library";
 import { notificationRoutes } from "./notifications";
 import { requestRoutes } from "./requests";
 import { schoolRoutes } from "./school";
@@ -25,6 +26,8 @@ export const apiRoutes: FastifyPluginAsync = async (app) => {
   await app.register(courseRoutes, { prefix: "/courses" });
   await app.register(enrollmentRoutes, { prefix: "/enrollments" });
   await app.register(lessonRoutes, { prefix: "/lessons" });
+  // No prefix: owns both `/library` and `/lessons/:id/library-items` (full paths inside).
+  await app.register(libraryRoutes);
   await app.register(bookingRoutes, { prefix: "/bookings" });
   await app.register(requestRoutes, { prefix: "/requests" });
   await app.register(assignmentRoutes, { prefix: "/assignments" });

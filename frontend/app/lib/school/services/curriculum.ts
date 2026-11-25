@@ -264,7 +264,7 @@ export function attachFileToPlan(actorId: string, planId: string, file: { name: 
     const plan = getSchoolSnapshot().collections.lessonPlans[planId];
     const unit = plan && getSchoolSnapshot().collections.courseUnits[plan.unitId];
     if (!plan || !unit) throw new ServiceError("Lesson plan not found.");
-    await attachLessonPlanFile(unit.courseId, unit.id, planId, file);
+    await attachLessonPlanFile(unit.courseId, unit.id, planId, file.id);
   });
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);

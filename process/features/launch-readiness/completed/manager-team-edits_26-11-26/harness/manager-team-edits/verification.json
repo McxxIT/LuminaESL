@@ -1,0 +1,204 @@
+{
+  "task": "manager-team-edits — managers rename and pause/reactivate own-team teachers/students; admin email change signs out an active user or re-invites an invited one",
+  "result": "PASS (executor run; independent vc-tester EVL re-run recorded in manualChecks)",
+  "commands": [
+    {
+      "command": "npm run typecheck",
+      "result": "PASS",
+      "notes": "exit 0, both workspaces (frontend runs next typegen then tsc --noEmit)"
+    },
+    {
+      "command": "npm run lint",
+      "result": "PASS",
+      "notes": "exit 0, eslint for frontend and for backend src/tests/scripts"
+    },
+    {
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "13 files / 111 tests (target >= 13 / >= 110); new user-edit-policy.test.ts with 12 tests; contract.test.ts anonymous 401 case"
+    },
+    {
+      "command": "npm run test --workspace @lumina/frontend",
+      "result": "PASS",
+      "notes": "13 files / 80 tests (target >= 13 / >= 75); people-api-edit.test.ts, people-edit-rules.test.ts, permissions.test.ts additions"
+    },
+    {
+      "command": "npm run smoke",
+      "result": "PASS",
+      "notes": "18/18 domains, 1060 checks (target >= 18 / >= 910); new team-edits domain green alongside profile, invites, auth, uploads, library, rebook"
+    },
+    {
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "33 API tests + 6 demo tests (target >= 33 + 6); 3 new in manager-team-edits.spec.ts, 1 new in demo/regression.spec.ts; ports 3000/3100/4000 verified free before the run"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS",
+      "notes": "exit 0; only the expected LF->CRLF advisory warnings, no whitespace errors"
+    },
+    {
+      "command": "git status --porcelain -- backend/src/db",
+      "result": "PASS",
+      "notes": "empty: no migration, no schema change"
+    },
+    {
+      "command": "git diff --stat -- package.json package-lock.json backend/package.json frontend/package.json",
+      "result": "PASS",
+      "notes": "empty: no dependency change"
+    },
+    {
+      "command": "grep console./logger in backend/src/routes/users.ts, backend/src/lib/user-edit-policy.ts, backend/src/lib/activity.ts",
+      "result": "PASS",
+      "notes": "no console.* and no logger call in the changed files; no email address or token reaches a log call on this path"
+    }
+  ],
+  "steps": [
+    {
+      "step": "Manager renames an own-team teacher: one PATCH, 200, name lands, exactly one user.renamed row",
+      "command": "npm run smoke (team-edits); npm run e2e (manager-team-edits.spec)",
+      "result": "PASS",
+      "notes": "e2e asserts the PATCH body carries exactly [\"name\"]"
+    },
+    {
+      "step": "Manager renames an own-team student, including an enrolled-only student",
+      "command": "npm run smoke (team-edits); npm run e2e (manager-team-edits.spec)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Manager scope: byte-identical 403 for unknown, foreign-team, admin, manager, and non-teacher/student targets; self path still works",
+      "command": "npm run test --workspace @lumina/backend (user-edit-policy.test.ts); npm run smoke (team-edits scope checks, profile)",
+      "result": "PASS",
+      "notes": "the policy denies before any DB read, so an unknown id and a foreign id are indistinguishable"
+    },
+    {
+      "step": "Manager restricted keys: email, avatarColor, archived status, {name,email} -> 403 with nothing applied",
+      "command": "npm run test --workspace @lumina/backend (user-edit-policy.test.ts); npm run smoke (team-edits restricted-field checks)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Manager pause and reactivate own-team members; refresh tokens revoked on pause; activity once each",
+      "command": "npm run smoke (team-edits); npm run e2e (manager-team-edits.spec)",
+      "result": "PASS",
+      "notes": "e2e polls the admin bootstrap for status paused then active"
+    },
+    {
+      "step": "Manager cannot pause or rename an admin-archived member (403, nothing applied)",
+      "command": "npm run smoke (team-edits archived guard)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Invited member: manager rename 200, manager pause 409 NOT_ACTIVATED, nothing applied",
+      "command": "npm run smoke (team-edits invited checks)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Admin email change on an ACTIVE person: refresh tokens revoked, user.email_changed with no address in the summary, unchanged email is a no-op",
+      "command": "npm run test --workspace @lumina/backend (effects/summaries); npm run smoke (team-edits email checks)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Admin email change on an INVITED person: old link dead, one new invitation to the new address, cooldown bypassed, set-password works at the new address",
+      "command": "npm run smoke (team-edits invited-email checks); npm run e2e (manager-team-edits.spec)",
+      "result": "PASS",
+      "notes": "e2e re-opens the old #set-password link in a fresh context and expects 'invalid or has expired'"
+    },
+    {
+      "step": "Duplicate email 409 and a two-request race: one 200, one 409, never 500",
+      "command": "npm run smoke (team-edits duplicate/race)",
+      "result": "PASS",
+      "notes": "the UNIQUE violation is caught inside the transaction and mapped to conflict()"
+    },
+    {
+      "step": "Activity hygiene: no '@' in any summary; a rolled-back attempt leaves no activity row",
+      "command": "npm run smoke (team-edits activity checks); npm run test --workspace @lumina/backend (emailChangeSummary)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Frontend request shaping, partial-failure message, and invite outcome",
+      "command": "npm run test --workspace @lumina/frontend (people-api-edit.test.ts)",
+      "result": "PASS",
+      "notes": "a manager session sends the name only; an admin sends a trimmed lowercase email"
+    },
+    {
+      "step": "Local/demo parity: a manager email change is refused locally, a name edit succeeds, teacher.manage/student.manage matrix holds",
+      "command": "npm run test --workspace @lumina/frontend (people-edit-rules.test.ts, permissions.test.ts)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "UI end to end in API mode: manager edit/pause with a locked Email and the admin-only note; admin invited-email change shows the new link",
+      "command": "npm run e2e (manager-team-edits.spec)",
+      "result": "PASS",
+      "notes": "3 tests; log mailer; no real mail"
+    },
+    {
+      "step": "Demo fence: Email disabled, name edit works, zero /api/v1/ requests",
+      "command": "npm run e2e (demo regression.spec)",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "No regression: smoke profile/invites/auth/uploads/library/rebook, backend vitest, e2e account-invites/auth/uploads/curriculum-library, frontend vitest",
+      "command": "npm run smoke; npm run test --workspace @lumina/backend; npm run test --workspace @lumina/frontend; npm run e2e",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Static soundness and no schema/dependency/log change",
+      "command": "npm run typecheck; npm run lint; git diff --check; git status --porcelain -- backend/src/db; git diff --stat -- package.json package-lock.json backend/package.json frontend/package.json",
+      "result": "PASS",
+      "notes": ""
+    },
+    {
+      "step": "Authorization edge matrix: restricted keys on any id, byte-identical 403, archived own-team, invited rename/pause split, unchanged admin email, archived+invited email change, unknown-key bodies",
+      "command": "npm run test --workspace @lumina/backend (user-edit-policy.test.ts); npm run smoke (team-edits)",
+      "result": "PASS",
+      "notes": ""
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "Agent-probe AC-16: manager edit form with the disabled Email and the admin-only note, and the invite-result modal after an admin email change, at 1440x950 and 390x844",
+      "result": "PASS — throwaway Playwright spec against the API-mode servers (log mailer), deleted afterwards. Email renders greyed and disabled with 'Only an admin can change an email address.' under it at both viewports; the invite-result modal is fully readable at both, and documentElement.scrollWidth stays within clientWidth on all four captures. The invite link field was masked before capture so no token is stored. Images: harness/manager-team-edits/screenshots/ac16-*.png",
+      "timestamp": "2026-11-24T22:33:00Z"
+    },
+    {
+      "check": "Lowercase-writer grep: confirm the stored email is lowercased by the writers, which is why the smoke comparisons normalize with toLowerCase()",
+      "result": "CONFIRMED — backend/src/routes/users.ts:73 and :86 (create/patch schemas) and backend/src/lib/school-import.ts:518 lowercase through zod before the insert. The smoke fixture compares DB rows and mailbox entries with .toLowerCase() for that reason; the camelCase emailFor() labels were the fixture bug, not a product bug.",
+      "timestamp": "2026-11-24T22:20:00Z"
+    },
+    {
+      "check": "Independent EVL re-run (vc-tester, fresh context): typecheck, lint, both vitest suites, git diff --check, backend/src/db clean, dependency diff, logging grep, smoke, e2e",
+      "result": "PASS — all 10 gates green with margins: typecheck exit 0, lint exit 0, backend 13 files / 111 tests, frontend 13 files / 80 tests, smoke 18/18 domains 1060 checks (team-edits domain alone 224 checks; profile 19, invites 131, auth 58, library 170), ports free before e2e, 33 API + 6 demo, git diff --check exit 0, backend/src/db empty, dependency diff empty, logging grep 0 matches in all three files. Claims a-g all CONFIRMED by the EVL agent reading the code (transaction at users.ts:449 with lockUserForInvite first; static deny before any read; archived guard at :459; issueInvite on the tx at :508 with deliverInvite only after commit at :559; revokeSessions at :512; emailChangeSummary name-only; frontend name-only body at school.ts:85-88). No hard-stop event, no file modified by the EVL agent. The EVL agent flagged the pack as incomplete only because review-decision.json is not written yet, which is the step that follows this review; it recorded no code defect.",
+      "timestamp": "2026-11-24T23:05:00Z"
+    }
+  ],
+  "reviewFollowUp": {
+    "date": "26-11-26",
+    "decision": "user chose to fix the two real review findings (N1, N2) before the commit checkpoint",
+    "changes": [
+      "N1: frontend/app/lib/school/services/people.ts — assertManagerKeepsStoredEmail applied in the API branch of updateTeacher and updateStudent, reading the current users from the browser store; a manager's real email change is refused with ServiceError before any request.",
+      "N2: frontend/app/lib/school/api/school.ts — savedAccountOnly removed; updateTeacher and updateStudent return PersonEditResult { invite?, warning? } so the committed account save, the profile-failure explanation and the invitation link all survive; ManagerTeachers, ManagerStudents and AdminManagers show warning and still open InviteResultModal. Recorded deviation from plan D13.",
+      "N3 (incidental): partial-failure copy is now 'The account was saved, but the profile details were not: ...', true for a manager as well as an admin."
+    ],
+    "tests": [
+      "frontend/tests/people-api-guard.test.ts (new, 6 tests): API-branch manager email rule for teachers and students, unchanged email in another case, admin allowed, name-only edit, invite pass-through.",
+      "frontend/tests/people-api-edit.test.ts: partial-save tests rewritten to the { invite, warning } result (2 replaced, 1 added)."
+    ],
+    "gates": [
+      { "command": "npm run typecheck", "result": "PASS", "notes": "exit 0, both workspaces" },
+      { "command": "npm run lint", "result": "PASS", "notes": "exit 0, both workspaces" },
+      { "command": "npm run test --workspace @lumina/frontend", "result": "PASS", "notes": "14 files / 87 tests (was 13 / 80)" },
+      { "command": "npm run e2e", "result": "PASS", "notes": "ports 3000/3100/4000 verified free first; 33 API + 6 demo" }
+    ],
+    "notRerun": "backend vitest and smoke: no backend file changed by the follow-up (frontend-only fix); typecheck still covers the cross-workspace type import in contract.test.ts",
+    "residuals": "N4-N10 unchanged and accepted/backlogged as recorded in review-decision.json"
+  }
+}

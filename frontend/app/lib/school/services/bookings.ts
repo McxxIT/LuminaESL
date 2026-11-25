@@ -80,6 +80,7 @@ export function rebookLesson(actorId: string, lessonId: string, date: string, ti
     const actor = requireUser(draft, actorId);
     const original = requireLesson(draft, lessonId);
     assertCan(draft, actor, "lesson.book", { lessonId });
+    if (original.status === "live") throw new ServiceError("A lesson in progress cannot be rebooked.");
     assertSlotOpen(draft, original.teacherId, date, time);
     const lesson = createLesson(draft, { teacherId: original.teacherId, studentId: original.studentId, date, time, title: original.title, focus: original.focus, actorId });
     changeCredits(draft, { studentId: original.studentId, hours: -LESSON_CREDIT_HOURS, reason: "booking", description: `${original.title} lesson`, actorId, lessonId: lesson.id });

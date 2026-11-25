@@ -142,7 +142,7 @@ export default function StudentOverview({
       <article className="role-card"><div className="metric-icon blue"><Icon name="calendar" /></div><div><span>NEXT LESSON</span><strong>{nextLesson ? `${formatLessonDate(nextLesson.date)}, ${nextLesson.time}` : "Not booked"}</strong><small>{nextLesson?.title ?? "Book a session to get started"}</small></div></article>
       <article className="role-card"><div className="metric-icon green"><Icon name="chart" /></div><div><span>COURSE PROGRESS</span><strong>{courseProgress ? <>{courseProgress.completed} <em>/ {courseProgress.total} lessons</em></> : "Not enrolled"}</strong><small>{courseProgress ? courseProgress.courseTitle : "Ask your school to enroll you"}</small>{courseProgress && courseProgress.total > 0 && <div className="bar course-progress-bar"><i style={{ width: `${Math.round((courseProgress.completed / courseProgress.total) * 100)}%` }} /></div>}</div></article>
       <article className="role-card"><div className="metric-icon violet"><Icon name="zap" /></div><div><span>LEARNING STREAK</span><strong>12 days</strong><small>{practiceMinutes} practice minutes logged</small></div></article>
-      <article className="role-card"><div className="metric-icon orange"><Icon name="clock" /></div><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>hrs</em></strong><small>About {Math.floor(creditHours)} 25-minute lessons</small></div></article>
+      <article className="role-card"><div className="metric-icon orange"><Icon name="clock" /></div><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>credits</em></strong><small>About {Math.floor(creditHours)} 25-minute lessons</small></div></article>
     </section>
 
     <div className="student-dashboard-grid">

@@ -1,0 +1,12 @@
+{
+  "task": "lumina-v1-finish Phase 05 — Parity Polish & Unit Tests (rebook enrichment)",
+  "planPath": "process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-05-parity-polish-and-unit-tests_PLAN_23-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": ["billing or credits"],
+  "riskClass": "billing or credits",
+  "workDescription": "POST /lessons/:id/rebook now accepts any non-live original (scheduled, completed, cancelled; live -> 400) and enriches the new lesson with resolveLessonDefaults (active enrollment, next lesson plan, planAttachedBy/At, fresh ESL-#### room code) inside the existing transaction, after lockStudentCredits, the slot lookup and the balance check. Exactly one -1 booking debit and one lesson.booked activity per rebook, unchanged. The local (demo) rebookLesson gains the same live refusal. No schema, auth or response-shape change.",
+  "approver": "vc-code-reviewer (pending; review-decision.json is written after the review)",
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": false,
+  "why": "The rebook handler debits a credit and creates a lesson; widening which originals are accepted must not open a double charge, a free lesson, a plan double-booking or an ownership bypass."
+}

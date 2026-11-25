@@ -1,11 +1,11 @@
 import { buildDaySlots, isSlotInPast } from "../scheduling";
 import { initials, parseISODate, toISODate } from "../student";
 import { computeTeacherPerformance, type PerformanceRules, type TeacherPerformance } from "../teacherPerformance";
-import type { CreditTransaction, StudentAssignment, StudentLesson, TeacherHomework, TeacherLesson, TeacherLessonMaterial, TeacherSlotClosure, TeacherSlotOpening } from "../types";
+import type { CreditTransaction, LessonLibraryMaterial, StudentAssignment, StudentLesson, TeacherHomework, TeacherLesson, TeacherLessonMaterial, TeacherSlotClosure, TeacherSlotOpening } from "../types";
 import { isApiDataMode } from "../auth/mode";
 import { readFile } from "./files";
 import { get, list, query } from "./repositories";
-import { lessonsForStudent, lessonsForTeacher, plansForCourse, ratingsForLesson } from "./selectors";
+import { libraryForLesson, lessonsForStudent, lessonsForTeacher, plansForCourse, ratingsForLesson } from "./selectors";
 import type { Assignment, Lesson, LessonCancellationRequest, SchoolData, SlotClosureRequest } from "./types";
 
 /**
@@ -40,6 +40,20 @@ export function lessonMaterialView(data: SchoolData, lesson: Lesson): TeacherLes
       return file ? [{ id: file.id, name: file.name, type: file.type, size: file.size, storageKey: file.storageKey }] : [];
     }),
   };
+}
+
+/**
+ * Curriculum Library files linked to a lesson, for the teacher and student lesson views. A
+ * cancelled lesson shows none (the backend also stops serving them for cancelled lessons).
+ */
+export function lessonLibraryMaterialsView(data: SchoolData, lesson: Lesson): LessonLibraryMaterial[] {
+  if (lesson.status === "cancelled") return [];
+  return libraryForLesson(data, lesson.id).flatMap((item) => {
+    const file = get(data, "attachments", item.attachmentId);
+    return file
+      ? [{ id: item.id, title: item.title, category: item.category, attachmentId: file.id, fileName: file.name, type: file.type, size: file.size, storageKey: file.storageKey }]
+      : [];
+  });
 }
 
 /** A shared lesson as the teacher screens see it (`TeacherLesson`). */
@@ -81,6 +95,7 @@ export function toTeacherLessonView(data: SchoolData, lesson: Lesson): TeacherLe
       reviewNote: cancellation.reviewNote,
     },
     material: lessonMaterialView(data, lesson),
+    libraryMaterials: lessonLibraryMaterialsView(data, lesson),
     ratings: ratings.length ? ratings.map((rating) => ({ from: rating.from, name: rating.authorName, score: rating.score, comment: rating.comment, ratedAt: rating.createdAt.slice(0, 10) })) : undefined,
     teacherAbsence: absence && { note: absence.note, reportedBy: nameOf(data, absence.reportedBy), reportedAt: absence.reportedAt },
   };
@@ -152,6 +167,7 @@ export function toStudentLessonView(data: SchoolData, lesson: Lesson): StudentLe
     cancelReason: lesson.cancelReason,
     attendance: lesson.attendance,
     ratings: ratingsForLesson(data, lesson.id).map((rating) => ({ from: rating.from, score: rating.score, comment: rating.comment })),
+    materials: lessonLibraryMaterialsView(data, lesson),
   };
 }
 

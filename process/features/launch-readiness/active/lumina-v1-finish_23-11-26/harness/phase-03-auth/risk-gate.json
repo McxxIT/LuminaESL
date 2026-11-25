@@ -1,0 +1,16 @@
+{
+  "task": "lumina-v1-finish Phase 03 — auth & account lifecycle hardening",
+  "planPath": "process/features/launch-readiness/active/lumina-v1-finish_23-11-26/phase-03-auth-lifecycle-hardening_PLAN_23-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": [
+    "auth or identity",
+    "permission, secret, or trust-boundary logic",
+    "public API or external contract changes"
+  ],
+  "riskClass": "auth or identity",
+  "workDescription": "New POST /auth/change-password and admin POST /users/:id/reset-password; refresh-token revocation on change/reset/pause/archive; refresh-token pruning; per-route auth rate limits with a per-IP ceiling; production CORS_ORIGIN guard; refreshCookieOptions helper; password policy tightened to 10-128 chars; Settings password card and admin ResetPasswordModal gated on !isDemoMode().",
+  "approver": "pending — reviewer (vc-code-reviewer or the user) records the decision in review-decision.json",
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Changes who can set credentials, how sessions end, and how brute force is throttled. A defect could lock users out, let a stolen session take over an account, or lift rate limits. No schema change; no migration."
+}

@@ -6,6 +6,13 @@ import Modal from "../shared/Modal";
 import { teacherLevelOptions } from "../../lib/data";
 import type { Course, Guardian, SchoolUser } from "../../lib/school";
 import type { ServiceResult } from "../../lib/school/services";
+import { isApiDataMode } from "../../lib/auth/mode";
+
+const INVITE_NOTE = "We'll email them a link to set their password.";
+/** A manager may rename a team member but not touch the address. */
+export const EMAIL_ADMIN_ONLY_NOTE = "Only an admin can change an email address.";
+/** An admin changing an invited person's email re-issues the invitation. */
+export const EMAIL_INVITED_NOTE = "Changing the email sends a new invitation to the new address.";
 
 /**
  * Create/edit forms for people management. Each form calls `onSubmit`, shows a service error
@@ -47,17 +54,19 @@ function LevelSelect({ label, value, onChange }: { label: string; value: string;
 
 // Managers --------------------------------------------------------------------------------
 
-export function ManagerFormModal({ initial, onSubmit, onClose }: {
+export function ManagerFormModal({ initial, emailNote, onSubmit, onClose }: {
   initial?: { name: string; email: string };
+  /** Shown under the Email field (an invited manager's email change re-invites). */
+  emailNote?: string;
   onSubmit: Submit<{ name: string; email: string }>;
   onClose: () => void;
 }) {
   const [form, setForm] = useState(initial ?? { name: "", email: "" });
   return <FormModal id="manager-form" eyebrow={initial ? "EDIT MANAGER" : "NEW MANAGER"} title={initial ? `Edit ${initial.name}` : "Add a manager"}
-    description={initial ? undefined : "They can sign in right away with this email and look after the teachers you assign them."}
+    description={initial ? undefined : (isApiDataMode() ? `${INVITE_NOTE} They will look after the teachers you assign them.` : "They can sign in right away with this email and look after the teachers you assign them.")}
     submitLabel={initial ? "Save changes" : "Add manager"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Dana Cruz" autoFocus /></label>
-    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" /></label>
+    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" />{emailNote && <small data-testid="email-invite-note">{emailNote}</small>}</label>
   </FormModal>;
 }
 
@@ -65,19 +74,22 @@ export function ManagerFormModal({ initial, onSubmit, onClose }: {
 
 export type TeacherFormValues = { name: string; email: string; headline: string; specializations: string; bio: string; managerId: string };
 
-export function TeacherFormModal({ initial, managers, onSubmit, onClose }: {
+export function TeacherFormModal({ initial, managers, lockEmail, emailNote, onSubmit, onClose }: {
   initial?: TeacherFormValues;
   /** Pass to let the admin choose the manager (create only). */
   managers?: SchoolUser[];
+  /** Edit mode: a manager may not change the address. */
+  lockEmail?: boolean;
+  emailNote?: string;
   onSubmit: Submit<TeacherFormValues>;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<TeacherFormValues>(initial ?? { name: "", email: "", headline: "", specializations: "", bio: "", managerId: managers?.[0]?.id ?? "" });
   return <FormModal id="teacher-form" eyebrow={initial ? "EDIT TEACHER" : "NEW TEACHER"} title={initial ? `Edit ${initial.name}` : "Add a teacher"}
-    description={initial ? undefined : "The teacher can sign in right away with this email and start opening booking slots."}
+    description={initial ? undefined : (isApiDataMode() ? `${INVITE_NOTE} Then they can start opening booking slots.` : "The teacher can sign in right away with this email and start opening booking slots.")}
     submitLabel={initial ? "Save changes" : "Add teacher"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Ana Lopez" autoFocus /></label>
-    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" /></label>
+    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@lumina.school" disabled={lockEmail} />{emailNote && <small data-testid={lockEmail ? "email-locked-note" : "email-invite-note"}>{emailNote}</small>}</label>
     <label className="full-field">Headline<input value={form.headline} onChange={(event) => setForm({ ...form, headline: event.target.value })} placeholder="e.g. Business English and interview coach" /></label>
     <label className="full-field">Specialties<input value={form.specializations} onChange={(event) => setForm({ ...form, specializations: event.target.value })} placeholder="Comma separated, e.g. IELTS, Pronunciation" /></label>
     {managers && <label className="full-field">Manager<select value={form.managerId} onChange={(event) => setForm({ ...form, managerId: event.target.value })}>
@@ -107,11 +119,14 @@ export function toGuardian(values: StudentFormValues): Guardian | null {
   return values.guardianName.trim() ? { name: values.guardianName, email: values.guardianEmail, relationship: "Parent" } : null;
 }
 
-export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose }: {
+export function StudentFormModal({ initial, teachers, courses, lockEmail, emailNote, onSubmit, onClose }: {
   initial?: StudentFormValues;
   /** Create mode: teachers and courses to enroll the new student with. */
   teachers?: SchoolUser[];
   courses?: Course[];
+  /** Edit mode: a manager may not change the address. */
+  lockEmail?: boolean;
+  emailNote?: string;
   onSubmit: Submit<StudentFormValues>;
   onClose: () => void;
 }) {
@@ -121,10 +136,10 @@ export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose
     teacherId: teachers?.find((teacher) => teacher.status === "active")?.id ?? "", courseId: courses?.[0]?.id ?? "", startingCredits: "5",
   });
   return <FormModal id="student-form" eyebrow={creating ? "NEW STUDENT" : "EDIT STUDENT"} title={creating ? "Add a student" : `Edit ${initial.name}`}
-    description={creating ? "The student can sign in right away and book with the teacher you choose." : undefined}
+    description={creating ? (isApiDataMode() ? `${INVITE_NOTE} Then they can book with the teacher you choose.` : "The student can sign in right away and book with the teacher you choose.") : undefined}
     submitLabel={creating ? "Add student" : "Save changes"} onClose={onClose} onSubmit={() => onSubmit(form)}>
     <label>Full name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Sam Rivera" autoFocus /></label>
-    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" /></label>
+    <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" disabled={lockEmail} />{emailNote && <small data-testid={lockEmail ? "email-locked-note" : "email-invite-note"}>{emailNote}</small>}</label>
     <LevelSelect label="Current level" value={form.level} onChange={(level) => setForm({ ...form, level })} />
     <LevelSelect label="Target level" value={form.targetLevel} onChange={(targetLevel) => setForm({ ...form, targetLevel })} />
     <label className="full-field">Learning goal<input value={form.goal} onChange={(event) => setForm({ ...form, goal: event.target.value })} placeholder="e.g. Speak confidently in client meetings" /></label>
@@ -136,7 +151,7 @@ export function StudentFormModal({ initial, teachers, courses, onSubmit, onClose
       <label>Course<select value={form.courseId} onChange={(event) => setForm({ ...form, courseId: event.target.value })} disabled={!form.teacherId}>
         {courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}
       </select></label>
-      <label className="full-field">Starting credits (hours)<input type="number" min="0" step="0.5" value={form.startingCredits} onChange={(event) => setForm({ ...form, startingCredits: event.target.value })} /><small>One 25-minute lesson uses 1 credit.</small></label>
+      <label className="full-field">Starting credits<input type="number" min="0" step="0.5" value={form.startingCredits} onChange={(event) => setForm({ ...form, startingCredits: event.target.value })} /><small>One 25-minute lesson uses 1 credit.</small></label>
     </>}
     <label>Guardian name<input value={form.guardianName} onChange={(event) => setForm({ ...form, guardianName: event.target.value })} placeholder="Optional" /></label>
     <label>Guardian email<input type="email" value={form.guardianEmail} onChange={(event) => setForm({ ...form, guardianEmail: event.target.value })} placeholder="Optional" /></label>
@@ -173,12 +188,12 @@ export function CreditAdjustModal({ studentName, balance, onSubmit, onClose }: {
   const [reason, setReason] = useState("");
   const amount = Number(hours) || 0;
   const next = Number((balance + (direction === "add" ? amount : -amount)).toFixed(2));
-  return <FormModal id="credit-form" eyebrow="CREDITS" title={`Adjust credits for ${studentName}`} description={`Current balance: ${balance.toFixed(2)} hours.`}
+  return <FormModal id="credit-form" eyebrow="CREDITS" title={`Adjust credits for ${studentName}`} description={`Current balance: ${balance.toFixed(2)} credits.`}
     submitLabel="Save adjustment" onClose={onClose} onSubmit={() => onSubmit({ hours: direction === "add" ? amount : -amount, reason })}>
-    <label>Change<select value={direction} onChange={(event) => setDirection(event.target.value as "add" | "remove")}><option value="add">Add hours</option><option value="remove">Remove hours</option></select></label>
-    <label>Hours<input type="number" min="0.25" step="0.25" value={hours} onChange={(event) => setHours(event.target.value)} /></label>
+    <label>Change<select value={direction} onChange={(event) => setDirection(event.target.value as "add" | "remove")}><option value="add">Add credits</option><option value="remove">Remove credits</option></select></label>
+    <label>Credits<input type="number" min="0.25" step="0.25" value={hours} onChange={(event) => setHours(event.target.value)} /></label>
     <label className="full-field">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="e.g. Goodwill credit for a technical issue" /></label>
-    <p className="student-form-note full-field">New balance: <strong>{next.toFixed(2)} hours</strong>{next < 0 ? " (cannot go below zero)" : ""}</p>
+    <p className="student-form-note full-field">New balance: <strong>{next.toFixed(2)} credits</strong>{next < 0 ? " (cannot go below zero)" : ""}</p>
   </FormModal>;
 }
 
@@ -193,6 +208,25 @@ export function ConfirmStatusModal({ person, onConfirm, onClose }: { person: Sch
       <p>{pausing
         ? person.role === "teacher" ? "Students cannot book new lessons with a paused teacher. Lessons already booked stay on the schedule." : person.role === "student" ? "The student cannot book or manage lessons while paused." : "Their teachers stay assigned to them; the admin still sees every approval."
         : "Everything they had before pausing is still there."}</p>
+    </div></div>
+  </FormModal>;
+}
+
+export function ResetPasswordModal({ person, onSubmit, onClose }: { person: SchoolUser; onSubmit: Submit<string>; onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  return <FormModal id="reset-password-form" eyebrow="RESET PASSWORD" title={`Set a new password for ${person.name}`}
+    description={person.email} submitLabel="Reset password" danger onClose={onClose}
+    onSubmit={() => {
+      if (password.length < 10 || password.length > 128) return { ok: false, error: "The new password must be 10 to 128 characters." };
+      if (password !== confirm) return { ok: false, error: "The passwords do not match." };
+      return onSubmit(password);
+    }}>
+    <label>New password<input type="password" name="new-password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} maxLength={128} autoFocus /><small>At least 10 characters. Share it with them privately.</small></label>
+    <label>Confirm new password<input type="password" name="confirm-password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} maxLength={128} /></label>
+    <div className="lesson-callout warning full-field"><Icon name="lock" size={16} /><div>
+      <strong>Their old password stops working right away</strong>
+      <p>Devices where they are already signed in lose access within 15 minutes, when their current session expires. They then sign in with the new password.</p>
     </div></div>
   </FormModal>;
 }

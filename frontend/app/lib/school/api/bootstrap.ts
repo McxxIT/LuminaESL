@@ -39,6 +39,8 @@ const COLLECTION_KEYS = [
   "assignments",
   "credits",
   "activity",
+  "libraryItems",
+  "lessonLibraryItems",
 ] as const satisfies readonly (keyof SchoolCollections)[];
 
 const SETTING_KEYS = [

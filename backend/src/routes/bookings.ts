@@ -8,14 +8,16 @@ import {
   users,
 } from "../db/schema";
 import {
+  ACTIVE_LESSON_CONFLICT_MESSAGE,
   badRequest,
   conflict,
   forbidden,
+  isActiveLessonSlotConflict,
   notFound,
   unprocessable,
 } from "../lib/errors";
 import { logActivity } from "../lib/activity";
-import { getCreditBalance } from "../lib/credits";
+import { getCreditBalance, lockStudentCredits } from "../lib/credits";
 import { resolveLessonDefaults } from "../lib/lesson-defaults";
 import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
 import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time";
@@ -197,69 +199,82 @@ export const bookingRoutes: FastifyPluginAsync = async (app) => {
         throw forbidden("This student is not on your team");
       }
 
-      const result = await app.db.transaction(async (tx) => {
-        const [slot] = await tx
-          .select()
-          .from(slotOpenings)
-          .where(eq(slotOpenings.id, body.slotId))
-          .limit(1);
-        if (!slot) throw notFound("Slot not found");
+      let result: typeof lessons.$inferSelect;
+      try {
+        result = await app.db.transaction(async (tx) => {
+          // Lock the student's ledger first (single lock order across every credit path).
+          await lockStudentCredits(tx, studentId);
 
-        const balance = await getCreditBalance(tx, studentId);
-        if (balance < 1) {
-          throw unprocessable("Student does not have enough lesson credits");
-        }
+          const [slot] = await tx
+            .select()
+            .from(slotOpenings)
+            .where(eq(slotOpenings.id, body.slotId))
+            .limit(1);
+          if (!slot) throw notFound("Slot not found");
 
-        const [claimed] = await tx
-          .delete(slotOpenings)
-          .where(eq(slotOpenings.id, body.slotId))
-          .returning();
-        if (!claimed) throw conflict("That slot was just taken");
+          const balance = await getCreditBalance(tx, studentId);
+          if (balance < 1) {
+            throw unprocessable("Student does not have enough lesson credits");
+          }
 
-        const defaults = await resolveLessonDefaults(tx, {
-          teacherId: claimed.teacherId,
-          studentId,
-          actorId: request.user.sub,
-        });
+          const [claimed] = await tx
+            .delete(slotOpenings)
+            .where(eq(slotOpenings.id, body.slotId))
+            .returning();
+          if (!claimed) throw conflict("That slot was just taken");
 
-        const [lesson] = await tx
-          .insert(lessons)
-          .values({
+          const defaults = await resolveLessonDefaults(tx, {
             teacherId: claimed.teacherId,
             studentId,
-            date: claimed.date,
-            time: claimed.time,
-            endTime: addMinutes(claimed.time, LESSON_MINUTES),
-            title: "Booked lesson",
-            enrollmentId: defaults.enrollmentId,
-            lessonPlanId: defaults.lessonPlanId,
-            planAttachedBy: defaults.planAttachedBy,
-            planAttachedAt: defaults.planAttachedAt,
-            roomCode: defaults.roomCode,
-            createdBy: request.user.sub,
-          })
-          .returning();
-        if (!lesson) throw new Error("Failed to create lesson");
+            actorId: request.user.sub,
+          });
 
-        await tx.insert(creditEntries).values({
-          studentId,
-          hours: -1,
-          reason: "booking",
-          description: "Lesson booking",
-          lessonId: lesson.id,
-          actorId: request.user.sub,
+          const [lesson] = await tx
+            .insert(lessons)
+            .values({
+              teacherId: claimed.teacherId,
+              studentId,
+              date: claimed.date,
+              time: claimed.time,
+              endTime: addMinutes(claimed.time, LESSON_MINUTES),
+              title: "Booked lesson",
+              enrollmentId: defaults.enrollmentId,
+              lessonPlanId: defaults.lessonPlanId,
+              planAttachedBy: defaults.planAttachedBy,
+              planAttachedAt: defaults.planAttachedAt,
+              roomCode: defaults.roomCode,
+              createdBy: request.user.sub,
+            })
+            .returning();
+          if (!lesson) throw new Error("Failed to create lesson");
+
+          await tx.insert(creditEntries).values({
+            studentId,
+            hours: -1,
+            reason: "booking",
+            description: "Lesson booking",
+            lessonId: lesson.id,
+            actorId: request.user.sub,
+          });
+
+          await logActivity(tx, {
+            actorId: request.user.sub,
+            action: "lesson.booked",
+            targetType: "lesson",
+            targetId: lesson.id,
+            summary: `Booked a lesson on ${claimed.date} at ${claimed.time}`,
+          });
+
+          return lesson;
         });
-
-        await logActivity(tx, {
-          actorId: request.user.sub,
-          action: "lesson.booked",
-          targetType: "lesson",
-          targetId: lesson.id,
-          summary: `Booked a lesson on ${claimed.date} at ${claimed.time}`,
-        });
-
-        return lesson;
-      });
+      } catch (error) {
+        // An open slot does not guarantee a free teacher/time key. The partial unique index
+        // decides, and its violation rolls the slot claim and debit back with the lesson.
+        if (isActiveLessonSlotConflict(error)) {
+          throw conflict(ACTIVE_LESSON_CONFLICT_MESSAGE);
+        }
+        throw error;
+      }
 
       reply.status(201);
       return result;

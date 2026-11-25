@@ -7,8 +7,9 @@ import LessonRating from "./LessonRating";
 import type { BookableTutor, BookLessonInput } from "./useStudentWorkspace";
 import type { RateLessonInput, ServiceCall } from "../../lib/school/services";
 import { buildDaySlots, canJoinLesson, findNextOpenSlot } from "../../lib/scheduling";
+import { downloadAttachmentFile } from "../../lib/school/attachment-download";
 import { downloadTextFile, formatLessonDate, formatLongDate, isoDaysFromNow, todayISO } from "../../lib/student";
-import type { StudentLesson, TeacherLesson, TeacherSlotClosure, TeacherSlotOpening } from "../../lib/types";
+import type { LessonLibraryMaterial, StudentLesson, TeacherLesson, TeacherSlotClosure, TeacherSlotOpening } from "../../lib/types";
 
 type TutorSchedule = { closedSlots: TeacherSlotClosure[]; openedSlots: TeacherSlotOpening[]; lessons: TeacherLesson[] };
 
@@ -61,7 +62,20 @@ function lessonSummary(lesson: StudentLesson) {
   ].join("\n");
 }
 
+function formatSize(size: number) {
+  return size > 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
 export default function StudentLessons({ lessons, creditHours, tutors: bookableTutors, getTutorSchedule, onBookLesson, onRescheduleLesson, onCancelLesson, onRebookLesson, onRateLesson, onNotice }: LessonsProps) {
+  async function downloadMaterial(item: LessonLibraryMaterial) {
+    try {
+      if (await downloadAttachmentFile({ id: item.attachmentId, name: item.fileName, storageKey: item.storageKey })) onNotice(`Downloaded ${item.fileName}.`);
+      else onNotice(`${item.fileName} is not available on this device yet.`);
+    } catch {
+      onNotice(`Could not download ${item.fileName}. Try again.`);
+    }
+  }
+
   function availableSlotsFor(tutorId: string | undefined, date: string, excludeLessonId?: string) {
     if (!tutorId) return [];
     const schedule = getTutorSchedule(tutorId);
@@ -253,7 +267,7 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
     <section className="student-lessons-summary">
       <article className="student-summary-card"><span className="metric-icon blue"><Icon name="calendar" /></span><div><span>UPCOMING</span><strong>{counts.upcoming}</strong></div></article>
       <article className="student-summary-card"><span className="metric-icon green"><Icon name="check" /></span><div><span>COMPLETED</span><strong>{counts.completed}</strong></div></article>
-      <article className="student-summary-card"><span className="metric-icon violet"><Icon name="clock" /></span><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>hrs</em></strong></div></article>
+      <article className="student-summary-card"><span className="metric-icon violet"><Icon name="clock" /></span><div><span>LESSON CREDITS</span><strong>{creditHours.toFixed(1)} <em>credits</em></strong></div></article>
       <article className="student-summary-card"><span className="metric-icon orange"><Icon name="award" /></span><div><span>ATTENDANCE</span><strong>96%</strong></div></article>
     </section>
 
@@ -329,6 +343,18 @@ export default function StudentLessons({ lessons, creditHours, tutors: bookableT
       </div>
       <div className="lesson-detail-section"><span className="eyebrow">FOCUS</span><div className="lesson-tags">{selectedLesson.focus.map((focus) => <span key={focus}>{focus}</span>)}</div></div>
       {selectedLesson.notes && <div className="lesson-detail-section"><span className="eyebrow">LESSON NOTES</span><p>{selectedLesson.notes}</p></div>}
+      {(() => {
+        // Read the live lesson so newly attached materials show without reopening the dialog.
+        const materials = (lessons.find((lesson) => lesson.id === selectedLesson.id) ?? selectedLesson).materials ?? [];
+        if (selectedLesson.status === "cancelled" || materials.length === 0) return null;
+        return <div className="lesson-detail-section" data-testid="student-lesson-materials"><span className="eyebrow">LESSON MATERIALS</span>
+          <div className="lesson-material-files">
+            {materials.map((item) => <button type="button" className="lesson-material-file" key={item.id} onClick={() => void downloadMaterial(item)}>
+              <Icon name="file" size={14} /><span>{item.title} · {item.category}</span><small>{formatSize(item.size)}</small><Icon name="download" size={14} />
+            </button>)}
+          </div>
+        </div>;
+      })()}
       {selectedLesson.homework && <div className="lesson-callout"><Icon name="book" size={16} /><div><strong>Prepare before class</strong><p>{selectedLesson.homework}</p></div></div>}
       {selectedLesson.status === "completed" && <>
         {selectedLesson.scores && <div className="report-scores">{selectedLesson.scores.map((score) => <div key={score.label}><strong>{score.value.toFixed(1)}<em>/5.0</em></strong><span>{score.label}</span></div>)}</div>}

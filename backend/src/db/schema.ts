@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -8,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -24,6 +26,7 @@ export const userStatus = pgEnum("user_status", [
   "active",
   "paused",
   "archived",
+  "invited",
 ]);
 export const courseStatus = pgEnum("course_status", [
   "draft",
@@ -113,6 +116,34 @@ export const refreshTokens = pgTable(
       .notNull(),
   },
   (table) => [index("refresh_tokens_user_idx").on(table.userId)],
+);
+
+/**
+ * Single-use account tokens. Only the sha256 hex of the raw token is stored.
+ * `invite` is issued today; `reset` is reserved for a future self-service flow.
+ */
+export const authTokens = pgTable(
+  "auth_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    purpose: text("purpose").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("auth_tokens_user_idx").on(table.userId),
+    check(
+      "auth_tokens_purpose_check",
+      sql`${table.purpose} in ('invite', 'reset')`,
+    ),
+  ],
 );
 
 export const teacherProfiles = pgTable("teacher_profiles", {
@@ -237,6 +268,41 @@ export const attachments = pgTable("attachments", {
     .notNull(),
 });
 
+/**
+ * Curriculum Library: one global, school-wide set of reusable materials. One file per item
+ * (`attachment_id` unique); archive-only (`status` published | archived, zod and CHECK-enforced).
+ */
+export const libraryItems = pgTable("library_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  category: text("category").notNull(),
+  level: text("level"),
+  description: text("description"),
+  tags: text("tags")
+    .array()
+    .default(sql`'{}'::text[]`)
+    .notNull(),
+  attachmentId: uuid("attachment_id")
+    .notNull()
+    .unique()
+    .references(() => attachments.id, { onDelete: "restrict" }),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  status: text("status").default("published").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+}, (table) => [
+  check(
+    "library_items_status_check",
+    sql`${table.status} in ('published', 'archived')`,
+  ),
+]);
+
 export const enrollments = pgTable(
   "enrollments",
   {
@@ -313,6 +379,34 @@ export const lessons = pgTable(
   (table) => [
     index("lessons_teacher_date_idx").on(table.teacherId, table.date),
     index("lessons_student_date_idx").on(table.studentId, table.date),
+    // One active lesson per teacher/date/start-time. Cancelled and completed rows stay
+    // historical and must not block reuse of the same key.
+    uniqueIndex("lessons_active_teacher_date_time_uidx")
+      .on(table.teacherId, table.date, table.time)
+      .where(sql`${table.status} in ('scheduled', 'live')`),
+  ],
+);
+
+/** Library items linked to a lesson. No id column; the API derives `{lessonId}:{libraryItemId}`. */
+export const lessonLibraryItems = pgTable(
+  "lesson_library_items",
+  {
+    lessonId: uuid("lesson_id")
+      .notNull()
+      .references(() => lessons.id, { onDelete: "cascade" }),
+    libraryItemId: uuid("library_item_id")
+      .notNull()
+      .references(() => libraryItems.id, { onDelete: "restrict" }),
+    attachedBy: uuid("attached_by")
+      .notNull()
+      .references(() => users.id),
+    attachedAt: timestamp("attached_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.lessonId, table.libraryItemId] }),
+    index("lesson_library_items_item_idx").on(table.libraryItemId),
   ],
 );
 
@@ -379,6 +473,7 @@ export const absences = pgTable("absences", {
   id: uuid("id").primaryKey().defaultRandom(),
   lessonId: uuid("lesson_id")
     .notNull()
+    .unique()
     .references(() => lessons.id, { onDelete: "cascade" }),
   teacherId: uuid("teacher_id")
     .notNull()
@@ -531,8 +626,11 @@ export const settings = pgTable("settings", {
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type AuthToken = typeof authTokens.$inferSelect;
 export type Course = typeof courses.$inferSelect;
 export type Lesson = typeof lessons.$inferSelect;
 export type Assignment = typeof assignments.$inferSelect;
 export type CreditEntry = typeof creditEntries.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type LibraryItem = typeof libraryItems.$inferSelect;
+export type LessonLibraryItem = typeof lessonLibraryItems.$inferSelect;

@@ -1,0 +1,65 @@
+{
+  "task": "manager-team-edits — managers rename and pause/reactivate own-team teachers/students; admin email change signs out an active user or re-invites an invited one",
+  "scenarios": [
+    {
+      "scenario": "A manager changes a team member's email to take over the account (password reset / invitation sent to the manager's own inbox)",
+      "ruled_out": true,
+      "rationale": "userPatchAccess denies the email key for every non-self manager before any database read, and the deny message is the same for unknown, foreign, admin, manager and non-teacher/student targets. Smoke sends email, avatarColor, archived status, and {name,email} as a manager and asserts 403 with nothing applied; vitest covers the same rows; the frontend also refuses locally through assertManagerKeepsEmail so the demo branch cannot drift."
+    },
+    {
+      "scenario": "A manager undoes an admin's archive (or edits the record of an archived member)",
+      "ruled_out": true,
+      "rationale": "Inside the transaction an archived target answers 403 for manager-team access before any update runs (users.ts:459); only an admin path may change an archived row. Smoke covers rename, pause and reactivate against an archived own-team member."
+    },
+    {
+      "scenario": "Ownership oracle: a manager probes ids to learn whether an id exists, belongs to another team, or is an admin",
+      "ruled_out": true,
+      "rationale": "The access matrix denies manager-team keys that are not allowed and the in-transaction ownership failure throws the same forbidden() with no message, so unknown id, foreign id, admin id and non-teacher/student id are indistinguishable (403, no body detail). The access decision runs before the row read, so there is no timing or existence signal."
+    },
+    {
+      "scenario": "TOCTOU: a profile or enrollment reassignment commits between the ownership read and the update, letting a manager edit a member who is no longer theirs",
+      "ruled_out": false,
+      "rationale": "Known gap (plan: manager-ownership-reassign-race_NOTE_26-11-26.md). The users row is locked with SELECT ... FOR UPDATE and the ownership read happens on that lock, which serializes user-row writers, but a profile/enrollment reassignment that commits after the in-transaction read is not blocked. Sub-second window; a real-concurrency proof is not attempted. Recorded as a residual, not counted as PASS."
+    },
+    {
+      "scenario": "A stale invitation stays usable after an admin changes the invited person's email",
+      "ruled_out": true,
+      "rationale": "issueInvite expires the older open invites inside the same transaction that writes the new address, so the old #set-password token is dead from the commit on. Smoke checks the old link fails and the new one works; e2e opens the old link in a fresh browser context and expects 'invalid or has expired'."
+    },
+    {
+      "scenario": "Mail bombing through repeated admin email changes (cooldown 0 on this path)",
+      "ruled_out": false,
+      "rationale": "Known gap (plan D8, gap-resolution D): the admin email-change path bypasses INVITE_RESEND_COOLDOWN_SECONDS on purpose so the new address gets its invitation immediately. Volume is bounded by admin-only access and the per-IP rate limit until per-sender-invite-limit_NOTE_25-11-26.md lands. Accepted for launch, recorded as a residual."
+    },
+    {
+      "scenario": "A partially applied edit: the account row updates but the profile PATCH fails, leaving the user without feedback",
+      "ruled_out": true,
+      "rationale": "The two calls are separate HTTP requests (known gap user-edit-two-call-atomicity_NOTE_26-11-26.md), but the frontend now rethrows through savedAccountOnly() so the user is told the account was saved and only the profile part failed. vitest covers the message."
+    },
+    {
+      "scenario": "A failed transaction still records activity (a rename reported for an edit that never committed)",
+      "ruled_out": true,
+      "rationale": "Every logActivity call runs on the same tx as the update, so a rollback discards them. Smoke asserts zero new activity rows for the rolled-back duplicate/race attempts and exactly one row for each successful action."
+    },
+    {
+      "scenario": "An email address leaks into the activity feed or a log line",
+      "ruled_out": true,
+      "rationale": "emailChangeSummary takes only the name and an outcome token; the smoke activity checks assert no summary contains '@', vitest covers the summary table, and the logging grep finds no console.* or logger call in users.ts, user-edit-policy.ts or activity.ts."
+    },
+    {
+      "scenario": "A manager reactivates a member an admin deliberately paused (escalation around the admin's decision)",
+      "ruled_out": false,
+      "rationale": "Known gap accepted by decision U2: pause/reactivate is symmetric for a manager on their own team, so a manager may undo an admin pause. Status changes are activity-logged with the actor. Recorded as a residual; changing it would need an admin-pause marker, which is out of scope here."
+    },
+    {
+      "scenario": "An access token issued before a pause or an admin email change keeps working",
+      "ruled_out": false,
+      "rationale": "Known gap (existing access-token-revocation_NOTE_24-11-26.md): only refresh tokens are revoked, so a stateless access JWT stays valid up to ACCESS_TOKEN_TTL (15 minutes). Documented in the plan's What This Coverage Does NOT Prove."
+    },
+    {
+      "scenario": "A never-activated account is forced to active or paused through the new manager path",
+      "ruled_out": true,
+      "rationale": "isUnusablePasswordHash(before.passwordHash) with body.status active or paused throws notActivated() (409) inside the transaction for every role, so an invited person must accept the invitation instead. Smoke asserts the invited rename/pause split (rename 200, pause 409)."
+    }
+  ]
+}

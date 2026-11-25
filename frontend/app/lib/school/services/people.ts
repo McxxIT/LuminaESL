@@ -3,24 +3,32 @@ import { isApiDataMode } from "../../auth/mode";
 import {
   assignTeacherToManager as assignTeacherToManagerApi,
   createStudent as createStudentApi,
+  createTeacher as createTeacherApi,
   createUser,
   enrollStudent as enrollStudentApi,
   recordCreditAdjustment,
   refreshSchoolAfterCommand,
+  resendInvite as resendInviteApi,
+  resetUserPassword,
   setUserStatus,
   updateUser,
   updateStudent as updateStudentApi,
   updateTeacher as updateTeacherApi,
+  type PersonEditResult,
 } from "../api/school";
 import { assertCan } from "../permissions";
 import { createId, get, list, patch, query, recordActivity, upsert } from "../repositories";
 import { managerIdForTeacher } from "../selectors";
-import { updateSchool } from "../store";
-import type { Guardian, SchoolData, SchoolRole, SchoolUser, UserStatus } from "../types";
+import { updateSchool, getSchoolSnapshot } from "../store";
+import type { InviteOutcome } from "../../api/types";
+import type { Guardian, SchoolData, SchoolRole, SchoolUser } from "../types";
 import { changeCredits, requireUser } from "./common";
-import { run, runAsync, ServiceError, type ServiceResult } from "./result";
+import { fail, run, runAsync, ServiceError, type ServiceResult } from "./result";
 
 /** People management: managers (admin only), teachers, students, enrollments, and credits. */
+
+/** A newly created person; in API mode they are `invited` and carry the invitation outcome. */
+export type CreatedPerson = SchoolUser & { invite?: InviteOutcome };
 
 const AVATAR_COLORS = ["indigo", "peach", "lavender", "mint"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -70,7 +78,7 @@ function manageActionFor(user: SchoolUser) {
 
 // Managers --------------------------------------------------------------------------------
 
-export function createManager(actorId: string, input: { name: string; email: string }): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+export function createManager(actorId: string, input: { name: string; email: string }): ServiceResult<CreatedPerson> | Promise<ServiceResult<CreatedPerson>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
       const user = await createUser({ name: cleanName(input.name), email: input.email.trim().toLowerCase(), role: "manager" });
@@ -83,6 +91,7 @@ export function createManager(actorId: string, input: { name: string; email: str
         status: user.status,
         avatarColor: user.avatarColor ?? AVATAR_COLORS[0],
         createdAt: user.createdAt ?? new Date().toISOString(),
+        invite: user.invite,
       };
     });
   }
@@ -108,20 +117,21 @@ export type TeacherInput = {
   managerId?: string | null;
 };
 
-export function createTeacher(actorId: string, input: TeacherInput): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+export function createTeacher(actorId: string, input: TeacherInput): ServiceResult<CreatedPerson> | Promise<ServiceResult<CreatedPerson>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      const user = await createUser({ name: cleanName(input.name), email: input.email.trim().toLowerCase(), role: "teacher", managerId: input.managerId });
-      await updateTeacherApi(user.id, input);
+      // Team assignment happens atomically in POST /users; only the profile is patched after.
+      const created = await createTeacherApi({ ...input, name: cleanName(input.name), email: input.email.trim().toLowerCase() });
       await refreshSchoolAfterCommand();
       return {
-        id: user.id,
+        id: created.userId,
         role: "teacher" as const,
-        name: user.name,
-        email: user.email,
-        status: user.status,
-        avatarColor: user.avatarColor ?? AVATAR_COLORS[0],
-        createdAt: user.createdAt ?? new Date().toISOString(),
+        name: cleanName(input.name),
+        email: input.email.trim().toLowerCase(),
+        status: "invited" as const,
+        avatarColor: AVATAR_COLORS[0],
+        createdAt: new Date().toISOString(),
+        invite: created.invite,
       };
     });
   }
@@ -145,11 +155,41 @@ export function createTeacher(actorId: string, input: TeacherInput): ServiceResu
   }));
 }
 
-export function updateTeacher(actorId: string, teacherId: string, input: Omit<TeacherInput, "managerId">): ServiceResult | Promise<ServiceResult> {
+/** Managers may rename a team member but never change the address (admin-only). */
+function assertManagerKeepsEmail(actor: SchoolUser, currentEmail: string, nextEmail: string) {
+  if (actor.role !== "manager") return;
+  if (nextEmail.trim().toLowerCase() !== currentEmail.toLowerCase()) {
+    throw new ServiceError("Only an admin can change an email address.");
+  }
+}
+
+/**
+ * API-mode counterpart of the local guard: the browser store holds the current
+ * users, so the address can be checked before the account patch. An unknown
+ * actor or target falls through to the server, which enforces the same rule.
+ */
+function assertManagerKeepsStoredEmail(actorId: string, userId: string, nextEmail: string) {
+  const snapshot = getSchoolSnapshot();
+  const actor = get(snapshot, "users", actorId);
+  if (!actor) return;
+  const target = get(snapshot, "users", userId);
+  if (!target) return;
+  assertManagerKeepsEmail(actor, target.email, nextEmail);
+}
+
+export function updateTeacher(actorId: string, teacherId: string, input: Omit<TeacherInput, "managerId">): ServiceResult<PersonEditResult> | Promise<ServiceResult<PersonEditResult>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      await updateTeacherApi(teacherId, input);
-      await refreshSchoolAfterCommand();
+      // The form submits the (disabled) email even for a manager; refuse a real change here
+      // so the API layer never silently drops it while the UI reports success.
+      assertManagerKeepsStoredEmail(actorId, teacherId, input.email);
+      try {
+        // The account PATCH carries the likely failures; the profile follows.
+        return await updateTeacherApi(teacherId, { ...input, name: cleanName(input.name) });
+      } finally {
+        // Show what was saved even when the second call failed.
+        await refreshSchoolAfterCommand().catch(() => undefined);
+      }
     });
   }
   return run(() => updateSchool((draft) => {
@@ -158,6 +198,7 @@ export function updateTeacher(actorId: string, teacherId: string, input: Omit<Te
     const teacher = get(draft, "users", teacherId);
     const profile = get(draft, "teacherProfiles", teacherId);
     if (!teacher || teacher.role !== "teacher" || !profile) throw new ServiceError("That teacher no longer exists.");
+    assertManagerKeepsEmail(actor, teacher.email, input.email);
     patch(draft, "users", teacherId, { name: cleanName(input.name), email: cleanEmail(draft, input.email, teacherId) });
     patch(draft, "teacherProfiles", teacherId, {
       headline: input.headline.trim() || profile.headline,
@@ -166,6 +207,7 @@ export function updateTeacher(actorId: string, teacherId: string, input: Omit<Te
       bio: input.bio !== undefined ? input.bio.trim() : profile.bio,
     });
     recordActivity(draft, { actorId, action: "teacher.updated", targetType: "user", targetId: teacherId, summary: input.name });
+    return {};
   }));
 }
 
@@ -205,13 +247,14 @@ export type StudentInput = {
   guardian?: Guardian | null;
 };
 
-export function createStudent(actorId: string, input: StudentInput & { teacherId?: string; courseId?: string; startingCredits?: number; managerId?: string | null }): ServiceResult<SchoolUser> | Promise<ServiceResult<SchoolUser>> {
+export function createStudent(actorId: string, input: StudentInput & { teacherId?: string; courseId?: string; startingCredits?: number; managerId?: string | null }): ServiceResult<CreatedPerson> | Promise<ServiceResult<CreatedPerson>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
       if (input.startingCredits && !Number.isInteger(input.startingCredits)) {
         throw new ServiceError("Starting credits must be a whole number in API mode.");
       }
-      const user = await createStudentApi(input);
+      const created = await createStudentApi(input);
+      const user = created.userId;
       if (input.teacherId && input.courseId) await enrollStudentApi(user, input.teacherId, input.courseId);
       if (input.startingCredits) await recordCreditAdjustment(user, input.startingCredits, "Starting credits");
       await refreshSchoolAfterCommand();
@@ -220,9 +263,10 @@ export function createStudent(actorId: string, input: StudentInput & { teacherId
         role: "student" as const,
         name: input.name.trim(),
         email: input.email.trim().toLowerCase(),
-        status: "active",
+        status: "invited" as const,
         avatarColor: AVATAR_COLORS[0],
         createdAt: new Date().toISOString(),
+        invite: created.invite,
       };
     });
   }
@@ -251,11 +295,16 @@ function cleanGuardian(guardian: Guardian | null | undefined): Guardian | undefi
   return { name: guardian.name.trim(), email, phone: guardian.phone?.trim() || undefined, relationship: guardian.relationship?.trim() || undefined };
 }
 
-export function updateStudent(actorId: string, studentId: string, input: StudentInput): ServiceResult | Promise<ServiceResult> {
+export function updateStudent(actorId: string, studentId: string, input: StudentInput): ServiceResult<PersonEditResult> | Promise<ServiceResult<PersonEditResult>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      await updateStudentApi(studentId, input);
-      await refreshSchoolAfterCommand();
+      // Same guard as the local branch: a manager may rename but not re-address.
+      assertManagerKeepsStoredEmail(actorId, studentId, input.email);
+      try {
+        return await updateStudentApi(studentId, { ...input, name: cleanName(input.name) });
+      } finally {
+        await refreshSchoolAfterCommand().catch(() => undefined);
+      }
     });
   }
   return run(() => updateSchool((draft) => {
@@ -263,9 +312,11 @@ export function updateStudent(actorId: string, studentId: string, input: Student
     assertCan(draft, actor, "student.manage", { studentId });
     const student = get(draft, "users", studentId);
     if (!student || student.role !== "student") throw new ServiceError("That student no longer exists.");
+    assertManagerKeepsEmail(actor, student.email, input.email);
     patch(draft, "users", studentId, { name: cleanName(input.name), email: cleanEmail(draft, input.email, studentId) });
     patch(draft, "studentProfiles", studentId, { level: input.level, targetLevel: input.targetLevel, goal: input.goal.trim(), guardian: cleanGuardian(input.guardian) });
     recordActivity(draft, { actorId, action: "student.updated", targetType: "user", targetId: studentId, summary: input.name });
+    return {};
   }));
 }
 
@@ -309,17 +360,17 @@ export function adjustCredits(actorId: string, studentId: string, hours: number,
   return run(() => updateSchool((draft) => {
     const actor = requireUser(draft, actorId);
     assertCan(draft, actor, "credits.adjust", { studentId });
-    if (!Number.isFinite(hours) || hours === 0) throw new ServiceError("Enter how many hours to add or remove.");
+    if (!Number.isFinite(hours) || hours === 0) throw new ServiceError("Enter how many credits to add or remove.");
     if (!reason.trim()) throw new ServiceError("Add a reason for the adjustment.");
     changeCredits(draft, { studentId, hours: Number(hours.toFixed(2)), reason: "adjustment", description: reason.trim(), actorId });
-    recordActivity(draft, { actorId, action: "credits.adjusted", targetType: "user", targetId: studentId, summary: `${hours > 0 ? "+" : ""}${hours} hrs: ${reason.trim()}` });
+    recordActivity(draft, { actorId, action: "credits.adjusted", targetType: "user", targetId: studentId, summary: `${hours > 0 ? "+" : ""}${hours} credits: ${reason.trim()}` });
   }));
 }
 
 // Any person ------------------------------------------------------------------------------
 
 /** Pause or reactivate a manager (admin), teacher, or student. Paused people cannot sign in or act. */
-export function setPersonStatus(actorId: string, userId: string, status: Exclude<UserStatus, "archived">): ServiceResult | Promise<ServiceResult> {
+export function setPersonStatus(actorId: string, userId: string, status: "active" | "paused"): ServiceResult | Promise<ServiceResult> {
   if (isApiDataMode()) {
     return runAsync(async () => {
       await setUserStatus(userId, status);
@@ -338,11 +389,40 @@ export function setPersonStatus(actorId: string, userId: string, status: Exclude
   }));
 }
 
-export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult | Promise<ServiceResult> {
+/**
+ * Send a fresh invitation to an `invited` person (API mode only). The previous
+ * link stops working. Demo mode has no invitations.
+ */
+export function resendInvite(actorId: string, userId: string): ServiceResult<InviteOutcome> | Promise<ServiceResult<InviteOutcome>> {
+  if (!isApiDataMode()) return fail("Invitations are not used in demo mode.");
+  return runAsync(async () => {
+    const invite = await resendInviteApi(userId);
+    await refreshSchoolAfterCommand();
+    return invite;
+  });
+}
+
+/**
+ * Admin reset of another account's password (API auth only). Demo/local accounts
+ * have no real passwords, so the local branch refuses; the UI hides the action there.
+ */
+export function resetPersonPassword(actorId: string, userId: string, newPassword: string): ServiceResult | Promise<ServiceResult> {
+  if (!isApiDataMode()) return fail("Passwords can only be reset when Lumina is connected to the school server.");
+  if (actorId === userId) return fail("You cannot reset your own password. Change it from Settings instead.");
+  return runAsync(async () => {
+    await resetUserPassword(userId, newPassword);
+  });
+}
+
+export function updateManager(actorId: string, managerId: string, input: { name: string; email: string }): ServiceResult<PersonEditResult> | Promise<ServiceResult<PersonEditResult>> {
   if (isApiDataMode()) {
     return runAsync(async () => {
-      await updateUser(managerId, { name: cleanName(input.name), email: input.email });
-      await refreshSchoolAfterCommand();
+      try {
+        // Admin-only path: an invited manager's email change re-invites.
+        return await updateUser(managerId, { name: cleanName(input.name), email: input.email });
+      } finally {
+        await refreshSchoolAfterCommand().catch(() => undefined);
+      }
     });
   }
   return run(() => updateSchool((draft) => {
@@ -350,5 +430,6 @@ export function updateManager(actorId: string, managerId: string, input: { name:
     assertCan(draft, actor, "manager.manage");
     if (get(draft, "users", managerId)?.role !== "manager") throw new ServiceError("That manager no longer exists.");
     patch(draft, "users", managerId, { name: cleanName(input.name), email: cleanEmail(draft, input.email, managerId) });
+    return {};
   }));
 }

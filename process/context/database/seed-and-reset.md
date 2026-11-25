@@ -14,6 +14,7 @@ BLUF: `npm run db:seed` upserts demo data; `npm run db:reset` TRUNCATES every ta
 
 - Uses `loadEnv()` + a one-connection `postgres` client; hashes with `lib/password.ts` (scrypt).
 - Demo password constant `DEMO_PASSWORD = "Password123!"` for all seeded accounts (admin@, manager@, manager2@, teacher@, student@ at `@lumina.school`).
+- Production guard (account-invites fix): `backend/src/db/seed-guard.ts` `assertSeedAllowed(NODE_ENV)` runs first and refuses `NODE_ENV=production`; the seed's password is dev-only and must never reach a production database. Consequence: production has no first-admin path yet (backlog `production-first-admin-bootstrap_NOTE_25-11-26.md`, a Phase 06 prerequisite). The guard checks only `NODE_ENV === "production"`.
 - Seeds users, profiles, courses/units/lesson plans, enrollments, lessons, slots, ratings, assignments, credits, and the singleton `settings` row. Dates are relative to today (`isoDate(offset)`).
 
 ## Reset (`backend/src/db/reset.ts`)
@@ -21,6 +22,7 @@ BLUF: `npm run db:seed` upserts demo data; `npm run db:reset` TRUNCATES every ta
 - Command chain: `tsx src/db/reset.ts && drizzle-kit migrate && tsx src/db/seed.ts`.
 - Truncates (`RESTART IDENTITY CASCADE`): activity, credit_entries, assignments, ratings, absences, requests, slot_openings, lessons, enrollments, attachments, lesson_plans, course_units, courses, student_profiles, teacher_profiles, refresh_tokens, users, settings.
 - Refuses when `NODE_ENV=production`. Prints the DB URL with credentials masked.
+- `auth_tokens` is not in `TABLES`; it is emptied through the `users` cascade (FK on delete cascade).
 - Note: a new table must be added to the `TABLES` list in `reset.ts` or reset will leave stale rows.
 
 The frontend has a separate "Reset demo workspace" action that only reseeds the browser store (local mode); it does not touch Postgres.

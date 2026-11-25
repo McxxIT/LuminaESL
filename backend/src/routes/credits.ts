@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { creditEntries, users } from "../db/schema";
 import { logActivity } from "../lib/activity";
-import { getCreditBalance } from "../lib/credits";
+import { getCreditBalance, lockStudentCredits } from "../lib/credits";
 import { badRequest, forbidden } from "../lib/errors";
 import { parsePagination } from "../lib/pagination";
 import { managerOwnsStudent, managerTeam, teacherStudentIds } from "../lib/scope";
@@ -117,7 +117,7 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
 
   app.post(
     "/",
-    { preHandler: app.requireRole(["admin", "manager", "student"]) },
+    { preHandler: app.requireRole(["admin", "manager"]) },
     async (request, reply) => {
       const body = createCreditSchema.parse(request.body);
 
@@ -129,9 +129,6 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
       if (!student || student.role !== "student") {
         throw badRequest("studentId must belong to a student");
       }
-      if (request.user.role === "student" && (body.studentId !== request.user.sub || body.reason !== "purchase")) {
-        throw forbidden("Students may only purchase credits for their own account");
-      }
       if (
         request.user.role === "manager" &&
         !(await managerOwnsStudent(app.db, request.user.sub, body.studentId))
@@ -140,6 +137,7 @@ export const creditRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const entry = await app.db.transaction(async (tx) => {
+        await lockStudentCredits(tx, body.studentId);
         const [row] = await tx
           .insert(creditEntries)
           .values({

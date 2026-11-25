@@ -10,15 +10,18 @@ import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import type { Env } from "./config/env";
 import { corsOrigins } from "./config/env";
 import { AppError } from "./lib/errors";
+import { createMailer, type Mailer } from "./lib/mailer";
 import authPlugin from "./plugins/auth";
 import dbPlugin from "./plugins/db";
 import { apiRoutes } from "./routes";
 
 export type BuildAppOptions = {
   env: Env;
+  /** Injected mail transport (tests, smoke); defaults to `createMailer(env)`. */
+  mailer?: Mailer;
 };
 
-export async function buildApp({ env }: BuildAppOptions) {
+export async function buildApp({ env, mailer }: BuildAppOptions) {
   const logger =
     env.NODE_ENV === "test"
       ? false
@@ -35,6 +38,7 @@ export async function buildApp({ env }: BuildAppOptions) {
   const app = Fastify({ logger, trustProxy: true });
 
   app.decorate("config", env);
+  app.decorate("mailer", mailer ?? createMailer(env, app.log));
 
   app.setErrorHandler(
     (error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {

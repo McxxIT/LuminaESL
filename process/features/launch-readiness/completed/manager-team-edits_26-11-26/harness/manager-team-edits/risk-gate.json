@@ -1,0 +1,17 @@
+{
+  "task": "manager-team-edits — managers rename and pause/reactivate own-team teachers/students; admin email change signs out an active user or re-invites an invited one; PATCH /users/:id becomes one transaction",
+  "planPath": "process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": [
+    "auth or identity",
+    "permission, secret, or trust-boundary logic",
+    "public API or external contract changes",
+    "session handling"
+  ],
+  "riskClass": "permission, secret, or trust-boundary logic",
+  "workDescription": "PATCH /users/:id rewritten as a single db.transaction (row lock, in-tx ownership read, archived guard, UNIQUE catch, invite/session/activity on the same tx, mail only after commit). New pure policy module user-edit-policy.ts owns the access matrix, the effects table, and the activity summary. Managers gain name + pause/reactivate on own-team teachers/students; email, avatarColor, archive and other teams stay admin-only. An admin email change revokes refresh tokens on an active person or re-issues the invitation (cooldown 0) on an invited one. Frontend: updateUser/updateTeacher/updateStudent/updateManager return { invite? }, the three form modals lock the Email field with an admin-only note or show the invited note, and all three callers open InviteResultModal on an invite. No schema, route, env or dependency change.",
+  "approver": "pending — reviewer (vc-code-reviewer) and the user record the decision in review-decision.json",
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Changes who may mutate another person's identity record and status, changes when sessions end and when invitation mail is issued, and touches the only route that can change an email address. A defect could let a manager take over an account email, resurrect an admin-archived member, or leave a stale invitation valid after an address change. No schema change; no migration; no new dependency."
+}

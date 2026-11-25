@@ -20,6 +20,10 @@ import {
   teacherProfiles,
   users,
 } from "./schema";
+import { assertSeedAllowed } from "./seed-guard";
+
+// Refuse production before reading env or touching the database.
+assertSeedAllowed(process.env.NODE_ENV);
 
 const env = loadEnv();
 const client = postgres(env.DATABASE_URL, { max: 1, onnotice: () => undefined });

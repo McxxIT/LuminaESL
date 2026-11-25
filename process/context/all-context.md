@@ -9,7 +9,7 @@ date: 18-11-26
 ---
 # lumina-esl - All Context
 
-Last updated: 2026-11-18
+Last updated: 2026-11-25
 
 **Lumina ESL is a real ESL (English as a second language) school management platform** for institution admins, managers, teachers, and students (parents act through the student account; they are not a login role). Lessons are **1:1 and 25 minutes**; each student is enrolled with one teacher in a curriculum course, and each booked lesson consumes the next lesson plan. No group classes. Billing is **credit-based**. Staff is two-level: admin creates managers and assigns teachers; each manager sees only their own teachers, students, and approvals; admin sees everything. Virtual classrooms use flexible meeting links (ClassIn / Zoom / Google Meet, no paid SDKs) stored in `lessons.roomCode`.
 
@@ -123,7 +123,8 @@ For most substantial tasks:
 | Folder | Scope |
 |---|---|
 | `process/features/backend-cutover/` | Frontend local-store to backend API cutover (Steps A-D, B3 domain slices) |
-| `process/features/curriculum/` | Courses, units, lesson plans, attachments; planned (not built) Curriculum Library |
+| `process/features/curriculum/` | Courses, units, lesson plans, attachments; the Curriculum Library (built in launch-readiness Phase 04) is documented in the database, auth, and uxui groups |
+| `process/features/launch-readiness/` | 6-phase v1 finish program (Phases 01-04 done): dev DB 0004 alignment, upload scoping & staff credits, auth hardening, Curriculum Library; remaining polish/Vitest, CI & Docker Compose |
 | `process/features/lessons-scheduling/` | Bookings, slot openings, lessons, ratings, room codes, homework/assignments, notifications |
 | `process/features/people-billing/` | Users/roles, managers, approvals/requests, enrollments, profiles, credits/billing |
 
@@ -196,7 +197,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
       plugins/                -- db.ts, auth.ts
       routes/                 -- auth users students teachers courses enrollments lessons
                                  bookings requests assignments credits notifications
-                                 uploads settings school
+                                 uploads settings school library
       lib/                    -- errors, roles, scope, time, password, pagination, activity
       db/                     -- schema.ts, migrations/, seed.ts, reset.ts
     tests/                    -- app / contract / password vitest files
@@ -217,10 +218,10 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 | DB | PostgreSQL 15+ (local), drizzle-orm 0.38, drizzle-kit 0.30, `postgres` 3.4 driver |
 | Validation | zod 3.24 (env, request bodies/query/params) |
 | Runtime | `tsx` runs backend TS directly (no emitted build; backend "build" = typecheck) |
-| Tests | vitest 3 (backend, `backend/tests`, 30 tests); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 15 API-mode tests + 3 demo regression tests, run by `npm run e2e`) |
+| Tests | vitest 3 (backend, `backend/tests`, 98 tests in 12 files; frontend, `frontend/tests`, 62 tests in 11 files, node env, drives the real local services on a memory store); Playwright 1.65 `@playwright/test` (browser parity suite in `frontend/e2e`: 30 API-mode tests + 5 demo regression tests, run by `npm run e2e`) |
 | TS config | Backend: strict, noUncheckedIndexedAccess, verbatimModuleSyntax, noImplicitOverride, ES2022. Frontend: strict, bundler resolution |
 | State (frontend) | `useState` + external store (`useSyncExternalStore`) + per-role hooks; no Redux/Zustand |
-| Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. |
+| Hosting | None yet; local Windows dev. Vercel / VPS planned. No CI. First outside service: an SMTP server for invite emails (nodemailer; real SMTP delivery verified 26-11-26). |
 
 ## Key Patterns and Conventions
 
@@ -228,9 +229,9 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Backend errors:** throw `AppError(statusCode, code, message, details)` via helpers `badRequest/unauthorized/forbidden/notFound/conflict(409)/unprocessable(422)`. Response shape `{error:{code,message,details?}}`; ZodError -> 400 `VALIDATION_ERROR`; 500 `INTERNAL_ERROR` (message hidden in production).
 
-**Manager scoping:** `backend/src/lib/scope.ts` (`managerOwnsStudent`, `managerOwnsTeacher`, `managerTeam`). A manager's team = `managerId` on teacher/student profiles. Every manager-reachable route must apply it.
+**Manager scoping:** `backend/src/lib/scope.ts` (`managerOwnsStudent`, `managerOwnsTeacher`, `managerTeam`, `canAccessAttachment`/`assertCanAccessAttachment`). A manager's team = `managerId` on teacher/student profiles. Every manager-reachable route must apply it.
 
-**Backend bootstrap:** `GET /api/v1/school/bootstrap` returns the role-scoped dataset the frontend store hydrates from.
+**Backend bootstrap:** `GET /api/v1/school/bootstrap` returns the role-scoped dataset the frontend store hydrates from (18 collection keys since the Curriculum Library added `libraryItems` and `lessonLibraryItems`).
 
 **Frontend ServiceResult:** every service in `frontend/app/lib/school/services/` returns `ServiceResult<T> = {ok:true,value}|{ok:false,error}` (`ok()` / `fail()`; `run()` sync, `runAsync()` async convert ServiceError/PermissionError/ApiError).
 
@@ -256,18 +257,34 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 - (Resolved in B3: the balance is now the numeric `getCreditBalance`; postgres `numeric` is parsed to a JS number in `plugins/db.ts`.)
 - Backend `POST /lessons` (teacher/manager/admin schedules a lesson) now debits 1 credit like the demo add-lesson paths, and a cancellation refunds only a lesson that was actually debited (Nov 20, 2026). Plan selection is row-locked with `.for("update")` in `resolveLessonDefaults`, so concurrent bookings cannot claim the same plan. Backlog: `process/features/backend-cutover/backlog/booking-rules-followups_NOTE_18-11-26.md`.
-- A student can self-purchase up to 100 credits with no payment check.
-- Balance read and debit are not row-locked; concurrent bookings by one student could both pass.
-- No unique constraint on `lessons` (teacher, date, time); only the `slot_openings` row claim (`DELETE ... RETURNING`) prevents double-booking.
-- Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson is not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
+- Resolved Nov 23, 2026 (Phase 02): credits are staff-managed in API mode. `POST /credits` is
+  `requireRole(["admin", "manager"])`, so a student self-purchase returns `403`; the API-mode
+  `StudentBilling` screen hides "Buy credits", the purchase modal, and the demo VISA/auto-renew card.
+  Demo mode keeps local credit packages. Gate: `npm run smoke` (`credits` domain) +
+  `frontend/e2e/api/uploads.spec.ts`.
+- Resolved Nov 20, 2026: credit balance reads and debits are serialized per student by a
+  transaction-scoped advisory lock (`lockStudentCredits` in `backend/src/lib/credits.ts`), taken first by
+  all seven credit-mutating paths. Student cancel and teacher absence decide refunds inside the same
+  transaction (`WHERE status = 'scheduled'`, `absences.lesson_id` unique, migration `0003`), so concurrent
+  requests cannot double-refund or double-record. Gate: `frontend/e2e/api/credit-concurrency.spec.ts`.
+- Active lesson slots are guarded by the partial unique index `lessons_active_teacher_date_time_uidx`
+  (migration `0004`) on `(teacher_id, date, time)` where `status in ('scheduled','live')`; every writer maps
+  that violation to `409 CONFLICT`. Dev `lumina` was aligned on Nov 23, 2026 (user-approved cancellation of
+  13 test-residue duplicate rows after a `pg_dump` backup, followed by `npm run db:migrate`), so `smoke` and
+  `e2e` run directly against default `backend/.env` with 0 active duplicate groups.
+- Refund paths: student cancel refunds only a lesson with a `booking` debit row when hours-until >= `studentLateCancellationHours`; teacher absence refunds only if `refundTeacherCancellations` and the lesson was not already cancelled. Local-mode mirror uses `LESSON_CREDIT_HOURS` (1 credit per lesson; `SCHOOL_SCHEMA_VERSION` is 3 on both sides).
 
 **Other gotchas:**
+
+- Auth lifecycle (Phase 03, Nov 24, 2026): the password policy is 10-128 characters (length only); a wrong current password on `POST /auth/change-password` is `400 INVALID_CURRENT_PASSWORD`, never 401; admin reset is admin-only with no self-reset; password change/reset/pause/archive revoke refresh tokens but an issued access token lives up to 15 minutes. Known open items (all in `process/features/launch-readiness/backlog/`): `trustProxy` is unconditional, and admin-on-admin reset has no step-up. See `auth/jwt-cookie-flow.md`. Account creation (Nov 25-26, 2026): admin- and manager-created accounts are `invited` (migration `0007`) and set their own password through an emailed single-use 72 h link; no shared default password remains. Only admins ever see a copyable link; managers create and invite teachers and students on their own team only. See `auth/jwt-cookie-flow.md`.
+
+- Team-member edits (manager-team-edits fix, Nov 26, 2026): `PATCH /users/:id` is one transaction with the target row locked (`lockUserForInvite` then `managerOwnsInTx`) and a pure policy module (`backend/src/lib/user-edit-policy.ts`, `userPatchAccess` / `planUserPatchEffects`). Admin keeps full control; self keeps today's rules; a manager may change ONLY the name of a teacher/student on their own team and pause/reactivate them — email, avatar colour, role, team and archive stay admin-only, denied with 403 before any database read, and an archived member can never be mutated by a manager. Unknown ids and foreign ids answer the same 403 body (no oracle). An admin email change on an ACTIVE person revokes refresh tokens in the same transaction; on an INVITED person it expires the old invite and mails a new one (cooldown 0); an unchanged email is a no-op; duplicates are 409 even under a race. Activity `user.email_changed` never contains an address. Frontend: both branches refuse a manager email change (API branch reads `getSchoolSnapshot()`), and a two-call edit whose profile PATCH fails returns `{ invite?, warning? }` so the invite modal still opens. See `auth/roles-and-scope.md`, `auth/jwt-cookie-flow.md`, `uxui/school-data-layer.md`. Known gap: an issued access token lives up to 15 minutes (a paused manager keeps team-write authority that long).
 
 - `frontend/AGENTS.md` is auto-managed by `next dev` - do not edit or remove. Next 16 differs from training data; read `node_modules/next/dist/docs/` before writing Next code.
 - `npm run db:reset` TRUNCATES all tables (refuses production). Destructive; never use it as a verification gate.
 - Meeting links live in `lessons.roomCode` (max 40 chars), NOT `meeting_url`.
 - Parents are not a login role: guardian fields on `student_profiles`; parent ratings go through the student account (`ratingSource: "parent"`).
-- Curriculum Library (admin uploads, teacher attaches to bookings, student/parent views) is planned, not built. Only lesson-plan attachments and the uploads route exist. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`.
+- Curriculum Library (built Nov 24, 2026, Phase 04): one global school-wide library (`library_items`, `lesson_library_items`, migrations `0005`/`0006`) curated by admin and managers (edit/archive by creator or admin, archive-only); only admin and managers attach materials to lessons (managers on their team's lessons); teachers and students/parents see and download materials on their own non-cancelled lessons, including completed ones. Plan-attach (`POST` on a lesson plan) now takes only `{ attachmentId }` of an existing upload; downloads are contained to `UPLOAD_DIR` by `backend/src/lib/upload-path.ts`. Demo seed has an empty library and the import excludes library data. API mode stores bytes under `UPLOAD_DIR` with metadata in `attachments` (5 MB cap; pdf, images, Word, PowerPoint); demo keeps IndexedDB/localStorage behind `attachment-download.ts`. Since Nov 23, 2026, `GET /uploads/:id{,/download}` re-derives per-record scope with `canAccessAttachment` (admin, uploader pre-attach, plan/course visibility, or request evidence); unreferenced uploads by another user return `403`.
 - The bell is the activity feed merged with the role derivation (deduped by target, cap 30). Read ids and muted categories are per user in `notification_state` via `GET`/`PATCH /notifications/state`; demo mode still uses localStorage. Notification ids are stored server-side, so keep them short.
 - Storage keys are split by mode: `lumina-school:v1` is local/demo only, `lumina-school:api-cache` is API mode's offline cache (`API_CACHE_KEY` in `frontend/app/lib/school/store.ts`), and API mode never writes `v1`. `hydrateSchool()` routes API saves to the cache key; writing the bootstrap over `v1` is what used to destroy local-only data before it could be imported.
 - One-time import (D2): `POST /school/import` + `POST /school/import/preview`, admin only, `backend/src/lib/school-import.ts` (zod payload, pure `buildImportPlan`, `applyImportPlan`, one transaction). The browser captures `lumina-school:v1` into `lumina-school:pending-import` before the first bootstrap (`frontend/app/lib/school/import/capture.ts`), archives it to `lumina-school:imported:<seededAt>` after a run, and uploads attachment bytes through `POST /uploads` before the import (preview uploads nothing). Idempotency is one `activity` row `school.imported` / `targetId: source.seededAt`; a repeat is 409 unless `options.force`. Profiles are keyed by their user in the browser store, so profile ids are receipted but kept out of the flat `idMap`.
@@ -281,7 +298,7 @@ esl/                          -- npm workspaces monorepo "lumina-esl"
 
 **Env var names (never values):**
 
-- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs)
+- Backend: `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`, `DATABASE_URL` (required), `JWT_SECRET` (min 32 chars), `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `CORS_ORIGIN` (comma list), `UPLOAD_DIR`, `RATE_LIMIT_MAX` (optional, default 300; raise only for smoke/load runs), `AUTH_RATE_LIMIT_MAX` (optional, default 30 per minute for login/refresh/change-password; smoke and Playwright set 100000; no production cap yet). In production `CORS_ORIGIN` must be an explicit http(s) list (empty, `*`, or non-http(s) fails startup). Mail and invite keys (names only): `MAIL_MAILER` (`smtp`|`log`|`array`), `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION` (`ssl`|`tls`), `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `APP_URL` (invite link base, never taken from request headers), `INVITE_RESEND_COOLDOWN_SECONDS` (default 30). Production refuses to start unless `MAIL_MAILER=smtp` with host, from address, and `APP_URL` set; with no mail config non-production falls back to log; `smtp` is refused under `NODE_ENV=test`
 - Frontend: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE`, `NEXT_PUBLIC_DATA_SOURCE`
 
 **Mode flag semantics (`frontend/app/lib/auth/mode.ts`):**
@@ -311,7 +328,7 @@ These stay in place and remain the source of truth for cutover status.
 
 - Solo developer. Agents commit directly on the `developing` branch (`main` is the later merge target). This overrides the harness default of branching first; see `CLAUDE.md` and `process/development-protocols/implementation-standards.md`.
 - Local Windows dev only: local PostgreSQL 15+, Next.js, Node backend. No CI/CD, no external services beyond Postgres. Vercel/VPS deploy planned later.
-- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (13 domains, 353 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 15 API tests on :3000 + backend :4000, then 3 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
+- Fully-automated gates: `npm run typecheck`, `npm run lint`, `npm run test --workspace @lumina/backend`, `npm run test --workspace @lumina/frontend`, `git diff --check`. Hybrid (needs Postgres + backend env file): `npm run db:migrate`, `npm run smoke` (17 domains, 835 checks; temp backend on 127.0.0.1:4100, local DB only, never resets), `npm run e2e` (Playwright parity suite: 30 API tests on :3000 + backend :4000, then 5 demo tests on :3100; ports 3000/3100/4000 must be free; see `tests/all-tests.md`).
 
 ## Validator Registry
 
@@ -340,8 +357,18 @@ Key files: `backend/src/app.ts`, `backend/src/db/schema.ts`, `backend/src/routes
 
 - Cutover D1 (parity suite), D2 (one-time import) and D3 (demo-data removal, archived in `process/features/backend-cutover/completed/d3-fallback-removal_19-11-26/`) are done. D3 removed demo *leakage* rather than the store: `upgrade()` no longer seeds an API cache, `resetSchool()` is inert in API mode, the reset controls are hidden, and `lumina-account` is written only in demo mode. `NEXT_PUBLIC_DATA_SOURCE=local` stays as the documented rollback flag for one release.
 - No CI: the parity suite and `npm run smoke` are local-only; deferred wiring lives in `process/features/backend-cutover/backlog/`.
-- Booking concurrency/precision risks above are unresolved.
-- Curriculum Library not built; no frontend unit or component tests; no CI.
+- Booking credit races are closed (per-student advisory lock, Nov 20, 2026) and active-slot uniqueness
+  (`lessons_active_teacher_date_time_uidx`, migration `0004`) plus debit-only refunds (`isLessonCharged`)
+  are applied and verified on default dev `lumina` (Nov 23, 2026). Active launch-readiness program:
+  `process/features/launch-readiness/active/lumina-v1-finish_23-11-26/` (Phases 01–05 done; Phase 06 covers
+  CI & Docker, preceded by three account-invites follow-ups). Phase 05 (Nov 25, 2026) made rebook accept any
+  non-live lesson with a fresh room code and the next plan, relabelled hours to credits in the UI, fixed 390px
+  material-chip overflow, and added the frontend Vitest runner. Phase 04 (Nov 24, 2026) built the Curriculum Library and closed a pre-existing
+  plan-attach path-traversal file read. Phase 03 (Nov 24, 2026) added password change and admin
+  reset, refresh-token revocation and pruning, named auth rate limits, and the production CORS guard. Open
+  auth gaps live in `process/features/launch-readiness/backlog/`.
+- Account-invites fix (Nov 25-26, 2026, commit 1940ea6): shared default password replaced by emailed single-use set-password links (`invited` status, `auth_tokens`, SMTP mailer); independent EVL green, review approved-with-concerns; real SMTP delivery verified on 26-11-26 (Step F passed, user-confirmed, AC-19 met); archived in `process/features/launch-readiness/completed/account-invites_25-11-26/`. Manager team edits (Nov 26, 2026): managers now rename and pause/reactivate own-team teachers/students through `PATCH /users/:id` (email/archive stay admin-only), the route is one transaction, and admin email changes sign out an active person or re-invite an invited one; review N1/N2 fixed and committed (`68c9c30`, `fe0cc49`, `5ee5f9f`); archived in `process/features/launch-readiness/completed/manager-team-edits_26-11-26/`. Next: two account-invites follow-ups before Phase 06 (public self-register decision, per-sender invite limit), then Phase 06; production prerequisites: mail keys, no `db:seed`, first-admin bootstrap (backlog `production-first-admin-bootstrap_NOTE_25-11-26.md`).
+- Frontend unit tests exist (Vitest, 14 files / 87 tests; only the `createLibraryItem` happy path is uncovered, backlog `frontend-library-create-item-unit-test_NOTE_25-11-26.md`); no CI (Phase 06). Library follow-ups (legacy `storage_key` audit, upload write-path hardening, `POST /requests` attachment ownership, orphaned uploads) are in `process/features/launch-readiness/backlog/`.
 
 ## Scan Metadata
 

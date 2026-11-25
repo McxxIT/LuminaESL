@@ -62,7 +62,7 @@ function forManager(data: SchoolData, user: SchoolUser): SchoolNotification[] {
   });
   studentsForUser(data, user).filter((student) => student.status === "active").forEach((student) => {
     const balance = creditBalance(data, student.id);
-    if (balance < LOW_CREDIT_HOURS) items.push({ id: `credits-${student.id}-${balance.toFixed(2)}`, category: "credits", icon: "wallet", title: "Low credits", detail: `${student.name} has ${balance.toFixed(1)} hours left`, nav: "Students", at: new Date().toISOString() });
+    if (balance < LOW_CREDIT_HOURS) items.push({ id: `credits-${student.id}-${balance.toFixed(2)}`, category: "credits", icon: "wallet", title: "Low credits", detail: `${student.name} has ${balance.toFixed(1)} credits left`, nav: "Students", at: new Date().toISOString() });
   });
   const weekEnd = isoDaysFromNow(7);
   const missing = lessonsForUser(data, user).filter((lesson) => lesson.status === "scheduled" && lesson.date >= isoDaysFromNow(0) && lesson.date <= weekEnd && !lessonPlanForLesson(data, lesson));
@@ -118,7 +118,7 @@ function forStudent(data: SchoolData, user: SchoolUser): SchoolNotification[] {
     if (assignment.status === "reviewed" && (assignment.reviewedAt ?? "") >= since(7)) items.push({ id: `hw-reviewed-${assignment.id}`, category: "homework", icon: "check", title: "Homework reviewed", detail: `${assignment.title}${assignment.grade ? ` · ${assignment.grade}` : ""}`, nav: "Assignments", at: assignment.reviewedAt! });
   });
   const balance = creditBalance(data, user.id);
-  if (balance < LOW_CREDIT_HOURS) items.push({ id: `credits-${balance.toFixed(2)}`, category: "credits", icon: "wallet", title: "Low credits", detail: `${balance.toFixed(1)} hours left. Top up to keep booking.`, nav: "Billing", at: new Date().toISOString() });
+  if (balance < LOW_CREDIT_HOURS) items.push({ id: `credits-${balance.toFixed(2)}`, category: "credits", icon: "wallet", title: "Low credits", detail: `${balance.toFixed(1)} credits left. Top up to keep booking.`, nav: "Billing", at: new Date().toISOString() });
   return items;
 }
 
@@ -148,9 +148,14 @@ const ACTION_TITLES: Record<string, string> = {
   "homework.assigned": "Homework assigned",
   "homework.reviewed": "Homework reviewed",
   "homework.submitted": "Homework submitted",
+  "library.archived": "Library item archived",
+  "library.created": "Library item added",
+  "library.updated": "Library item updated",
   "lesson.booked": "New booking",
   "lesson.cancelledByStudent": "Lesson cancelled",
   "lesson.completed": "Lesson completed",
+  "lesson.libraryAttached": "Material attached",
+  "lesson.libraryDetached": "Material removed",
   "lesson.planChanged": "Lesson plan changed",
   "lesson.rated": "New rating",
   "lesson.rescheduled": "Lesson rescheduled",
@@ -170,6 +175,8 @@ const ACTION_TITLES: Record<string, string> = {
   "teacher.updated": "Teacher updated",
   "user.archived": "Account archived",
   "user.created": "Account created",
+  "user.password_changed": "Password changed",
+  "user.password_reset": "Password reset",
   "user.inactive": "Account paused",
   "user.paused": "Account paused",
   "user.renamed": "Name updated",
@@ -216,6 +223,8 @@ function navFor(action: string, role: UserRole): string {
   if (family === "credits") return role === "student" ? "Billing" : "Students";
   if (family === "rating") return role === "teacher" ? "Analytics" : "Performance";
   if (family === "course" || family === "enrollment") return role === "student" ? "Progress" : "Curriculum";
+  // The Library is a sub-tab of Curriculum for staff; teachers and students see materials on lessons.
+  if (family === "library") return role === "admin" || role === "manager" ? "Curriculum" : "Lessons";
   if (family === "settings") return role === "admin" ? "School settings" : "Settings";
   if (family === "manager") return "Managers";
   if (family === "teacher") return role === "admin" || role === "manager" ? "Teachers" : "Students";

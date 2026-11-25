@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { isUnusablePasswordHash } from "../src/lib/password";
+import * as schoolImport from "../src/lib/school-import";
 import {
   avatarColor,
   buildImportPlan,
@@ -91,7 +93,6 @@ const existing: ExistingSchool = {
 function plan(input: ImportPayload, dryRun = false) {
   return buildImportPlan(input, existing, {
     actorId: "99999999-9999-4999-8999-999999999999",
-    defaultPasswordHash: "hash",
     dryRun,
   });
 }
@@ -204,7 +205,35 @@ describe("buildImportPlan", () => {
     expect(result.rows.users[0]?.email, "emails are stored lower-case").toBe(
       "imported-student@lumina.school",
     );
-    expect(result.rows.users[0]?.passwordHash).toBe("hash");
+    expect(isUnusablePasswordHash(result.rows.users[0]?.passwordHash ?? "")).toBe(true);
+  });
+
+  it("should create imported users invited with an unusable hash and no default password option", () => {
+    const paused = { ...student, id: "local-paused", email: "paused@import.test", status: "paused" };
+    const other = { ...student, id: "local-other", email: "other@import.test" };
+    const result = plan(
+      payload({
+        users: {
+          "local-teacher": teacher,
+          "local-student": student,
+          "local-paused": paused,
+          "local-other": other,
+        },
+      }),
+    );
+    // The adopted teacher is untouched (no row); every new user is invited.
+    expect(result.counts.users.adopted).toBe(1);
+    expect(result.rows.users).toHaveLength(3);
+    const hashes = result.rows.users.map((row) => row.passwordHash);
+    for (const row of result.rows.users) {
+      expect(row.status).toBe("invited");
+      expect(isUnusablePasswordHash(row.passwordHash)).toBe(true);
+    }
+    expect(new Set(hashes).size, "each user gets a fresh unusable hash").toBe(3);
+    const resets = result.warnings.filter((warning) => warning.code === "status-reset");
+    expect(resets).toHaveLength(1);
+    expect(resets[0]?.message).toContain("1 imported account");
+    expect(Object.keys(schoolImport)).not.toContain("DEFAULT_IMPORT_PASSWORD");
   });
 
   it("adopts the existing teacher profile for an adopted teacher", () => {
@@ -454,7 +483,7 @@ describe("buildImportPlan", () => {
         uploads: { "local-attachment": uploadedId },
       }),
       { ...EMPTY_EXISTING, attachmentIds: new Set([uploadedId]) },
-      { actorId: "99999999-9999-4999-8999-999999999999", defaultPasswordHash: "hash", dryRun: false },
+      { actorId: "99999999-9999-4999-8999-999999999999", dryRun: false },
     );
 
     expect(result.counts.attachments.adopted).toBe(1);

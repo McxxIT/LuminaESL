@@ -13,19 +13,23 @@
  * SIGINT; smoke users are archived at the end. Fixture rows are left behind.
  */
 import "dotenv/config";
-import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq, like } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app";
 import { loadEnv } from "../src/config/env";
 import * as schema from "../src/db/schema";
-import { settings, users } from "../src/db/schema";
-import { hashPassword } from "../src/lib/password";
+import { attachments, authTokens, creditEntries, lessonPlans, lessons, libraryItems, refreshTokens, settings, users } from "../src/db/schema";
+import { createArrayMailer } from "../src/lib/mailer";
+import { hashPassword, unusablePasswordHash } from "../src/lib/password";
+import { hashToken } from "../src/lib/tokens";
+import { insertAccount } from "../src/routes/users";
+import { addMinutes, LESSON_MINUTES } from "../src/lib/time";
 
 // ---------------------------------------------------------------- guards
 
@@ -63,8 +67,14 @@ const env = loadEnv({
   PORT: String(port),
   LOG_LEVEL: "error",
   RATE_LIMIT_MAX: "100000",
+  AUTH_RATE_LIMIT_MAX: "100000",
   UPLOAD_DIR: uploadDir,
+  // Mail never leaves the process: in-memory outbox, short resend cooldown.
+  MAIL_MAILER: "array",
+  INVITE_RESEND_COOLDOWN_SECONDS: "2",
 });
+// The array mailer is injected into buildApp; createMailer would also refuse smtp under test.
+const mailer = createArrayMailer();
 
 const runId = `${Date.now().toString(36)}${randomBytes(2).toString("hex")}`;
 const password = randomBytes(18).toString("base64url");
@@ -107,6 +117,21 @@ async function cleanup(): Promise<void> {
     } catch (error) {
       console.error("FAILED to archive the smoke admin:", error);
     }
+  }
+  // Library items created by smoke users are archived (never deleted) so they do not stay
+  // published in the shared dev library for real managers.
+  try {
+    await db
+      .update(libraryItems)
+      .set({ status: "archived" })
+      .where(
+        inArray(
+          libraryItems.createdBy,
+          db.select({ id: users.id }).from(users).where(like(users.email, `smoke-${runId}-%`)),
+        ),
+      );
+  } catch (error) {
+    console.error("Could not archive smoke library items (best effort):", error);
   }
   try {
     await db
@@ -312,6 +337,66 @@ async function addCredits(studentLabel: string, hours: number, reason: "purchase
   expectStatus(res, 201, `credits for ${studentLabel}`);
 }
 
+/**
+ * Lesson inserted straight into the DB, with no ledger entry unless the test adds
+ * one. No API can create an uncharged lesson, and RFC-003 is exactly about that
+ * case: a cancellation must never mint credit for a lesson nobody paid for.
+ */
+async function insertProbeLesson(input: {
+  teacherLabel: string;
+  studentLabel: string;
+  days: number;
+}): Promise<string> {
+  const slot = nextSlot(input.days);
+  const [row] = await db
+    .insert(lessons)
+    .values({
+      teacherId: uid(input.teacherLabel),
+      studentId: uid(input.studentLabel),
+      enrollmentId: enrollmentId || null,
+      date: slot.date,
+      time: slot.time,
+      endTime: addMinutes(slot.time, LESSON_MINUTES),
+      title: `Smoke refund probe ${runId}`,
+      status: "scheduled",
+      createdBy: adminId!,
+    })
+    .returning({ id: lessons.id });
+  if (!row) throw new Error("could not insert a probe lesson");
+  return row.id;
+}
+
+async function insertProbeLedger(input: {
+  studentLabel: string;
+  hours: number;
+  reason: "booking" | "adjustment";
+  lessonId: string;
+  description: string;
+}): Promise<void> {
+  await db.insert(creditEntries).values({
+    studentId: uid(input.studentLabel),
+    hours: input.hours,
+    reason: input.reason,
+    description: input.description,
+    lessonId: input.lessonId,
+    actorId: adminId!,
+  });
+}
+
+/** Refund rows written against one lesson (the thing RFC-003 must control). */
+async function refundRows(lessonId: string): Promise<number> {
+  const [row] = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(creditEntries)
+    .where(
+      and(
+        eq(creditEntries.lessonId, lessonId),
+        eq(creditEntries.reason, "refund"),
+      ),
+    );
+  return Number(row?.value ?? 0);
+}
+
 let enrollmentId = "";
 let firstPlanId = "";
 let courseId = "";
@@ -460,6 +545,12 @@ async function onBehalfScenario(): Promise<void> {
 }
 
 async function rebookScenario(): Promise<void> {
+  // studentR needs an enrollment with teacherA so a rebook can take the next plan.
+  // Local variable on purpose: the module-level enrollmentId belongs to studentA.
+  const enrollmentRes = await call(tok("managerA"), "POST", "/enrollments", { studentId: uid("studentR"), teacherId: uid("teacherA"), courseId });
+  expectStatus(enrollmentRes, 201, "create rebook enrollment");
+  const rebookEnrollmentId = str(enrollmentRes.body, "id");
+
   await addCredits("studentR", 2.5);
   const original = await scheduleLesson(tok("teacherA"), uid("teacherA"), uid("studentR"), nextSlot(6));
   check(near(await balance("studentR"), 1.5), "rebook fixture balance should be 1.5");
@@ -470,11 +561,64 @@ async function rebookScenario(): Promise<void> {
   expectStatus(res, 201, "rebook with 1.5 credits");
   check(near(await balance("studentR"), 0.5), "rebook must debit exactly 1 (1.5 -> 0.5)");
   await expectOneActivity("lesson", str(res.body, "id"), "lesson.booked");
+
+  // Enrichment parity with POST /bookings: fresh room code, next plan, plan author, enrollment.
+  const originalLesson = await getLesson(original);
+  const rebooked = await getLesson(str(res.body, "id"));
+  expectRebookEnrichment(originalLesson, rebooked, rebookEnrollmentId, "scheduled original");
+  check(rebooked.lessonPlanId !== originalLesson.lessonPlanId, "rebooked lesson must not reuse the original's plan");
+
   const slot2 = nextSlot(6);
   await openSlot(tok("teacherA"), uid("teacherA"), slot2);
   const refused = await call(tok("studentR"), "POST", `/lessons/${original}/rebook`, slot2);
   expectStatus(refused, 400, "rebook with 0.5 credits");
   check(near(await balance("studentR"), 0.5), "refused rebook must not debit");
+
+  // Any non-live original can be rebooked (completed, cancelled), each charged exactly once.
+  await addCredits("studentR", 3);
+  check(near(await balance("studentR"), 3.5), "rebook top-up balance should be 3.5");
+  for (const status of ["completed", "cancelled"] as const) {
+    const source = await insertLibraryLesson("teacherA", "studentR", status);
+    const target = nextSlot(6);
+    await openSlot(tok("teacherA"), uid("teacherA"), target);
+    const before = await balance("studentR");
+    const rebook = await call(tok("studentR"), "POST", `/lessons/${source}/rebook`, target);
+    expectStatus(rebook, 201, `rebook a ${status} original`);
+    check(near(await balance("studentR"), before - 1), `rebook of a ${status} original must debit exactly 1`);
+    const newId = str(rebook.body, "id");
+    await expectOneActivity("lesson", newId, "lesson.booked");
+    expectRebookEnrichment(await getLesson(source), await getLesson(newId), rebookEnrollmentId, `${status} original`);
+  }
+  await expectDistinctActivePlans("studentR");
+
+  // A live original is refused: no debit, slot still open.
+  const live = await insertLibraryLesson("teacherA", "studentR", "live");
+  const liveTarget = nextSlot(6);
+  const liveSlotId = await openSlot(tok("teacherA"), uid("teacherA"), liveTarget);
+  const beforeLive = await balance("studentR");
+  expectStatus(await call(tok("studentR"), "POST", `/lessons/${live}/rebook`, liveTarget), 400, "rebook a live original");
+  check(near(await balance("studentR"), beforeLive), "refused live rebook must not debit");
+  check(await slotExists(uid("teacherA"), liveSlotId, liveTarget.date), "refused live rebook consumed the slot");
+}
+
+function expectRebookEnrichment(original: Record<string, unknown>, rebooked: Record<string, unknown>, enrollment: string, label: string): void {
+  const roomCode = String(rebooked.roomCode);
+  check(/^ESL-\d{4}$/.test(roomCode), `${label}: rebook room code "${roomCode}" must match ESL-####`);
+  check(rebooked.roomCode !== original.roomCode, `${label}: rebook must get a fresh room code, got ${roomCode} again`);
+  check(typeof rebooked.lessonPlanId === "string" && rebooked.lessonPlanId.length > 0, `${label}: rebook must take the next lesson plan`);
+  check(typeof rebooked.planAttachedBy === "string" && rebooked.planAttachedBy.length > 0, `${label}: rebook must set planAttachedBy`);
+  check(rebooked.enrollmentId === enrollment, `${label}: rebook enrollmentId ${String(rebooked.enrollmentId)} != ${enrollment}`);
+}
+
+async function expectDistinctActivePlans(studentLabel: string): Promise<void> {
+  const res = await call(tok("admin"), "GET", `/lessons?studentId=${uid(studentLabel)}&limit=100`);
+  expectStatus(res, 200, `list ${studentLabel} lessons`);
+  const plans = arr(obj(res.body, "lessons").items, "lessons.items")
+    .map((item) => obj(item, "lesson"))
+    .filter((lesson) => lesson.status === "scheduled" || lesson.status === "live")
+    .map((lesson) => lesson.lessonPlanId)
+    .filter((plan): plan is string => typeof plan === "string");
+  check(new Set(plans).size === plans.length, `active ${studentLabel} lessons share a lesson plan: ${plans.join(", ")}`);
 }
 
 let completedLessonId = "";
@@ -597,6 +741,11 @@ async function requestsScenario(): Promise<void> {
   const readBack = await call(tok("managerA"), "GET", `/uploads/${attachmentId}`);
   expectStatus(readBack, 200, "read attachment back");
   check(str(readBack.body, "name") === "smoke-note.pdf", "attachment name read-back");
+  expectStatus(await call(tok("admin"), "GET", `/uploads/${attachmentId}`), 200, "admin reads request attachment");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${attachmentId}`), 403, "cross-team manager reads request attachment");
+  check((await download(tok("managerB"), attachmentId)).status === 403, "cross-team manager downloads request attachment");
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${attachmentId}`), 403, "student reads teacher request attachment");
+  check((await download(tok("studentA"), attachmentId)).status === 403, "student downloads teacher request attachment");
   const before = await balance("studentA");
   expectStatus(await call(tok("managerA"), "POST", `/requests/${cancelId}/review`, { status: "approved" }), 200, "approve cancellation");
   check(near(await balance("studentA"), before + 1), "approve-cancel must refund exactly 1");
@@ -637,16 +786,19 @@ async function requestsScenario(): Promise<void> {
 
 async function creditsScenario(): Promise<void> {
   const before = await balance("studentA");
-  const purchase = await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 2, reason: "purchase", description: "Smoke purchase" });
-  expectStatus(purchase, 201, "student purchases own credits");
-  check(typeof obj(purchase.body, "credit").hours === "number", "POST /credits hours must be a number");
-  check(near(await balance("studentA"), before + 2), "purchase must add exactly 2");
-  await expectOneActivity("credit", str(purchase.body, "id"), "credits.purchased");
+  // Staff-managed credits policy (Phase 02): students cannot self-purchase in API mode.
+  expectStatus(await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 2, reason: "purchase", description: "Smoke self-purchase blocked" }), 403, "student self-purchase refused");
+  check(near(await balance("studentA"), before), "refused student purchase must not change balance");
   expectStatus(await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentB"), hours: 1, reason: "purchase", description: "x" }), 403, "student buys for another");
   expectStatus(await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 1, reason: "adjustment", description: "x" }), 403, "student adjusts own credits");
   expectStatus(await call(tok("teacherA"), "POST", "/credits", { studentId: uid("studentA"), hours: 1, reason: "adjustment", description: "x" }), 403, "teacher adjusts credits");
-  // Known gap, asserted as current behavior: a student may self-purchase up to 100 with no payment check.
-  const cap = await call(tok("studentA"), "POST", "/credits", { studentId: uid("studentA"), hours: 101, reason: "purchase", description: "x" });
+
+  const purchase = await call(tok("admin"), "POST", "/credits", { studentId: uid("studentA"), hours: 2, reason: "purchase", description: "Smoke admin purchase" });
+  expectStatus(purchase, 201, "admin records purchase credits");
+  check(typeof obj(purchase.body, "credit").hours === "number", "POST /credits hours must be a number");
+  check(near(await balance("studentA"), before + 2), "purchase must add exactly 2");
+  await expectOneActivity("credit", str(purchase.body, "id"), "credits.purchased");
+  const cap = await call(tok("admin"), "POST", "/credits", { studentId: uid("studentA"), hours: 101, reason: "purchase", description: "x" });
   expectStatus(cap, 400, "purchase above the 100 cap");
 
   const beforeB = await balance("studentB");
@@ -685,6 +837,57 @@ async function creditsScenario(): Promise<void> {
     bootSum += hours as number;
   }
   check(near(Math.round(bootSum * 100) / 100, finalBalance), `bootstrap credit sum ${bootSum} != balance ${finalBalance}`);
+}
+
+/**
+ * RFC-003 refund evidence: a refund requires a `booking` debit for the same
+ * lesson and student, and that charge must still be net-negative. Every path
+ * (student cancel, teacher absence, manager approval) is checked against an
+ * uncharged lesson, a reversed charge, and a charged control.
+ */
+async function refundEvidenceScenario(): Promise<void> {
+  // 1. Never charged: cancellation must not mint a credit.
+  const uncharged = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 30 });
+  const balanceBefore = await balance("studentA");
+  const cancelled = await call(tok("studentA"), "POST", `/lessons/${uncharged}/cancel`, {});
+  expectStatus(cancelled, 200, "cancel an uncharged lesson");
+  check(obj(cancelled.body, "cancel").refunded === false, "an uncharged lesson must not refund");
+  check(near(await balance("studentA"), balanceBefore), "an uncharged cancellation must not move the balance");
+  check((await refundRows(uncharged)) === 0, "no refund row for an uncharged lesson");
+
+  // 2. Charge reversed by an adjustment: still not refundable.
+  const reversed = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 31 });
+  await insertProbeLedger({ studentLabel: "studentA", hours: -1, reason: "booking", lessonId: reversed, description: "Smoke refund probe charge" });
+  await insertProbeLedger({ studentLabel: "studentA", hours: 1, reason: "adjustment", lessonId: reversed, description: "Smoke refund probe reversal" });
+  const cancelledReversed = await call(tok("studentA"), "POST", `/lessons/${reversed}/cancel`, {});
+  expectStatus(cancelledReversed, 200, "cancel a reversed charge");
+  check(obj(cancelledReversed.body, "cancel").refunded === false, "a reversed charge must not refund");
+  check((await refundRows(reversed)) === 0, "no refund row for a reversed charge");
+
+  // 3. Control: a charged lesson refunds exactly once.
+  const charged = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 32 });
+  await insertProbeLedger({ studentLabel: "studentA", hours: -1, reason: "booking", lessonId: charged, description: "Smoke refund probe charge" });
+  const beforeCharged = await balance("studentA");
+  const cancelledCharged = await call(tok("studentA"), "POST", `/lessons/${charged}/cancel`, {});
+  expectStatus(cancelledCharged, 200, "cancel a charged lesson");
+  check(obj(cancelledCharged.body, "cancel").refunded === true, "a charged lesson must refund");
+  check(near(await balance("studentA"), beforeCharged + 1), "the refund must add exactly one credit");
+  check((await refundRows(charged)) === 1, "exactly one refund row for a charged lesson");
+
+  // 4. Absence on an uncharged lesson: recorded, never refunded.
+  const absent = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: -1 });
+  const absence = await call(tok("admin"), "POST", `/lessons/${absent}/absence`, { note: `Smoke uncharged absence ${runId}` });
+  expectStatus(absence, 201, "record absence on an uncharged lesson");
+  check((await refundRows(absent)) === 0, "no refund row for an uncharged absence");
+
+  // 5. Manager approval on an uncharged lesson: cancelled, never refunded.
+  const pending = await insertProbeLesson({ teacherLabel: "teacherA", studentLabel: "studentA", days: 33 });
+  const request = await call(tok("teacherA"), "POST", "/requests", { type: "lesson-cancellation", lessonId: pending, reason: "Smoke uncharged approval" });
+  expectStatus(request, 201, "teacher requests cancellation for an uncharged lesson");
+  const approved = await call(tok("managerA"), "POST", `/requests/${str(request.body, "id")}/review`, { status: "approved" });
+  expectStatus(approved, 200, "approve the uncharged cancellation");
+  check((await refundRows(pending)) === 0, "approval of an uncharged lesson must not refund");
+  check(str(await getLesson(pending), "status") === "cancelled", "approval still cancels the lesson");
 }
 
 async function homeworkScenario(): Promise<void> {
@@ -742,15 +945,49 @@ async function uploadsScenario(): Promise<void> {
   check(num(uploaded.body, "size") === content.length, "upload reports the exact byte size");
 
   expectStatus(await call(tok("managerA"), "GET", `/uploads/${id}`), 200, "read attachment metadata");
+  expectStatus(await call(tok("admin"), "GET", `/uploads/${id}`), 200, "admin reads unattached upload");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${id}`), 403, "other manager blocked from unattached upload");
+  check((await download(tok("managerB"), id)).status === 403, "other manager download blocked before attach");
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${id}`), 403, "student blocked from unattached upload");
+  check((await download(tok("studentA"), id)).status === 403, "student download blocked before attach");
   const bytes = await download(tok("managerA"), id);
   check(bytes.status === 200, `download expected 200, got ${bytes.status}`);
   check(bytes.bytes.length === content.length, `download length ${bytes.bytes.length} != ${content.length}`);
   check(Buffer.compare(Buffer.from(bytes.bytes), Buffer.from(content)) === 0, "download returns the same bytes");
 
-  const attach = await call(tok("managerA"), "POST", `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`, {
-    id, name: "smoke-plan.pdf", type: "application/pdf", size: content.length, storageKey: "smoke",
-  });
+  const planAttachPath = `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`;
+  const attach = await call(tok("managerA"), "POST", planAttachPath, { attachmentId: id });
   expectStatus(attach, 200, "attach upload to a plan");
+
+  // Published course plan attachment: enrolled student/teacher and any manager allowed; unrelated student/teacher denied.
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${id}`), 200, "enrolled student reads plan attachment");
+  const studentBytes = await download(tok("studentA"), id);
+  check(studentBytes.status === 200 && Buffer.compare(Buffer.from(studentBytes.bytes), Buffer.from(content)) === 0, "enrolled student downloads identical plan bytes");
+  expectStatus(await call(tok("teacherA"), "GET", `/uploads/${id}`), 200, "enrolled teacher reads plan attachment");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${id}`), 200, "other manager reads published course plan attachment");
+  expectStatus(await call(tok("studentB"), "GET", `/uploads/${id}`), 403, "unrelated student blocked from plan attachment");
+  check((await download(tok("studentB"), id)).status === 403, "unrelated student download blocked");
+  expectStatus(await call(tok("teacherB"), "GET", `/uploads/${id}`), 403, "unrelated teacher blocked from plan attachment");
+  check((await download(tok("teacherB"), id)).status === 403, "unrelated teacher download blocked");
+
+  // Draft course plan attachment: owner + admin allowed; other manager + students blocked.
+  const draftCourse = await call(tok("managerA"), "POST", "/courses", { title: `Smoke draft ${runId}`, level: "A2", status: "draft" });
+  expectStatus(draftCourse, 201, "create draft course");
+  const draftCourseId = str(draftCourse.body, "id");
+  const draftUnit = await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units`, { title: "Draft Unit 1", order: 0 });
+  expectStatus(draftUnit, 201, "create draft unit");
+  const draftPlan = await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units/${str(draftUnit.body, "id")}/plans`, { title: "Draft Plan 1", order: 0 });
+  expectStatus(draftPlan, 201, "create draft plan");
+  const draftUpload = await upload(tok("managerA"), { name: "draft-only.pdf", type: "application/pdf", bytes: content });
+  expectStatus(draftUpload, 201, "upload draft plan file");
+  const draftAttachmentId = str(draftUpload.body, "id");
+  expectStatus(await call(tok("managerA"), "POST", `/courses/${draftCourseId}/units/${str(draftUnit.body, "id")}/plans/${str(draftPlan.body, "id")}/attachments`, {
+    attachmentId: draftAttachmentId,
+  }), 200, "attach file to draft plan");
+  expectStatus(await call(tok("admin"), "GET", `/uploads/${draftAttachmentId}`), 200, "admin reads draft course attachment");
+  expectStatus(await call(tok("managerB"), "GET", `/uploads/${draftAttachmentId}`), 403, "other manager blocked from draft course attachment");
+  check((await download(tok("managerB"), draftAttachmentId)).status === 403, "other manager blocked from draft course download");
+  expectStatus(await call(tok("studentA"), "GET", `/uploads/${draftAttachmentId}`), 403, "student blocked from draft course attachment");
 
   expectStatus(await call(null, "GET", `/uploads/${id}`), 401, "anonymous reads attachment");
   check((await download(null, id)).status === 401, "anonymous download is refused");
@@ -762,6 +999,102 @@ async function uploadsScenario(): Promise<void> {
 
   // Current behavior: uploads write no activity row of their own.
   await expectNoActivity("attachment", id, "attachment.uploaded");
+
+  await planAttachRulesChecks(id, content);
+  await traversalCanaryCheck(id);
+}
+
+/** Plan attach takes only `{ attachmentId }` of an existing upload (Step F, F1.1). */
+async function planAttachRulesChecks(attachedId: string, content: Uint8Array): Promise<void> {
+  const errorCode = (res: Res) => str(obj(res.body, "error").error, "code");
+  const planAttachPath = `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`;
+
+  // (a) managerB can edit their own plan but cannot attach managerA's upload to it.
+  const courseB = await call(tok("managerB"), "POST", "/courses", { title: `Smoke B course ${runId}`, level: "A1", status: "draft" });
+  expectStatus(courseB, 201, "managerB creates a course");
+  const courseBId = str(courseB.body, "id");
+  const unitB = await call(tok("managerB"), "POST", `/courses/${courseBId}/units`, { title: "B Unit 1", order: 0 });
+  expectStatus(unitB, 201, "managerB creates a unit");
+  const unitBId = str(unitB.body, "id");
+  const planB = await call(tok("managerB"), "POST", `/courses/${courseBId}/units/${unitBId}/plans`, { title: "B Plan 1", order: 0 });
+  expectStatus(planB, 201, "managerB creates a plan");
+  const planBPath = `/courses/${courseBId}/units/${unitBId}/plans/${str(planB.body, "id")}/attachments`;
+  const ownB = await upload(tok("managerB"), { name: "b-own.pdf", type: "application/pdf", bytes: content });
+  expectStatus(ownB, 201, "managerB uploads own file");
+  expectStatus(await call(tok("managerB"), "POST", planBPath, { attachmentId: str(ownB.body, "id") }), 200, "managerB attaches own upload to own plan");
+  expectStatus(await call(tok("managerB"), "POST", planBPath, { attachmentId: attachedId }), 403, "managerB attaches managerA's upload");
+
+  // (b) unknown attachment id.
+  expectStatus(await call(tok("managerA"), "POST", planAttachPath, { attachmentId: randomUUID() }), 404, "attach an unknown attachment id");
+
+  // (c) client file metadata and legacy shapes are rejected by the strict body.
+  const clientId = randomUUID();
+  const shapes: Array<[string, unknown]> = [
+    ["attachmentId + storageKey", { attachmentId: attachedId, storageKey: `../smoke-evil-${runId}` }],
+    ["legacy file shape", { id: clientId, name: "x.pdf", type: "application/pdf", size: 1, storageKey: `smoke-evil-legacy-${runId}` }],
+    ["empty body", {}],
+  ];
+  for (const [label, body] of shapes) {
+    const res = await call(tok("managerA"), "POST", planAttachPath, body);
+    expectStatus(res, 400, `plan attach rejects ${label}`);
+    check(errorCode(res) === "VALIDATION_ERROR", `plan attach ${label} error code ${JSON.stringify(res.body)}`);
+  }
+
+  // (d) request evidence cannot be attached to a plan.
+  const reqLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const evidence = await upload(tok("managerA"), { name: "plan-evidence.pdf", type: "application/pdf", bytes: content });
+  expectStatus(evidence, 201, "upload a file that becomes request evidence");
+  const evidenceId = str(evidence.body, "id");
+  const request = await call(tok("teacherA"), "POST", "/requests", { type: "lesson-cancellation", lessonId: reqLesson, reason: "Smoke plan evidence", attachmentId: evidenceId });
+  expectStatus(request, 201, "teacher files request citing the upload");
+  const evidenceAttach = await call(tok("managerA"), "POST", planAttachPath, { attachmentId: evidenceId });
+  expectStatus(evidenceAttach, 422, "attach request evidence to a plan");
+  check(errorCode(evidenceAttach) === "ATTACHMENT_NOT_ELIGIBLE", `request evidence attach error code ${JSON.stringify(evidenceAttach.body)}`);
+
+  // (e) admin attaches any upload to any plan.
+  expectStatus(await call(tok("admin"), "POST", planBPath, { attachmentId: attachedId }), 200, "admin attaches another user's upload");
+
+  // (f) the route created no attachments rows for client-supplied ids or keys.
+  const [stray] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(attachments)
+    .where(sql`${attachments.storageKey} like ${`%smoke-evil-%${runId}%`} or ${attachments.id} = ${clientId}`);
+  check(stray?.n === 0, `plan attach created no attachments rows for client keys (got ${stray?.n})`);
+  const [plan] = await db.select({ ids: lessonPlans.attachmentIds }).from(lessonPlans).where(eq(lessonPlans.id, firstPlanId));
+  check(JSON.stringify(plan?.ids) === JSON.stringify([attachedId]), `plan holds only the legitimately attached id (got ${JSON.stringify(plan?.ids)})`);
+}
+
+/**
+ * A stored key that escapes UPLOAD_DIR is refused with 404 (Step F, F1.3). Uses a canary
+ * file in the system temp dir (outside the upload dir and the repo), never a real secret.
+ */
+async function traversalCanaryCheck(controlId: string): Promise<void> {
+  const canaryName = `smoke-canary-${runId}.txt`;
+  const canaryPath = join(uploadDir, "..", canaryName);
+  const sentinel = `CANARY-${runId}`;
+  let rowId: string | undefined;
+  try {
+    writeFileSync(canaryPath, sentinel);
+    const [row] = await db
+      .insert(attachments)
+      .values({
+        name: `smoke-traversal-${runId}.txt`,
+        type: "text/plain",
+        size: sentinel.length,
+        storageKey: `../${canaryName}`,
+        uploadedBy: adminId!,
+      })
+      .returning({ id: attachments.id });
+    rowId = row?.id;
+    if (!rowId) throw new Error("could not insert the traversal fixture row");
+    const res = await download(tok("admin"), rowId);
+    check(res.status === 404, `traversal key download expected 404, got ${res.status}`);
+    check(!Buffer.from(res.bytes).toString("utf8").includes(sentinel), "traversal download leaks no canary content");
+    check((await download(tok("admin"), controlId)).status === 200, "legitimate upload still downloads");
+  } finally {
+    if (rowId) await db.delete(attachments).where(eq(attachments.id, rowId)).catch(() => undefined);
+    rmSync(canaryPath, { force: true });
+  }
 }
 
 async function notificationsScenario(): Promise<void> {
@@ -815,10 +1148,782 @@ async function notificationsScenario(): Promise<void> {
   );
 }
 
+// The auth domain mutates passwords, so it runs on its own fixture user (never on
+// the shared fixtures whose `password` other domains reuse). The user is archived
+// with the other smoke users; fabricated refresh-token rows are removed in finally.
+type Session = { status: number; body: unknown; token: string; cookie: string; setCookie: string };
+
+async function authCall(input: { path: string; body?: unknown; token?: string; cookie?: string }): Promise<Session> {
+  const headers: Record<string, string> = {};
+  if (input.token) headers.Authorization = `Bearer ${input.token}`;
+  if (input.cookie) headers.Cookie = `refresh_token=${input.cookie}`;
+  if (input.body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(`${base}${input.path}`, {
+    method: "POST",
+    headers,
+    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+  });
+  const text = await response.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      body = text;
+    }
+  }
+  const setCookie = response.headers.getSetCookie().find((value) => value.startsWith("refresh_token=")) ?? "";
+  const cookie = setCookie ? (setCookie.split(";")[0] ?? "").slice("refresh_token=".length) : "";
+  const token = typeof body === "object" && body !== null && typeof (body as { accessToken?: unknown }).accessToken === "string"
+    ? (body as { accessToken: string }).accessToken
+    : "";
+  return { status: response.status, body, token, cookie, setCookie };
+}
+
+async function signIn(email: string, pw: string, label: string): Promise<Session> {
+  const session = await authCall({ path: "/auth/login", body: { email, password: pw } });
+  expectStatus(session, 200, label);
+  check(session.token !== "" && session.cookie !== "", `${label}: expected an access token and a refresh cookie`);
+  return session;
+}
+
+function errorCode(res: { body: unknown }): unknown {
+  const error = obj(res.body, "error body").error;
+  return typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+}
+
+async function activeTokenCount(userId: string): Promise<number> {
+  const rows = await db
+    .select({ id: refreshTokens.id })
+    .from(refreshTokens)
+    .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+  return rows.length;
+}
+
+async function authScenario(): Promise<void> {
+  const email = emailFor("pwuser");
+  const created = await call(tok("admin"), "POST", "/users", {
+    name: `Smoke pwuser ${runId}`,
+    email,
+    password,
+    role: "student",
+    managerId: uid("managerA"),
+  });
+  expectStatus(created, 201, "create password fixture user");
+  const userId = str(created.body, "id");
+  const changed = randomBytes(18).toString("base64url");
+  const reset = randomBytes(18).toString("base64url");
+  const fabricated: string[] = [];
+
+  try {
+    // ---- change-password
+    const a = await signIn(email, password, "pwuser signs in (device A)");
+    const b = await signIn(email, password, "pwuser signs in (device B)");
+
+    const wrong = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      cookie: a.cookie,
+      body: { currentPassword: `${password}-wrong`, newPassword: changed },
+    });
+    check(wrong.status !== 401, `wrong current password must not be 401 (client would refresh), got ${wrong.status}`);
+    expectStatus(wrong, 400, "wrong current password");
+    check(errorCode(wrong) === "INVALID_CURRENT_PASSWORD", `wrong current password code: ${JSON.stringify(wrong.body)}`);
+
+    const same = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      body: { currentPassword: password, newPassword: password },
+    });
+    expectStatus(same, 400, "new password equal to current");
+    check(errorCode(same) === "VALIDATION_ERROR", `same password code: ${JSON.stringify(same.body)}`);
+
+    const short = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      body: { currentPassword: password, newPassword: "short-pw" },
+    });
+    expectStatus(short, 400, "new password under 10 characters");
+
+    const ok = await authCall({
+      path: "/auth/change-password",
+      token: a.token,
+      cookie: a.cookie,
+      body: { currentPassword: password, newPassword: changed },
+    });
+    expectStatus(ok, 200, "change password");
+    check(JSON.stringify(ok.body) === JSON.stringify({ success: true }), `change password body: ${JSON.stringify(ok.body)}`);
+    check(ok.cookie !== "" && ok.cookie !== a.cookie, "change password rotates the refresh cookie");
+    const attrs = ok.setCookie.toLowerCase();
+    check(attrs.includes("httponly"), `refresh cookie must be HttpOnly: ${ok.setCookie}`);
+    check(attrs.includes("samesite=lax"), `refresh cookie must be SameSite=Lax: ${ok.setCookie}`);
+    check(attrs.includes("path=/api/v1/auth"), `refresh cookie path: ${ok.setCookie}`);
+    check(!ok.setCookie.includes(changed), "the new password never appears in the cookie");
+    await expectOneActivity("user", userId, "user.password_changed");
+
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: b.cookie }), 401, "other device refresh after change");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: a.cookie }), 401, "old cookie refresh after change");
+    const rotated = await authCall({ path: "/auth/refresh", cookie: ok.cookie });
+    expectStatus(rotated, 200, "new cookie refresh after change (device A stays signed in)");
+
+    expectStatus(await authCall({ path: "/auth/login", body: { email, password } }), 401, "old password login after change");
+    const c = await signIn(email, changed, "new password login after change");
+
+    // ---- admin reset
+    expectStatus(await call(tok("managerA"), "POST", `/users/${userId}/reset-password`, { newPassword: reset }), 403, "manager resets password");
+    expectStatus(await call(tok("teacherA"), "POST", `/users/${userId}/reset-password`, { newPassword: reset }), 403, "teacher resets password");
+    expectStatus(await call(c.token, "POST", `/users/${userId}/reset-password`, { newPassword: reset }), 403, "student resets own password via admin route");
+    const selfReset = await call(tok("admin"), "POST", `/users/${uid("admin")}/reset-password`, { newPassword: reset });
+    expectStatus(selfReset, 400, "admin self-reset");
+    expectStatus(
+      await call(tok("admin"), "POST", "/users/00000000-0000-4000-8000-000000000000/reset-password", { newPassword: reset }),
+      404,
+      "reset unknown user",
+    );
+    expectStatus(await call(tok("admin"), "POST", `/users/${userId}/reset-password`, { newPassword: "short-pw" }), 400, "reset with a short password");
+    expectStatus(
+      await call(tok("admin"), "POST", `/users/${userId}/reset-password`, { newPassword: reset, role: "admin" }),
+      400,
+      "reset rejects extra fields",
+    );
+
+    const resetRes = await call(tok("admin"), "POST", `/users/${userId}/reset-password`, { newPassword: reset });
+    expectStatus(resetRes, 200, "admin resets password");
+    check(str(resetRes.body, "id") === userId && obj(resetRes.body, "reset").success === true, `reset body: ${JSON.stringify(resetRes.body)}`);
+    check(!JSON.stringify(resetRes.body).includes(reset), "reset response never echoes the password");
+    await expectOneActivity("user", userId, "user.password_reset");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: c.cookie }), 401, "target refresh after admin reset");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: rotated.cookie }), 401, "target device A refresh after admin reset");
+    check((await activeTokenCount(userId)) === 0, "admin reset revokes every target refresh token");
+    expectStatus(await authCall({ path: "/auth/login", body: { email, password: changed } }), 401, "pre-reset password login");
+
+    // ---- prune on login: expired + revoked > 7 days are deleted, fresh + recently revoked kept
+    const day = 86_400_000;
+    const now = Date.now();
+    const rows = [
+      { label: "expired", expiresAt: new Date(now - day), revokedAt: null },
+      { label: "oldRevoked", expiresAt: new Date(now + 10 * day), revokedAt: new Date(now - 8 * day) },
+      { label: "fresh", expiresAt: new Date(now + 10 * day), revokedAt: null },
+      { label: "recentRevoked", expiresAt: new Date(now + 10 * day), revokedAt: new Date(now - day) },
+    ];
+    const ids: Record<string, string> = {};
+    for (const row of rows) {
+      const [inserted] = await db
+        .insert(refreshTokens)
+        .values({
+          userId,
+          tokenHash: createHash("sha256").update(`smoke-${runId}-${row.label}-${randomBytes(8).toString("hex")}`).digest("hex"),
+          expiresAt: row.expiresAt,
+          revokedAt: row.revokedAt,
+        })
+        .returning({ id: refreshTokens.id });
+      if (!inserted) throw new Error(`could not insert the ${row.label} refresh token`);
+      ids[row.label] = inserted.id;
+      fabricated.push(inserted.id);
+    }
+    const d = await signIn(email, reset, "reset password login (runs the prune)");
+    const left = await db
+      .select({ id: refreshTokens.id })
+      .from(refreshTokens)
+      .where(inArray(refreshTokens.id, fabricated));
+    const remaining = new Set(left.map((row) => row.id));
+    check(!remaining.has(ids.expired ?? ""), "prune deletes the expired token");
+    check(!remaining.has(ids.oldRevoked ?? ""), "prune deletes the token revoked 8 days ago");
+    check(remaining.has(ids.fresh ?? ""), "prune keeps the fresh token");
+    check(remaining.has(ids.recentRevoked ?? ""), "prune keeps the token revoked 1 day ago");
+
+    // ---- pause and archive revoke the target's tokens
+    expectStatus(await call(tok("admin"), "PATCH", `/users/${userId}`, { status: "paused" }), 200, "admin pauses the password user");
+    check((await activeTokenCount(userId)) === 0, "pause revokes every refresh token");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: d.cookie }), 401, "refresh after pause");
+    expectStatus(await call(tok("admin"), "PATCH", `/users/${userId}`, { status: "active" }), 200, "admin reactivates the password user");
+    const e = await signIn(email, reset, "login after reactivation");
+    expectStatus(await call(tok("admin"), "DELETE", `/users/${userId}`), 200, "admin archives the password user");
+    check((await activeTokenCount(userId)) === 0, "archive revokes every refresh token");
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: e.cookie }), 401, "refresh after archive");
+    expectStatus(await authCall({ path: "/auth/login", body: { email, password: reset } }), 401, "login after archive");
+  } finally {
+    if (fabricated.length) {
+      await db.delete(refreshTokens).where(inArray(refreshTokens.id, fabricated)).catch((error: unknown) => {
+        console.error("Could not remove fabricated refresh tokens (best effort):", error);
+      });
+    }
+    await db.update(users).set({ status: "archived" }).where(eq(users.id, userId)).catch(() => undefined);
+  }
+}
+
 // ---------------------------------------------------------------- runner
 
 type Outcome = { domain: string; checks: number; error?: string };
 const outcomes: Outcome[] = [];
+
+// ---------------------------------------------------------------- invites
+// Account invitations. Mail goes only to the in-memory array mailer; tokens are read from
+// the captured message, never printed. Fixtures use `smoke-{runId}-inv*` emails and are
+// archived by cleanup() with the other smoke users.
+
+const RESEND_WAIT_MS = 2_100; // INVITE_RESEND_COOLDOWN_SECONDS=2 in this run
+const INVALID_TOKEN_CODE = "INVALID_OR_EXPIRED_TOKEN";
+const GENERIC_MAIL_ERROR = "The invitation email could not be sent.";
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function outboxFor(email: string) {
+  return mailer.outbox.filter((message) => message.to === email);
+}
+function tokenFromText(text: string): string {
+  const match = /#set-password=([A-Za-z0-9_-]+)/.exec(text);
+  if (!match?.[1]) throw new Error("no invitation link in the captured message");
+  return match[1];
+}
+function latestInviteToken(email: string): string {
+  const messages = outboxFor(email);
+  const last = messages[messages.length - 1];
+  if (!last) throw new Error(`no captured invitation for ${email.split("@")[0]}`);
+  return tokenFromText(last.text);
+}
+function inviteOf(res: Res): Record<string, unknown> {
+  return obj(obj(res.body, "response").invite, "invite");
+}
+async function setPasswordWith(token: string, newPassword: string): Promise<Res> {
+  return call(null, "POST", "/auth/set-password", { token, password: newPassword });
+}
+async function openInviteCount(userId: string): Promise<number> {
+  const rows = await db
+    .select({ id: authTokens.id })
+    .from(authTokens)
+    .where(and(eq(authTokens.userId, userId), isNull(authTokens.usedAt), gt(authTokens.expiresAt, new Date())));
+  return rows.length;
+}
+async function inviteTokenRow(token: string) {
+  const [row] = await db.select().from(authTokens).where(eq(authTokens.tokenHash, hashToken(token))).limit(1);
+  return row;
+}
+async function userStatusOf(userId: string): Promise<string | undefined> {
+  const [row] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId)).limit(1);
+  return row?.status;
+}
+async function adminInvite(label: string, role: "manager" | "teacher" | "student", extra: Record<string, unknown> = {}): Promise<{ id: string; email: string; res: Res }> {
+  const email = emailFor(label);
+  const res = await call(tok("admin"), "POST", "/users", { name: `Smoke ${label} ${runId}`, email, role, ...extra });
+  expectStatus(res, 201, `admin invites ${label}`);
+  return { id: str(res.body, "id"), email, res };
+}
+function noLink(res: Res, label: string): void {
+  check(!("link" in inviteOf(res)), `${label}: a manager response must never contain a link`);
+  check(!JSON.stringify(res.body).includes("set-password"), `${label}: no link text anywhere in a manager response`);
+}
+
+async function invitesScenario(): Promise<void> {
+  check(mailer.kind === "array", "invites run on the array mailer only");
+
+  // 1. Admin creates an invited user (no password).
+  const outboxBefore = mailer.outbox.length;
+  const first = await adminInvite("inv1", "teacher");
+  check(str(first.res.body, "status") === "invited", "a user created without a password is invited");
+  const firstInvite = inviteOf(first.res);
+  check(firstInvite.sent === true && firstInvite.mode === "array", "admin create reports an array-mode send");
+  check(typeof firstInvite.link === "string", "admin gets the link outside production in array mode");
+  check(mailer.outbox.length === outboxBefore + 1 && outboxFor(first.email).length === 1, "exactly one message captured");
+  const message = outboxFor(first.email)[0];
+  check(Boolean(message) && message!.text.includes(String(firstInvite.link)) && message!.html.includes(String(firstInvite.link)), "the message carries the link");
+  const textWithoutLink = message!.text.split(String(firstInvite.link)).join("");
+  check(!message!.text.includes(password) && !/password\s*[:=]/i.test(textWithoutLink), "the message carries no password");
+  const guessed = await call(null, "POST", "/auth/login", { email: first.email, password });
+  expectStatus(guessed, 401, "invited user login");
+  check(obj(obj(guessed.body, "login").error, "error").message === "Invalid email or password", "invited login fails with the generic message");
+  const adminBoot = await bootstrapOf("admin");
+  check(adminBoot.users?.[first.id]?.status === "invited", "the invited user is in the admin bootstrap");
+
+  // 2. Accept: a policy-invalid password does not burn the token; refresh tokens are revoked.
+  await db.insert(refreshTokens).values({
+    userId: first.id,
+    tokenHash: createHash("sha256").update(`smoke-${runId}-inv1-${randomBytes(8).toString("hex")}`).digest("hex"),
+    expiresAt: new Date(Date.now() + 86_400_000),
+  });
+  const token1 = tokenFromText(message!.text);
+  const tooShort = await setPasswordWith(token1, "short1234");
+  expectStatus(tooShort, 400, "set-password with 9 characters");
+  check(errorCode(tooShort) === "VALIDATION_ERROR", "policy failure is a validation error");
+  check((await inviteTokenRow(token1))?.usedAt === null, "the token is not consumed by a validation failure");
+  const newPassword = randomBytes(18).toString("base64url");
+  expectStatus(await setPasswordWith(token1, newPassword), 204, "set-password");
+  check((await userStatusOf(first.id)) === "active", "accepting activates the account");
+  check((await activeTokenCount(first.id)) === 0, "refresh tokens were revoked at accept");
+  await signIn(first.email, newPassword, "login after accept");
+  const reuse = await setPasswordWith(token1, newPassword);
+  expectStatus(reuse, 400, "token reuse");
+  check(errorCode(reuse) === INVALID_TOKEN_CODE, "reuse gives the generic code");
+  await expectOneActivity("user", first.id, "user.invite_accepted");
+
+  // 3. Token edge cases give one identical answer; parallel accepts have one winner.
+  const unknown = await setPasswordWith(randomBytes(32).toString("base64url"), newPassword);
+  const expiredUser = await adminInvite("inv3", "student");
+  const expiredToken = latestInviteToken(expiredUser.email);
+  await db.update(authTokens).set({ expiresAt: sql`now() - interval '1 minute'` }).where(eq(authTokens.tokenHash, hashToken(expiredToken)));
+  const expired = await setPasswordWith(expiredToken, newPassword);
+  const archivedUser = await adminInvite("inv4", "teacher");
+  const archivedToken = latestInviteToken(archivedUser.email);
+  expectStatus(await call(tok("admin"), "DELETE", `/users/${archivedUser.id}`), 200, "archive invited user");
+  const archived = await setPasswordWith(archivedToken, newPassword);
+  for (const [label, res] of [["unknown", unknown], ["expired", expired], ["used", reuse], ["archived", archived]] as const) {
+    expectStatus(res, 400, `${label} token`);
+    check(JSON.stringify(res.body) === JSON.stringify(reuse.body), `${label} token answers exactly like a used token`);
+  }
+  check((await userStatusOf(archivedUser.id)) === "archived", "the archived invitee stays archived");
+  check((await inviteTokenRow(archivedToken))?.usedAt === null, "a rolled-back accept leaves the token unconsumed");
+  const reactivate = await call(tok("admin"), "PATCH", `/users/${archivedUser.id}`, { status: "active" });
+  expectStatus(reactivate, 409, "invite -> archive -> PATCH active");
+  check(errorCode(reactivate) === "ACCOUNT_NOT_ACTIVATED", "reactivating a never-activated account is refused");
+  const raceUser = await adminInvite("inv5", "student");
+  const raceToken = latestInviteToken(raceUser.email);
+  const race = await Promise.all([setPasswordWith(raceToken, newPassword), setPasswordWith(raceToken, newPassword)]);
+  const raceStatuses = race.map((res) => res.status).sort();
+  check(raceStatuses[0] === 204 && raceStatuses[1] === 400, `parallel accepts: one 204 and one 400 (got ${raceStatuses.join(",")})`);
+
+  // 3b. Lock order: set-password racing resend or archive never deadlocks (no 500) and ends consistent.
+  for (let round = 1; round <= 3; round += 1) {
+    const resendRace = await adminInvite(`inv-lock-r${round}`, "teacher");
+    const resendRaceToken = latestInviteToken(resendRace.email);
+    await sleep(RESEND_WAIT_MS);
+    const [accept, resend] = await Promise.all([
+      setPasswordWith(resendRaceToken, newPassword),
+      call(tok("admin"), "POST", `/users/${resendRace.id}/invite`),
+    ]);
+    check(accept.status < 500 && resend.status < 500, `round ${round}: set-password vs resend has no 500 (got ${accept.status},${resend.status})`);
+    const afterResend = await userStatusOf(resendRace.id);
+    const resendTokenUsed = (await inviteTokenRow(resendRaceToken))?.usedAt != null;
+    check(
+      (accept.status === 204 && afterResend === "active" && resendTokenUsed && resend.status === 409) ||
+        (accept.status === 400 && errorCode(accept) === INVALID_TOKEN_CODE && afterResend === "invited" && !resendTokenUsed && resend.status === 200),
+      `round ${round}: set-password vs resend ends consistent (accept ${accept.status}, resend ${resend.status}, ${afterResend})`,
+    );
+
+    const archiveRace = await adminInvite(`inv-lock-a${round}`, "student");
+    const archiveRaceToken = latestInviteToken(archiveRace.email);
+    const [accept2, archive] = await Promise.all([
+      setPasswordWith(archiveRaceToken, newPassword),
+      call(tok("admin"), "PATCH", `/users/${archiveRace.id}`, { status: "archived" }),
+    ]);
+    check(accept2.status < 500 && archive.status < 500, `round ${round}: set-password vs archive has no 500 (got ${accept2.status},${archive.status})`);
+    const afterArchive = await userStatusOf(archiveRace.id);
+    const archiveTokenUsed = (await inviteTokenRow(archiveRaceToken))?.usedAt != null;
+    check(
+      (accept2.status === 204 && archiveTokenUsed && archive.status === 200 && afterArchive === "archived") ||
+        (accept2.status === 400 && errorCode(accept2) === INVALID_TOKEN_CODE && !archiveTokenUsed && afterArchive === "archived"),
+      `round ${round}: set-password vs archive ends consistent (accept ${accept2.status}, archive ${archive.status}, ${afterArchive})`,
+    );
+  }
+
+  // 4. Resend: old link dies, cooldown 429, parallel resend leaves one open token.
+  const resendUser = await adminInvite("inv6", "teacher");
+  const oldToken = latestInviteToken(resendUser.email);
+  await sleep(RESEND_WAIT_MS);
+  const resent = await call(tok("admin"), "POST", `/users/${resendUser.id}/invite`);
+  expectStatus(resent, 200, "admin resend");
+  check(outboxFor(resendUser.email).length === 2, "resend captured a second message");
+  const oldUse = await setPasswordWith(oldToken, newPassword);
+  expectStatus(oldUse, 400, "first link after resend");
+  const tooSoon = await call(tok("admin"), "POST", `/users/${resendUser.id}/invite`);
+  expectStatus(tooSoon, 429, "resend inside the cooldown");
+  await sleep(RESEND_WAIT_MS);
+  const parallel = await Promise.all([
+    call(tok("admin"), "POST", `/users/${resendUser.id}/invite`),
+    call(tok("admin"), "POST", `/users/${resendUser.id}/invite`),
+  ]);
+  const parallelStatuses = parallel.map((res) => res.status).sort();
+  check(parallelStatuses[0] === 200 && parallelStatuses[1] === 429, `parallel resend: one 200 and one 429 (got ${parallelStatuses.join(",")})`);
+  check((await openInviteCount(resendUser.id)) === 1, "exactly one open invite after parallel resends");
+  check((await activityCount("user", resendUser.id, "user.invite_resent")) === 2, "one invite_resent row per successful resend");
+  expectStatus(await call(tok("admin"), "POST", `/users/${uid("teacherA")}/invite`), 409, "resend for an active user");
+  expectStatus(await call(tok("admin"), "POST", `/users/${randomUUID()}/invite`), 404, "admin resend for an unknown id");
+
+  // 5. Manager creation: own team, atomically; no other roles, no password, no other team.
+  const managerTeacher = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv7 ${runId}`, email: emailFor("inv7"), role: "teacher" });
+  expectStatus(managerTeacher, 201, "manager creates a teacher");
+  noLink(managerTeacher, "manager create");
+  const inv7 = str(managerTeacher.body, "id");
+  check(str(managerTeacher.body, "status") === "invited", "manager-created teacher is invited");
+  const [teacherProfile] = await db.select({ managerId: schema.teacherProfiles.managerId }).from(schema.teacherProfiles).where(eq(schema.teacherProfiles.userId, inv7));
+  check(teacherProfile?.managerId === uid("managerA"), "the teacher joins the manager's team in the same create");
+  expectStatus(await call(tok("managerA"), "PATCH", `/teachers/${inv7}`, { headline: "Smoke invited teacher" }), 200, "manager edits the new teacher at once");
+  const managerBoot = await bootstrapOf("managerA");
+  check(Boolean(managerBoot.users?.[inv7]), "the new teacher is in the manager's bootstrap");
+  const managerStudent = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv8 ${runId}`, email: emailFor("inv8"), role: "student" });
+  expectStatus(managerStudent, 201, "manager creates a student");
+  noLink(managerStudent, "manager create student");
+  const [studentProfile] = await db.select({ managerId: schema.studentProfiles.managerId }).from(schema.studentProfiles).where(eq(schema.studentProfiles.userId, str(managerStudent.body, "id")));
+  check(studentProfile?.managerId === uid("managerA"), "the student joins the manager's roster in the same create");
+  for (const role of ["admin", "manager"] as const) {
+    expectStatus(await call(tok("managerA"), "POST", "/users", { name: "Nope", email: emailFor(`inv-${role}`), role }), 403, `manager creates ${role}`);
+  }
+  expectStatus(await call(tok("managerA"), "POST", "/users", { name: "Nope", email: emailFor("inv-pw"), role: "teacher", password }), 403, "manager sends a password");
+  expectStatus(await call(tok("managerA"), "POST", "/users", { name: "Nope", email: emailFor("inv-other"), role: "student", managerId: uid("managerB") }), 403, "manager names another manager");
+  const ownId = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv9 ${runId}`, email: emailFor("inv9"), role: "student", managerId: uid("managerA") });
+  expectStatus(ownId, 201, "manager names themself");
+  expectStatus(await call(tok("managerB"), "PATCH", `/teachers/${inv7}`, { headline: "Not yours" }), 403, "another manager edits the new teacher");
+  expectStatus(await call(tok("admin"), "POST", "/users", { name: "Nope", email: emailFor("inv-badmgr"), role: "teacher", managerId: uid("teacherA") }), 400, "admin managerId must be a manager");
+
+  // 6. Manager resend: own team only; never a link.
+  await sleep(RESEND_WAIT_MS);
+  const managerResend = await call(tok("managerA"), "POST", `/users/${inv7}/invite`);
+  expectStatus(managerResend, 200, "manager resends to own teacher");
+  noLink(managerResend, "manager resend");
+  const otherTeamStudent = await adminInvite("inv10", "student", { managerId: uid("managerB") });
+  expectStatus(await call(tok("managerA"), "POST", `/users/${otherTeamStudent.id}/invite`), 403, "manager resend to another team");
+  const invitedManager = await adminInvite("inv11", "manager");
+  expectStatus(await call(tok("managerA"), "POST", `/users/${invitedManager.id}/invite`), 403, "manager resend to a manager");
+  expectStatus(await call(tok("managerA"), "POST", `/users/${randomUUID()}/invite`), 403, "manager resend to an unknown id (no oracle)");
+  expectStatus(await call(tok("teacherA"), "POST", `/users/${inv7}/invite`), 403, "teacher cannot resend");
+  expectStatus(await call(tok("studentA"), "POST", `/users/${inv7}/invite`), 403, "student cannot resend");
+
+  // 9. Mail failure: the account is committed, the error is generic; managers still get no link.
+  mailer.failNext(new Error("Simulated SMTP rejection"));
+  const failedManager = await call(tok("managerA"), "POST", "/users", { name: `Smoke inv12 ${runId}`, email: emailFor("inv12"), role: "teacher" });
+  expectStatus(failedManager, 201, "manager create with a mail failure");
+  const failedInvite = inviteOf(failedManager);
+  check(failedInvite.sent === false && failedInvite.error === GENERIC_MAIL_ERROR, "a failed send reports the fixed generic error");
+  check(!JSON.stringify(failedManager.body).includes("Simulated"), "SMTP detail never reaches the client");
+  noLink(failedManager, "manager create with a failed send");
+  const inv12 = str(failedManager.body, "id");
+  check((await userStatusOf(inv12)) === "invited" && (await openInviteCount(inv12)) === 1, "user and token exist despite the failed send");
+  mailer.failNext(new Error("Simulated SMTP rejection"));
+  const failedAdmin = await adminInvite("inv13", "student");
+  check(inviteOf(failedAdmin.res).sent === false && typeof inviteOf(failedAdmin.res).link === "string", "an admin gets the link when the send failed");
+  await sleep(RESEND_WAIT_MS);
+  const recovered = await call(tok("managerA"), "POST", `/users/${inv12}/invite`);
+  expectStatus(recovered, 200, "resend after a failed send");
+  check(inviteOf(recovered).sent === true, "the following resend succeeds");
+  noLink(recovered, "manager resend after failure");
+
+  // 7. Admin-only password: an active account, no mail.
+  const withPasswordEmail = emailFor("inv14");
+  const withPassword = await call(tok("admin"), "POST", "/users", { name: `Smoke inv14 ${runId}`, email: withPasswordEmail, role: "student", password });
+  expectStatus(withPassword, 201, "admin create with a password");
+  check(str(withPassword.body, "status") === "active" && !("invite" in obj(withPassword.body, "create")), "a password makes an active account with no invite");
+  check(outboxFor(withPasswordEmail).length === 0, "no mail for a password-created account");
+  await signIn(withPasswordEmail, password, "login with an admin-set password");
+
+  // 8. Status safety on an invited account.
+  const safety = await adminInvite("inv15", "teacher");
+  const safetyToken = latestInviteToken(safety.email);
+  for (const status of ["active", "paused"] as const) {
+    const res = await call(tok("admin"), "PATCH", `/users/${safety.id}`, { status });
+    expectStatus(res, 409, `PATCH ${status} on an invited user`);
+    check(errorCode(res) === "ACCOUNT_NOT_ACTIVATED", `PATCH ${status} answers ACCOUNT_NOT_ACTIVATED`);
+  }
+  expectStatus(await call(tok("admin"), "POST", `/users/${safety.id}/reset-password`, { newPassword: newPassword }), 409, "reset-password on an invited user");
+  expectStatus(await call(tok("admin"), "PATCH", `/users/${safety.id}`, { email: emailFor("inv15b") }), 200, "email change on an invited user");
+  expectStatus(await setPasswordWith(safetyToken, newPassword), 400, "the link after an email change");
+  check((await openInviteCount(safety.id)) === 1, "an email change expires the old invite and issues one new invite");
+  check(outboxFor(emailFor("inv15b")).length === 1, "the new invitation goes to the new address");
+  const invitedList = await call(tok("admin"), "GET", `/users?status=invited&q=${encodeURIComponent(`smoke-${runId}`)}`);
+  expectStatus(invitedList, 200, "list invited users");
+  const items = fieldArr(invitedList.body, "items");
+  check(items.length > 0 && items.every((item) => obj(item, "user").status === "invited"), "status=invited filters");
+
+  // AC-20: a forced profile-insert failure rolls back the user and the token.
+  const rollbackEmail = emailFor("inv-rollback");
+  let rolledBack = false;
+  try {
+    await db.transaction(async (tx) => {
+      await insertAccount(tx, {
+        actorId: uid("admin"),
+        name: `Smoke rollback ${runId}`,
+        email: rollbackEmail,
+        role: "teacher",
+        avatarColor: "#6366f1",
+        managerId: randomUUID(), // no such user: the profile insert violates its foreign key
+        passwordHash: unusablePasswordHash(),
+        invited: true,
+        now: new Date(),
+      });
+    });
+  } catch {
+    rolledBack = true;
+  }
+  check(rolledBack, "the forced profile-insert failure throws");
+  const leftover = await db.select({ id: users.id }).from(users).where(eq(users.email, rollbackEmail));
+  check(leftover.length === 0, "no users row survives a failed create");
+  const orphanTokens = await db
+    .select({ id: authTokens.id })
+    .from(authTokens)
+    .leftJoin(users, eq(users.id, authTokens.userId))
+    .where(isNull(users.id));
+  check(orphanTokens.length === 0, "no invite token survives a failed create");
+}
+
+// ---------------------------------------------------------------- team edits (manager-team-edits)
+
+async function userRowOf(userId: string): Promise<{ name: string; email: string; status: string; role: string }> {
+  const [row] = await db
+    .select({ name: users.name, email: users.email, status: users.status, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) throw new Error("team-edits: user row missing");
+  return row;
+}
+async function userActivityOf(userId: string): Promise<{ action: string; summary: string }[]> {
+  return db
+    .select({ action: schema.activity.action, summary: schema.activity.summary })
+    .from(schema.activity)
+    .where(and(eq(schema.activity.targetType, "user"), eq(schema.activity.targetId, userId)));
+}
+async function userActionCount(userId: string, action: string): Promise<number> {
+  return (await userActivityOf(userId)).filter((row) => row.action === action).length;
+}
+function sameBody(a: Res, b: Res): boolean {
+  return JSON.stringify(a.body) === JSON.stringify(b.body);
+}
+async function inviteStillValid(token: string): Promise<boolean> {
+  const row = await inviteTokenRow(token);
+  return Boolean(row && row.usedAt === null && row.expiresAt.getTime() > Date.now());
+}
+
+async function teamEditsScenario(): Promise<void> {
+  check(mailer.kind === "array", "team-edits run on the array mailer only");
+  const mA = tok("managerA");
+  const admin = tok("admin");
+  const patch = (token: string, id: string, body: unknown) => call(token, "PATCH", `/users/${id}`, body);
+  const touched: string[] = [];
+
+  await createUser("teTeacher", "teacher", uid("managerA"));
+  await createUser("teStudent", "student", uid("managerA"));
+  await createUser("teOtherT", "teacher", uid("managerB"));
+  await createUser("teOtherS", "student", uid("managerB"));
+  await createUser("teStudentB", "student", uid("managerB"));
+  touched.push(uid("teTeacher"), uid("teStudent"), uid("teOtherT"), uid("teOtherS"), uid("teStudentB"));
+  // Enrolled-only student: managerB's roster, enrolled with managerA's teacher.
+  const enrolled = await call(admin, "POST", "/enrollments", { studentId: uid("teStudentB"), teacherId: uid("teacherA"), courseId });
+  expectStatus(enrolled, 201, "admin enrolls managerB's student with teacherA");
+
+  // 1. Rename (roster teacher, roster student, enrolled-only student).
+  for (const label of ["teTeacher", "teStudent", "teStudentB"]) {
+    const newName = `Smoke ${label} renamed ${runId}`;
+    const res = await patch(mA, uid(label), { name: newName });
+    expectStatus(res, 200, `managerA renames ${label}`);
+    check(str(res.body, "name") === newName, `${label}: the response carries the new name`);
+    check((await userActionCount(uid(label), "user.renamed")) === 1, `${label}: exactly one user.renamed row`);
+  }
+  const renamedSummary = (await userActivityOf(uid("teTeacher"))).find((row) => row.action === "user.renamed")?.summary ?? "";
+  check(renamedSummary.includes(" → "), "user.renamed keeps the arrow summary");
+  const managerBoot = await bootstrapOf("managerA");
+  check(managerBoot.users?.[uid("teTeacher")]?.name === `Smoke teTeacher renamed ${runId}`, "managerA bootstrap shows the renamed teacher");
+  check(managerBoot.users?.[uid("teStudent")]?.name === `Smoke teStudent renamed ${runId}`, "managerA bootstrap shows the renamed student");
+  expectStatus(await patch(mA, uid("teTeacher"), { name: `Smoke teTeacher renamed ${runId}` }), 200, "unchanged name");
+  check((await userActionCount(uid("teTeacher"), "user.renamed")) === 1, "an unchanged name writes no activity row");
+
+  // 2. Scope: identical 403 for unknown and foreign targets; self path kept.
+  const unknownRes = await patch(mA, randomUUID(), { name: "Smoke nobody" });
+  expectStatus(unknownRes, 403, "managerA renames an unknown id");
+  for (const target of [uid("teOtherT"), uid("teOtherS"), uid("managerB"), uid("admin")]) {
+    const res = await patch(mA, target, { name: "Smoke not yours" });
+    expectStatus(res, 403, "managerA renames outside the team");
+    check(sameBody(res, unknownRes), "unknown and foreign ids answer the identical 403 body");
+  }
+  check((await userRowOf(uid("teOtherT"))).name === `Smoke teOtherT ${runId}`, "a foreign teacher keeps their name");
+  expectStatus(await patch(mA, uid("managerA"), { name: `Smoke managerA self ${runId}` }), 200, "managerA renames self");
+  expectStatus(await patch(tok("teTeacher"), uid("teStudent"), { name: "x" }), 403, "teacher renames student");
+  expectStatus(await patch(tok("teStudent"), uid("teTeacher"), { name: "x" }), 403, "student renames teacher");
+
+  // 3. Restricted fields: 403 before any write; unknown keys are stripped.
+  const tId = uid("teTeacher");
+  const tName = (await userRowOf(tId)).name;
+  expectStatus(await patch(mA, tId, { email: emailFor("te-steal") }), 403, "manager changes an email");
+  expectStatus(await patch(mA, tId, { avatarColor: "#123456" }), 403, "manager changes an avatar color");
+  expectStatus(await patch(mA, tId, { name: "Smoke should not apply", email: emailFor("te-steal") }), 403, "manager sends name and email");
+  check((await userRowOf(tId)).name === tName, "name is not applied when the email is refused");
+  expectStatus(await patch(mA, tId, { status: "archived" }), 403, "manager archives");
+  check((await userRowOf(tId)).status === "active", "status unchanged after a refused archive");
+  expectStatus(await patch(mA, uid("teOtherT"), { email: emailFor("te-steal") }), 403, "manager email change on a foreign id");
+  expectStatus(await patch(mA, randomUUID(), { avatarColor: "#123456" }), 403, "manager avatar change on an unknown id");
+  // Stored emails are lowercased (zod), so compare against the normalised form.
+  check((await userRowOf(tId)).email === emailFor("teTeacher").toLowerCase(), "email unchanged after every refused attempt");
+  const withRole = await patch(mA, tId, { name: `Smoke teTeacher role ${runId}`, role: "admin" });
+  expectStatus(withRole, 200, "manager sends name plus role");
+  check((await userRowOf(tId)).role === "teacher" && (await userRowOf(tId)).name === `Smoke teTeacher role ${runId}`, "role ignored, name applied");
+  expectStatus(await patch(mA, tId, { name: `Smoke teTeacher mgr ${runId}`, managerId: uid("managerB") }), 200, "manager sends name plus managerId");
+  check((await userRowOf(tId)).name === `Smoke teTeacher mgr ${runId}`, "name applied with managerId stripped");
+  for (const body of [{ managerId: uid("managerB") }, { role: "admin" }, {}]) {
+    const own = await patch(mA, tId, body);
+    expectStatus(own, 400, `manager body ${JSON.stringify(Object.keys(body))} after stripping`);
+    expectStatus(await patch(mA, randomUUID(), body), 400, "the same body at an unknown id");
+  }
+  expectStatus(await patch(mA, tId, { name: `Smoke teTeacher back ${runId}` }), 200, "managerA still owns the teacher after the stripped managerId");
+
+  // 4. Pause / reactivate own-team people; refresh revoked on pause.
+  for (const label of ["teTeacher", "teStudent"]) {
+    const id = uid(label);
+    const session = await signIn(emailFor(label), password, `${label} signs in`);
+    expectStatus(await patch(mA, id, { status: "paused" }), 200, `managerA pauses ${label}`);
+    check((await activeTokenCount(id)) === 0, `${label}: pause revokes refresh tokens`);
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: session.cookie }), 401, `${label}: old refresh cookie after pause`);
+    expectStatus(await authCall({ path: "/auth/login", body: { email: emailFor(label), password } }), 401, `${label}: login while paused`);
+    check((await userActionCount(id, "user.paused")) === 1, `${label}: one user.paused row`);
+    expectStatus(await patch(tok("managerB"), id, { status: "active" }), 403, `managerB reactivates ${label}`);
+    check((await userRowOf(id)).status === "paused", `${label}: still paused after a foreign attempt`);
+    expectStatus(await patch(mA, id, { status: "active" }), 200, `managerA reactivates ${label}`);
+    await signIn(emailFor(label), password, `${label} signs in after reactivation`);
+    check((await userActionCount(id, "user.active")) === 1, `${label}: one user.active row`);
+  }
+  await createUser("teSpare", "student", uid("managerA"));
+  touched.push(uid("teSpare"));
+  expectStatus(await call(admin, "DELETE", `/users/${uid("teSpare")}`), 200, "admin archives a team student");
+  expectStatus(await patch(mA, uid("teSpare"), { status: "active" }), 403, "manager restores an archived member");
+  check((await userRowOf(uid("teSpare"))).status === "archived", "archive not undone by a manager");
+  expectStatus(await patch(mA, uid("teSpare"), { name: "Smoke archived rename" }), 403, "manager renames an archived member");
+  const teamInvited = await adminInvite("teInvited", "teacher", { managerId: uid("managerA") });
+  touched.push(teamInvited.id);
+  // Stored and mailed addresses are lowercased; fixture labels are camelCase.
+  const teamInvitedEmail = teamInvited.email.toLowerCase();
+  expectStatus(await patch(mA, teamInvited.id, { name: `Smoke teInvited renamed ${runId}` }), 200, "manager renames an invited member");
+  for (const status of ["paused", "active"] as const) {
+    const res = await patch(mA, teamInvited.id, { status });
+    expectStatus(res, 409, `manager sets ${status} on an invited member`);
+    check(errorCode(res) === "ACCOUNT_NOT_ACTIVATED", `manager ${status} on invited answers ACCOUNT_NOT_ACTIVATED`);
+  }
+  const invitedOutbox = outboxFor(teamInvitedEmail).length;
+  expectStatus(await patch(mA, teamInvited.id, { email: emailFor("te-invited-steal") }), 403, "manager changes an invited member's email");
+  check(outboxFor(emailFor("te-invited-steal")).length === 0 && outboxFor(teamInvitedEmail).length === invitedOutbox, "no invite sent on a refused manager email change");
+
+  // 5. Admin email change on an ACTIVE person.
+  await createUser("teActive", "teacher", uid("managerA"));
+  const activeId = uid("teActive");
+  touched.push(activeId);
+  const s1 = await signIn(emailFor("teActive"), password, "teActive session 1");
+  const s2 = await signIn(emailFor("teActive"), password, "teActive session 2");
+  const activeNew = emailFor("te-active-new");
+  const changed = await patch(admin, activeId, { email: activeNew });
+  expectStatus(changed, 200, "admin changes an active person's email");
+  check(!("invite" in obj(changed.body, "email change")), "no invite for an active person");
+  check((await activeTokenCount(activeId)) === 0, "an admin email change revokes refresh tokens");
+  for (const session of [s1, s2]) {
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: session.cookie }), 401, "old refresh cookie after the email change");
+  }
+  expectStatus(await authCall({ path: "/auth/login", body: { email: emailFor("teActive"), password } }), 401, "login at the old address");
+  const fresh = await signIn(activeNew, password, "login at the new address");
+  check((await userActionCount(activeId, "user.email_changed")) === 1, "one user.email_changed row");
+  const changedSummary = (await userActivityOf(activeId)).find((row) => row.action === "user.email_changed")?.summary ?? "";
+  check(!changedSummary.includes("@") && changedSummary.includes("signed out"), "email_changed summary has no address and says signed out");
+  const tokensBefore = await activeTokenCount(activeId);
+  expectStatus(await patch(admin, activeId, { email: activeNew, name: `Smoke teActive renamed ${runId}` }), 200, "admin sends the same email with a new name");
+  check((await activeTokenCount(activeId)) === tokensBefore && tokensBefore > 0, "an unchanged email revokes nothing");
+  check((await userActionCount(activeId, "user.email_changed")) === 1, "an unchanged email writes no email_changed row");
+  const selfNew = emailFor("te-active-self");
+  expectStatus(await patch(fresh.token, activeId, { email: selfNew }), 200, "a person changes their own email");
+  check((await activeTokenCount(activeId)) === tokensBefore, "a self email change keeps the person signed in");
+  check((await userActionCount(activeId, "user.email_changed")) === 2, "a self email change writes one row");
+  await createUser("tePaused", "student", uid("managerA"));
+  touched.push(uid("tePaused"));
+  expectStatus(await patch(admin, uid("tePaused"), { status: "paused" }), 200, "admin pauses tePaused");
+  const outboxSize = mailer.outbox.length;
+  const pausedChange = await patch(admin, uid("tePaused"), { email: emailFor("te-paused-new") });
+  expectStatus(pausedChange, 200, "admin changes a paused person's email");
+  check(!("invite" in obj(pausedChange.body, "paused change")) && mailer.outbox.length === outboxSize, "no invite for a paused person");
+
+  // 6. Admin email change on an INVITED person: re-invite to the new address.
+  const inv = await adminInvite("teInv", "teacher", { managerId: uid("managerA") });
+  touched.push(inv.id);
+  const invEmail = inv.email.toLowerCase();
+  check(outboxFor(invEmail).length === 1, "first invite went to the old address");
+  const oldToken = latestInviteToken(invEmail);
+  const invNew = emailFor("te-inv-new");
+  const reinvited = await patch(admin, inv.id, { email: invNew });
+  expectStatus(reinvited, 200, "admin changes an invited person's email");
+  const reinvite = inviteOf(reinvited);
+  check(reinvite.sent === true && reinvite.mode === "array" && typeof reinvite.link === "string", "the response carries the new invite with the admin link");
+  check(str(reinvited.body, "email") === invNew, "the response carries the new email");
+  check(outboxFor(invNew).length === 1 && outboxFor(invEmail).length === 1, "one mail to the new address, none more to the old");
+  const oldRes = await setPasswordWith(oldToken, password);
+  expectStatus(oldRes, 400, "the old link after the email change");
+  check(errorCode(oldRes) === INVALID_TOKEN_CODE, "the old link answers INVALID_OR_EXPIRED_TOKEN");
+  check((await openInviteCount(inv.id)) === 1, "exactly one open invite");
+  check((await userActionCount(inv.id, "user.email_changed")) === 1 && (await userActionCount(inv.id, "user.invite_resent")) === 1, "one email_changed and one invite_resent row");
+  // Cooldown bypassed: two changes back to back.
+  const invNew2 = emailFor("te-inv-new2");
+  const invNew3 = emailFor("te-inv-new3");
+  expectStatus(await patch(admin, inv.id, { email: invNew2 }), 200, "second email change without waiting");
+  expectStatus(await patch(admin, inv.id, { email: invNew3 }), 200, "third email change without waiting");
+  check(outboxFor(invNew2).length === 1 && outboxFor(invNew3).length === 1, "each new address got one mail");
+  check((await openInviteCount(inv.id)) === 1, "still exactly one open invite");
+  // Mail failure after commit.
+  const invNew4 = emailFor("te-inv-new4");
+  mailer.failNext(new Error("Simulated SMTP rejection"));
+  const failed = await patch(admin, inv.id, { email: invNew4 });
+  expectStatus(failed, 200, "email change with a mail failure");
+  check(inviteOf(failed).sent === false && inviteOf(failed).error === GENERIC_MAIL_ERROR, "a failed send reports the generic error");
+  check(!JSON.stringify(failed.body).includes("Simulated"), "SMTP detail never reaches the client");
+  check((await userRowOf(inv.id)).email === invNew4 && (await openInviteCount(inv.id)) === 1, "email and token committed despite the failed send");
+  await sleep(RESEND_WAIT_MS);
+  const recovered = await call(admin, "POST", `/users/${inv.id}/invite`);
+  expectStatus(recovered, 200, "resend after the failed send");
+  check(inviteOf(recovered).sent === true, "the resend succeeds");
+  expectStatus(await setPasswordWith(latestInviteToken(invNew4), password), 204, "the new link sets a password");
+  await signIn(invNew4, password, "login at the new invited address");
+  // Archived never-activated, and archive together with the email change.
+  const invArch = await adminInvite("teInvArch", "student");
+  touched.push(invArch.id);
+  expectStatus(await call(admin, "DELETE", `/users/${invArch.id}`), 200, "admin archives an invited user");
+  const archChange = await patch(admin, invArch.id, { email: emailFor("te-arch-new") });
+  expectStatus(archChange, 200, "email change on an archived never-activated user");
+  check(!("invite" in obj(archChange.body, "archived change")) && outboxFor(emailFor("te-arch-new")).length === 0, "no mail for an archived user");
+  const invArch2 = await adminInvite("teInvArch2", "student");
+  touched.push(invArch2.id);
+  const archBoth = await patch(admin, invArch2.id, { email: emailFor("te-arch2-new"), status: "archived" });
+  expectStatus(archBoth, 200, "email change plus archive on an invited user");
+  check(!("invite" in obj(archBoth.body, "archive plus email")) && outboxFor(emailFor("te-arch2-new")).length === 0, "archive plus email sends no mail");
+  check((await openInviteCount(invArch2.id)) === 0, "archive plus email expires the open invite");
+
+  // 7. Duplicate email and the concurrent race.
+  const takenEmail = emailFor("teStudent");
+  const activeTokens = await activeTokenCount(activeId);
+  const activeRows = (await userActivityOf(activeId)).length;
+  const dupActive = await patch(admin, activeId, { email: takenEmail });
+  expectStatus(dupActive, 409, "duplicate email on an active user");
+  check((await userRowOf(activeId)).email === selfNew, "active user unchanged after a duplicate");
+  check((await activeTokenCount(activeId)) === activeTokens, "active user's refresh tokens intact after a duplicate");
+  check((await userActivityOf(activeId)).length === activeRows, "a rolled-back edit leaves no activity row");
+  const dupInv = await adminInvite("teDupInv", "student");
+  touched.push(dupInv.id);
+  const dupToken = latestInviteToken(dupInv.email.toLowerCase());
+  expectStatus(await patch(admin, dupInv.id, { email: takenEmail }), 409, "duplicate email on an invited user");
+  check((await openInviteCount(dupInv.id)) === 1 && (await inviteStillValid(dupToken)), "invited user keeps its working invite after a duplicate");
+  await createUser("teRace", "student", uid("managerA"));
+  touched.push(uid("teRace"));
+  const raceEmail = emailFor("te-race");
+  const raceRows = {
+    [uid("teRace")]: (await userActivityOf(uid("teRace"))).length,
+    [dupInv.id]: (await userActivityOf(dupInv.id)).length,
+  };
+  const [raceA, raceB] = await Promise.all([
+    patch(admin, uid("teRace"), { email: raceEmail }),
+    patch(admin, dupInv.id, { email: raceEmail }),
+  ]);
+  const statuses = [raceA.status, raceB.status].sort();
+  check(statuses[0] === 200 && statuses[1] === 409, `race answers one 200 and one 409, got ${statuses.join(",")}`);
+  const loserId = raceA.status === 409 ? uid("teRace") : dupInv.id;
+  const loserOriginal = loserId === dupInv.id ? dupInv.email.toLowerCase() : emailFor("teRace").toLowerCase();
+  check((await userRowOf(loserId)).email === loserOriginal, "the race loser keeps its email");
+  check((await userActivityOf(loserId)).length === raceRows[loserId], "the race loser gets no activity row");
+  if (loserId === dupInv.id) {
+    check(await inviteStillValid(dupToken), "the invited loser keeps its working invite");
+  }
+
+  // 8. Activity hygiene: no address in any summary for this domain's targets.
+  for (const id of touched) {
+    for (const row of await userActivityOf(id)) {
+      check(!row.summary.includes("@"), `activity ${row.action} summary contains no address`);
+    }
+  }
+
+  // 9. Regression: manager profile edits keep their own scope.
+  expectStatus(await call(mA, "PATCH", `/teachers/${uid("teTeacher")}`, { headline: "Smoke team headline" }), 200, "manager edits own teacher profile");
+  expectStatus(await call(mA, "PATCH", `/teachers/${uid("teOtherT")}`, { headline: "Not yours" }), 403, "manager edits a foreign teacher profile");
+  expectStatus(await call(mA, "PATCH", `/students/${uid("teStudent")}`, { goal: "Smoke team goal" }), 200, "manager edits own student profile");
+  expectStatus(await call(mA, "PATCH", `/students/${uid("teOtherS")}`, { goal: "Not yours" }), 403, "manager edits a foreign student profile");
+  expectStatus(await patch(admin, uid("teOtherT"), { avatarColor: "#224466" }), 200, "admin changes another user's avatar");
+  check((await userActionCount(uid("teOtherT"), "user.updated")) === 1, "an avatar change writes one user.updated row");
+}
 
 async function scenario(domain: string, body: () => Promise<void>): Promise<void> {
   const start = checkCount;
@@ -833,9 +1938,308 @@ async function scenario(domain: string, body: () => Promise<void>): Promise<void
   }
 }
 
+/** Lesson inserted straight into the DB with a chosen status (library fixtures need completed/live/cancelled). */
+async function insertLibraryLesson(teacherLabel: string, studentLabel: string, status: "scheduled" | "live" | "completed" | "cancelled"): Promise<string> {
+  const slot = nextSlot(9);
+  const [row] = await db
+    .insert(lessons)
+    .values({
+      teacherId: uid(teacherLabel),
+      studentId: uid(studentLabel),
+      date: slot.date,
+      time: slot.time,
+      endTime: addMinutes(slot.time, LESSON_MINUTES),
+      title: `Smoke library lesson ${runId}`,
+      status,
+      createdBy: adminId!,
+    })
+    .returning({ id: lessons.id });
+  if (!row) throw new Error("could not insert a library lesson");
+  return row.id;
+}
+
+async function setLessonStatus(lessonId: string, status: "completed" | "cancelled"): Promise<void> {
+  await db.update(lessons).set({ status }).where(eq(lessons.id, lessonId));
+}
+
+async function bootstrapOf(label: string): Promise<Record<string, Record<string, Record<string, unknown>>>> {
+  const res = await call(tok(label), "GET", "/school/bootstrap");
+  expectStatus(res, 200, `bootstrap ${label}`);
+  return obj(obj(res.body, "bootstrap").collections, "collections") as Record<string, Record<string, Record<string, unknown>>>;
+}
+
+async function libraryScenario(): Promise<void> {
+  const bytesOf = (label: string) => new TextEncoder().encode(`smoke library ${label} ${runId}`);
+  const pdf = async (label: string, name: string, bytes: Uint8Array) => {
+    const res = await upload(tok(label), { name, type: "application/pdf", bytes });
+    expectStatus(res, 201, `${label} uploads ${name}`);
+    return str(res.body, "id");
+  };
+  const errorCode = (res: Res) => str(obj(res.body, "error").error, "code");
+  const missing = "00000000-0000-4000-8000-000000000000";
+  await createUser("managerC", "manager");
+
+  // 1. Create ------------------------------------------------------------------------------
+  const contentA = bytesOf("a");
+  const fileA = await pdf("managerA", "lib-a.pdf", contentA);
+  const created = await call(tok("managerA"), "POST", "/library", { attachmentId: fileA, title: "  Airport worksheet  ", category: "Worksheets", level: "B1", tags: ["travel", "travel", "speaking"] });
+  expectStatus(created, 201, "manager creates a library item from own upload");
+  const itemA = str(created.body, "id");
+  check(str(created.body, "title") === "Airport worksheet", "library title is trimmed");
+  check(str(created.body, "status") === "published", "new library item is published");
+  check(str(created.body, "createdBy") === uid("managerA"), "createdBy is the actor");
+  check(JSON.stringify(fieldArr(created.body, "tags")) === JSON.stringify(["travel", "speaking"]), "duplicate tags collapse");
+  await expectOneActivity("libraryItem", itemA, "library.created");
+
+  const fileB = await pdf("managerB", "lib-b.pdf", bytesOf("b"));
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileB, title: "Not mine", category: "Worksheets" }), 403, "manager creates from another user's upload");
+  const adminCreated = await call(tok("admin"), "POST", "/library", { attachmentId: fileB, title: "Team B slides", category: "Slides" });
+  expectStatus(adminCreated, 201, "admin creates from another user's upload");
+  const itemB = str(adminCreated.body, "id");
+  check(str(adminCreated.body, "createdBy") === uid("admin"), "admin item createdBy is the admin");
+
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileA, title: "Again", category: "Worksheets" }), 409, "second item on the same attachment");
+  expectStatus(await call(tok("admin"), "POST", "/library", { attachmentId: missing, title: "Ghost", category: "Worksheets" }), 404, "unknown attachment");
+  expectStatus(await call(tok("studentA"), "POST", "/library", { attachmentId: fileA, title: "Student", category: "Worksheets" }), 403, "student creates a library item");
+  expectStatus(await call(tok("teacherA"), "POST", "/library", { attachmentId: fileA, title: "Teacher", category: "Worksheets" }), 403, "teacher creates a library item");
+  // Client file metadata is never accepted: the strict body rejects it; metadata comes from the upload row.
+  const fileMeta = await pdf("managerA", "lib-meta.pdf", bytesOf("meta"));
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", name: "evil.exe", size: 1 }), 400, "client file metadata rejected");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", description: "x".repeat(2001) }), 400, "description over 2000 chars");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", level: "x".repeat(51) }), 400, "level over 50 chars");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: "Meta", category: "Worksheets", tags: Array.from({ length: 21 }, (_, i) => `t${i}`) }), 400, "more than 20 tags");
+  expectStatus(await call(tok("managerA"), "POST", "/library", { attachmentId: fileMeta, title: " ", category: "Worksheets" }), 400, "blank title");
+
+  // Request evidence can never become a library item.
+  const reqLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const evidence = await pdf("teacherA", "lib-evidence.pdf", bytesOf("evidence"));
+  const request = await call(tok("teacherA"), "POST", "/requests", { type: "lesson-cancellation", lessonId: reqLesson, reason: "Smoke library evidence", attachmentId: evidence });
+  expectStatus(request, 201, "teacher files request evidence");
+  const evidenceItem = await call(tok("admin"), "POST", "/library", { attachmentId: evidence, title: "Evidence", category: "Worksheets" });
+  expectStatus(evidenceItem, 422, "request evidence into the library");
+  check(errorCode(evidenceItem) === "ATTACHMENT_NOT_ELIGIBLE", `request evidence error code ${JSON.stringify(evidenceItem.body)}`);
+
+  const createdC = await call(tok("managerC"), "POST", "/library", { attachmentId: await pdf("managerC", "lib-c.pdf", bytesOf("c")), title: "Manager C handout", category: "Handouts" });
+  expectStatus(createdC, 201, "manager without a team creates an item");
+  const itemC = str(createdC.body, "id");
+
+  // 2. Patch -------------------------------------------------------------------------------
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemA}`, { title: "Airport worksheet v2" }), 200, "creator edits");
+  expectStatus(await call(tok("managerB"), "PATCH", `/library/${itemA}`, { title: "Hijack" }), 403, "other manager edits");
+  expectStatus(await call(tok("teacherA"), "PATCH", `/library/${itemA}`, { title: "Hijack" }), 403, "teacher edits");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { category: "Worksheets A" }), 200, "admin edits");
+  check((await activityCount("libraryItem", itemA, "library.updated")) === 2, "two edits log two library.updated rows");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { attachmentId: fileB }), 400, "PATCH cannot swap the file");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { createdBy: uid("managerB") }), 400, "PATCH cannot change the creator");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, { owner: "x" }), 400, "PATCH rejects unknown keys");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${itemA}`, {}), 400, "PATCH rejects an empty body");
+  expectStatus(await call(tok("admin"), "PATCH", `/library/${missing}`, { title: "Ghost" }), 404, "PATCH unknown item");
+
+  // 3. Attach ------------------------------------------------------------------------------
+  const lessonA = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const lessonLive = await insertLibraryLesson("teacherA", "studentA", "live");
+  const lessonDone = await insertLibraryLesson("teacherA", "studentA", "completed");
+  const lessonGone = await insertLibraryLesson("teacherA", "studentA", "cancelled");
+  const lessonB = await insertLibraryLesson("teacherB", "studentB", "scheduled");
+
+  const attached = await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemA });
+  expectStatus(attached, 200, "manager attaches to own-team lesson");
+  check(str(attached.body, "id") === `${lessonA}:${itemA}`, "link id is lessonId:libraryItemId");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemA }), 200, "repeat attach is idempotent");
+  await expectOneActivity("lesson", lessonA, "lesson.libraryAttached");
+  expectStatus(await call(tok("managerB"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemB }), 403, "other-team manager attaches");
+  expectStatus(await call(tok("teacherA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemB }), 403, "teacher attaches");
+  expectStatus(await call(tok("studentA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemB }), 403, "student attaches");
+  expectStatus(await call(tok("admin"), "POST", `/lessons/${lessonB}/library-items`, { libraryItemId: itemB }), 200, "admin attaches to any lesson");
+  expectStatus(await call(tok("admin"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemC }), 200, "admin attaches manager C's item");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonLive}/library-items`, { libraryItemId: itemA }), 200, "attach to a live lesson");
+  const doneAttach = await call(tok("managerA"), "POST", `/lessons/${lessonDone}/library-items`, { libraryItemId: itemA });
+  expectStatus(doneAttach, 422, "attach to a completed lesson");
+  check(errorCode(doneAttach) === "LESSON_NOT_ATTACHABLE", "completed lesson error code");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonGone}/library-items`, { libraryItemId: itemA }), 422, "attach to a cancelled lesson");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${missing}/library-items`, { libraryItemId: itemA }), 404, "attach to an unknown lesson");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: missing }), 404, "attach an unknown item");
+
+  // 4. Download ----------------------------------------------------------------------------
+  const studentBytes = await download(tok("studentA"), fileA);
+  check(studentBytes.status === 200 && Buffer.compare(Buffer.from(studentBytes.bytes), Buffer.from(contentA)) === 0, `linked student downloads identical bytes (got ${studentBytes.status})`);
+  check((await download(tok("studentB"), fileA)).status === 403, "unrelated student download blocked");
+  check((await download(tok("teacherA"), fileA)).status === 200, "teacher of the linked lesson downloads");
+  check((await download(tok("teacherB"), fileA)).status === 403, "unrelated teacher download blocked");
+  check((await download(tok("managerB"), fileA)).status === 200, "other manager downloads a published item");
+
+  // A student whose only linked lesson is cancelled loses access.
+  const fileZ = await pdf("managerA", "lib-z.pdf", bytesOf("z"));
+  const createdZ = await call(tok("managerA"), "POST", "/library", { attachmentId: fileZ, title: "Zero handout", category: "Handouts" });
+  expectStatus(createdZ, 201, "create item for the cancel check");
+  const itemZ = str(createdZ.body, "id");
+  const lessonZero = await insertLibraryLesson("teacherA", "studentZero", "scheduled");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonZero}/library-items`, { libraryItemId: itemZ }), 200, "attach item for studentZero");
+  check((await download(tok("studentZero"), fileZ)).status === 200, "student downloads before the lesson is cancelled");
+  await setLessonStatus(lessonZero, "cancelled");
+  check((await download(tok("studentZero"), fileZ)).status === 403, "student of a cancelled linked lesson is blocked");
+
+  // Archive: no new browse, existing links keep access.
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemA}`, { status: "archived" }), 200, "creator archives");
+  await expectOneActivity("libraryItem", itemA, "library.archived");
+  check((await download(tok("studentA"), fileA)).status === 200, "linked student keeps access to an archived item");
+  check((await download(tok("managerB"), fileA)).status === 403, "other manager loses an archived item not linked to their team");
+  check((await download(tok("managerA"), fileA)).status === 200, "creator keeps access to an archived item");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${lessonLive}/library-items`, { libraryItemId: itemA }), 422, "archived item cannot be attached again");
+  const fileU = await pdf("managerA", "lib-u.pdf", bytesOf("u"));
+  const createdU = await call(tok("managerA"), "POST", "/library", { attachmentId: fileU, title: "Unused", category: "Handouts" });
+  expectStatus(createdU, 201, "create an unlinked item");
+  const itemU = str(createdU.body, "id");
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemU}`, { status: "archived" }), 200, "archive the unlinked item");
+  check((await download(tok("managerB"), fileU)).status === 403, "other manager blocked from an archived unlinked item");
+  const blocked = await call(tok("managerA"), "POST", `/lessons/${lessonA}/library-items`, { libraryItemId: itemU });
+  expectStatus(blocked, 422, "attach an archived item");
+  check(errorCode(blocked) === "ITEM_ARCHIVED", "archived item error code");
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${itemU}`, { status: "published" }), 200, "unarchive");
+  check((await activityCount("libraryItem", itemU, "library.archived")) === 1, "unarchive logs no second library.archived row");
+  await expectOneActivity("libraryItem", itemU, "library.updated");
+
+  // Phase 02 regression with library items present.
+  check((await download(tok("studentA"), evidence)).status === 403, "request evidence stays student-invisible");
+  const stray = await pdf("managerB", "lib-stray.pdf", bytesOf("stray"));
+  check((await download(tok("studentA"), stray)).status === 403, "unreferenced upload stays blocked for a student");
+  check((await download(tok("managerA"), stray)).status === 403, "unreferenced upload stays blocked for another manager");
+
+  // 5. Bootstrap per role --------------------------------------------------------------------
+  const studentBoot = await bootstrapOf("studentA");
+  const studentLessonIds = new Set(Object.keys(studentBoot.lessons ?? {}));
+  const studentLinks = Object.values(studentBoot.lessonLibraryItems ?? {});
+  check(studentLinks.every((link) => studentLessonIds.has(String(link.lessonId))), "student sees only links on own lessons");
+  check(Boolean(studentBoot.lessonLibraryItems?.[`${lessonA}:${itemA}`]), "student sees the link on their lesson");
+  check(Boolean(studentBoot.libraryItems?.[itemA]) && Boolean(studentBoot.libraryItems?.[itemC]), "student sees items linked to their lessons");
+  check(!studentBoot.libraryItems?.[itemB] && !studentBoot.libraryItems?.[itemU], "student does not browse other items");
+  check(Boolean(studentBoot.attachments?.[fileA]) && studentBoot.attachments?.[fileA]?.name === "lib-a.pdf" && studentBoot.attachments?.[fileA]?.size === contentA.length, "attachment metadata comes from the upload row");
+  check(!studentBoot.users?.[uid("managerC")], "student bootstrap pulls no library creator rows");
+  check(Object.values(studentBoot.libraryItems ?? {}).every((item) => item.createdByName === undefined), "student library items carry no creator name");
+
+  const zeroBoot = await bootstrapOf("studentZero");
+  check(Object.keys(zeroBoot.libraryItems ?? {}).length === 0 && Object.keys(zeroBoot.lessonLibraryItems ?? {}).length === 0, "student with only a cancelled linked lesson sees no library data");
+
+  const teacherBoot = await bootstrapOf("teacherA");
+  const teacherLessons = teacherBoot.lessons ?? {};
+  check(Object.values(teacherBoot.lessonLibraryItems ?? {}).every((link) => teacherLessons[String(link.lessonId)] && teacherLessons[String(link.lessonId)]?.status !== "cancelled"), "teacher sees only links on own non-cancelled lessons");
+  check(Boolean(teacherBoot.libraryItems?.[itemA]) && !teacherBoot.libraryItems?.[itemZ] && !teacherBoot.libraryItems?.[itemB], "teacher item visibility");
+  check(!teacherBoot.users?.[uid("managerC")], "teacher bootstrap pulls no library creator rows");
+  check(Object.values(teacherBoot.libraryItems ?? {}).every((item) => item.createdByName === undefined), "teacher library items carry no creator name");
+
+  const managerBoot = await bootstrapOf("managerA");
+  check(Boolean(managerBoot.libraryItems?.[itemB]) && Boolean(managerBoot.libraryItems?.[itemC]), "manager browses published items");
+  check(Boolean(managerBoot.libraryItems?.[itemA]), "manager sees own archived item");
+  check(Boolean(managerBoot.lessonLibraryItems?.[`${lessonA}:${itemA}`]) && !managerBoot.lessonLibraryItems?.[`${lessonB}:${itemB}`], "manager sees team links only");
+  const creatorBoot = await bootstrapOf("admin");
+  const managerCName = creatorBoot.users?.[uid("managerC")]?.name;
+  check(typeof managerCName === "string" && managerCName.length > 0, "admin bootstrap has managerC's name");
+  check(!managerBoot.users?.[uid("managerC")], "manager bootstrap pulls no other-manager user row because of the library");
+  check(managerBoot.libraryItems?.[itemC]?.createdByName === managerCName, "manager bootstrap carries the library creator's display name");
+  check(creatorBoot.libraryItems?.[itemC]?.createdByName === managerCName, "admin bootstrap carries the library creator's display name");
+  const managerBBoot = await bootstrapOf("managerB");
+  check(!managerBBoot.libraryItems?.[itemA], "other manager does not see an archived item unrelated to their team");
+  check(!managerBBoot.lessonLibraryItems?.[`${lessonA}:${itemA}`], "other manager sees no links on another team's lessons");
+  for (const label of ["studentA", "studentB", "teacherA", "managerB"]) {
+    const boot = label === "studentA" ? studentBoot : label === "teacherA" ? teacherBoot : label === "managerB" ? managerBBoot : await bootstrapOf(label);
+    const lessonIds = new Set(Object.keys(boot.lessons ?? {}));
+    check(Object.values(boot.lessonLibraryItems ?? {}).every((link) => lessonIds.has(String(link.lessonId))), `${label} gets no link rows for lessons outside their view`);
+  }
+  const adminBoot = await bootstrapOf("admin");
+  check(Boolean(adminBoot.lessonLibraryItems?.[`${lessonB}:${itemB}`]) && Boolean(adminBoot.libraryItems?.[itemU]), "admin sees every item and link");
+
+  // 6. Detach --------------------------------------------------------------------------------
+  expectStatus(await call(tok("teacherA"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 403, "teacher detaches");
+  expectStatus(await call(tok("studentA"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 403, "student detaches");
+  expectStatus(await call(tok("managerB"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 403, "other-team manager detaches");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${missing}/library-items/${itemA}`), 404, "detach on an unknown lesson");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonA}/library-items/${missing}`), 404, "detach an unknown item");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonA}/library-items/${itemA}`), 204, "manager detaches");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonA}/library-items/${itemA}`), 204, "repeat detach is idempotent");
+  await expectOneActivity("lesson", lessonA, "lesson.libraryDetached");
+  await setLessonStatus(lessonLive, "completed");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${lessonLive}/library-items/${itemA}`), 204, "detach on a completed lesson");
+  await expectOneActivity("lesson", lessonLive, "lesson.libraryDetached");
+  check((await download(tok("studentA"), fileA)).status === 403, "student loses access once the item is detached everywhere");
+
+  expectStatus(await call(null, "POST", "/library", { attachmentId: fileA, title: "x", category: "y" }), 401, "anonymous create");
+  check(str(createdC.body, "createdByName") === managerCName, "create response carries the creator name");
+
+  await libraryStepFChecks(pdf, bytesOf);
+}
+
+/** Step F library checks: plan/library overlap, concurrency, and the status CHECK (F5 i-iii, v). */
+async function libraryStepFChecks(
+  pdf: (label: string, name: string, bytes: Uint8Array) => Promise<string>,
+  bytesOf: (label: string) => Uint8Array,
+): Promise<void> {
+  // (i) A file that is both a published-course plan attachment and a library item keeps plan access.
+  const both = await pdf("managerA", "lib-both.pdf", bytesOf("both"));
+  expectStatus(await call(tok("managerA"), "POST", `/courses/${courseId}/units/${unitId}/plans/${firstPlanId}/attachments`, { attachmentId: both }), 200, "attach the overlap file to a plan");
+  const bothItem = await call(tok("managerA"), "POST", "/library", { attachmentId: both, title: "Overlap", category: "Handouts" });
+  expectStatus(bothItem, 201, "overlap file becomes a library item");
+  const bothItemId = str(bothItem.body, "id");
+  const bothLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  expectStatus(await call(tok("managerA"), "POST", `/lessons/${bothLesson}/library-items`, { libraryItemId: bothItemId }), 200, "link the overlap item to a lesson");
+  check((await download(tok("studentA"), both)).status === 200, "enrolled student downloads the overlap file");
+  check((await download(tok("teacherA"), both)).status === 200, "enrolled teacher downloads the overlap file");
+  check((await download(tok("studentB"), both)).status === 403, "unrelated student blocked from the overlap file");
+  expectStatus(await call(tok("managerA"), "PATCH", `/library/${bothItemId}`, { status: "archived" }), 200, "archive the overlap item");
+  expectStatus(await call(tok("managerA"), "DELETE", `/lessons/${bothLesson}/library-items/${bothItemId}`), 204, "detach the overlap item");
+  check((await download(tok("studentA"), both)).status === 200, "plan access survives archive and detach of the library link");
+  check((await download(tok("studentB"), both)).status === 403, "unrelated student still blocked after detach");
+
+  // (ii) Two parallel creates on one upload: exactly one 201 and one 409, never 500.
+  const raceFile = await pdf("managerA", "lib-race.pdf", bytesOf("race"));
+  const creates = await Promise.all([0, 1].map((n) => call(tok("managerA"), "POST", "/library", { attachmentId: raceFile, title: `Race ${n}`, category: "Handouts" })));
+  const createStatuses = creates.map((res) => res.status).sort((a, b) => a - b);
+  check(JSON.stringify(createStatuses) === JSON.stringify([201, 409]), `parallel creates give [201, 409], got ${JSON.stringify(createStatuses)}`);
+  const raceItem = creates.find((res) => res.status === 201);
+  if (!raceItem) throw new Error("no parallel create succeeded");
+  const raceItemId = str(raceItem.body, "id");
+
+  // (iii) Two parallel attaches: both 200, exactly one activity row.
+  const raceLesson = await insertLibraryLesson("teacherA", "studentA", "scheduled");
+  const linkPath = `/lessons/${raceLesson}/library-items`;
+  const attaches = await Promise.all([0, 1].map(() => call(tok("managerA"), "POST", linkPath, { libraryItemId: raceItemId })));
+  check(attaches.every((res) => res.status === 200), `parallel attaches both 200, got ${JSON.stringify(attaches.map((res) => res.status))}`);
+  await expectOneActivity("lesson", raceLesson, "lesson.libraryAttached");
+
+  // Attach racing detach: never 500; attach in {200, 409}, detach in {200, 204}.
+  for (let round = 0; round < 5; round += 1) {
+    const [attachRes, detachRes] = await Promise.all([
+      call(tok("managerA"), "POST", linkPath, { libraryItemId: raceItemId }),
+      call(tok("managerA"), "DELETE", `${linkPath}/${raceItemId}`),
+    ]);
+    check(attachRes.status === 200 || attachRes.status === 409, `attach vs detach round ${round}: attach got ${attachRes.status}`);
+    check(detachRes.status === 200 || detachRes.status === 204, `attach vs detach round ${round}: detach got ${detachRes.status}`);
+  }
+  const settle = await call(tok("managerA"), "POST", linkPath, { libraryItemId: raceItemId });
+  expectStatus(settle, 200, "attach after the race settles");
+  const links = Object.values((await bootstrapOf("admin")).lessonLibraryItems ?? {}).filter((link) => link.lessonId === raceLesson && link.libraryItemId === raceItemId);
+  check(links.length === 1, `end state holds exactly one link, got ${links.length}`);
+
+  // (v) The DB CHECK rejects an invalid status (23514); no row is left behind.
+  const bogusFile = await pdf("admin", "lib-bogus.pdf", bytesOf("bogus"));
+  let code: unknown;
+  try {
+    await db.insert(libraryItems).values({ title: "Bogus", category: "Handouts", attachmentId: bogusFile, createdBy: adminId!, status: "bogus" });
+  } catch (error) {
+    const err = error as { code?: unknown; cause?: { code?: unknown } };
+    code = err.code ?? err.cause?.code;
+  }
+  check(code === "23514", `invalid status insert fails with a check violation (got ${String(code)})`);
+  const leftover = await db.select({ id: libraryItems.id }).from(libraryItems).where(eq(libraryItems.attachmentId, bogusFile));
+  check(leftover.length === 0, "the rejected insert left no library row");
+}
+
 async function main(): Promise<number> {
   console.log(`Lumina API smoke run ${runId} on ${base} (db host ${dbHost})`);
-  app = await buildApp({ env });
+  if (env.NODE_ENV !== "test" || mailer.kind !== "array" || env.MAIL_MAILER !== "array") {
+    console.error("SMOKE REFUSED: mail must run with NODE_ENV=test and the in-memory array mailer.");
+    return 2;
+  }
+  app = await buildApp({ env, mailer });
   try {
     await app.listen({ host: "127.0.0.1", port });
   } catch (error) {
@@ -858,11 +2262,16 @@ async function main(): Promise<number> {
   await scenario("lessons", lessonsScenario);
   await scenario("requests", requestsScenario);
   await scenario("credits", creditsScenario);
+  await scenario("refunds", refundEvidenceScenario);
   await scenario("homework", homeworkScenario);
   await scenario("quality", qualityScenario);
   await scenario("profile", profileScenario);
   await scenario("uploads", uploadsScenario);
   await scenario("notifications", notificationsScenario);
+  await scenario("library", libraryScenario);
+  await scenario("auth", authScenario);
+  await scenario("invites", invitesScenario);
+  await scenario("team-edits", teamEditsScenario);
 
   const failed = outcomes.filter((outcome) => outcome.error);
   const total = outcomes.reduce((sum, outcome) => sum + outcome.checks, 0);

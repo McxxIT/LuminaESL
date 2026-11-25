@@ -1,0 +1,214 @@
+{
+  "task": "lumina-v1-finish Phase 04 — Curriculum Library",
+  "result": "PASS (executor run 24-11-26; independent vc-tester EVL re-run pending)",
+  "commands": [
+    {
+      "command": "npm run db:generate",
+      "result": "PASS",
+      "notes": "0005_zippy_thunderbolt_ross.sql generated with no interactive prompt; hand-reviewed: additive only"
+    },
+    {
+      "command": "npm run db:migrate (x3)",
+      "result": "PASS",
+      "notes": "first run applied 0005; later runs no-op (only benign 'already exists, skipping' notices for the drizzle schema/journal)"
+    },
+    {
+      "command": "git diff --name-only -- backend/src/db (incl. untracked)",
+      "result": "PASS",
+      "notes": "schema.ts, migrations/0005_zippy_thunderbolt_ross.sql, migrations/meta/_journal.json, migrations/meta/0005_snapshot.json only"
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "PASS",
+      "notes": "exit 0, both workspaces"
+    },
+    {
+      "command": "npm run lint",
+      "result": "PASS",
+      "notes": "exit 0, both workspaces"
+    },
+    {
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "6 files, 44 tests (was 43); contract test asserts 18 keys, the 4 library routes, and anonymous 401. Red-first: 2 failing before implementation"
+    },
+    {
+      "command": "npm run smoke (tripwire after Step B)",
+      "result": "PASS",
+      "notes": "15/15 domains, 463 checks; uploads 38 unchanged after the canAccessAttachment edit"
+    },
+    {
+      "command": "npm run smoke",
+      "result": "PASS",
+      "notes": "16/16 domains, 594 checks (library 131); run twice green"
+    },
+    {
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "27 API tests (new curriculum-library.spec.ts) + 4 demo tests (new library test)"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS",
+      "notes": "exit 0"
+    }
+  ],
+  "steps": [
+    {
+      "step": "duplicate attachment -> 409",
+      "result": "PASS",
+      "notes": "smoke library: second item on the same attachment"
+    },
+    {
+      "step": "request evidence into the library -> 422 ATTACHMENT_NOT_ELIGIBLE",
+      "result": "PASS",
+      "notes": "smoke library"
+    },
+    {
+      "step": "manager creates from another user's upload -> 403; admin -> 201",
+      "result": "PASS",
+      "notes": "smoke library"
+    },
+    {
+      "step": "other-team manager attach -> 403; teacher/student attach -> 403",
+      "result": "PASS",
+      "notes": "smoke library + e2e outsider student attach 403"
+    },
+    {
+      "step": "completed/cancelled lesson attach -> 422; archived item attach -> 422 ITEM_ARCHIVED; live lesson attach -> 200",
+      "result": "PASS",
+      "notes": "smoke library"
+    },
+    {
+      "step": "student of a cancelled linked lesson download -> 403",
+      "result": "PASS",
+      "notes": "smoke library (200 before cancel, 403 after)"
+    },
+    {
+      "step": "unrelated student / unrelated teacher download -> 403",
+      "result": "PASS",
+      "notes": "smoke library + e2e disposable student 403"
+    },
+    {
+      "step": "archived item still downloadable by an already-linked student; other manager loses it",
+      "result": "PASS",
+      "notes": "smoke library"
+    },
+    {
+      "step": "Phase 02: request evidence stays student-invisible and unreferenced uploads stay 403 with library items present",
+      "result": "PASS",
+      "notes": "smoke library + uploads domain 38 checks"
+    },
+    {
+      "step": "strict PATCH: attachmentId / createdBy / unknown key / empty body -> 400",
+      "result": "PASS",
+      "notes": "smoke library"
+    },
+    {
+      "step": "bootstrap: no cross-student links, teacher/student pull no library creator rows",
+      "result": "PASS",
+      "notes": "smoke library (fresh managerC creator absent from teacher/student bootstraps)"
+    },
+    {
+      "step": "migration second run is a no-op",
+      "result": "PASS",
+      "notes": "db:migrate re-run"
+    },
+    {
+      "step": "Step F: vitest upload-path.test.ts written red-first (module missing) then green",
+      "command": "npm run test --workspace @lumina/backend",
+      "result": "PASS",
+      "notes": "17 containment cases (native + path.win32): traversal, absolute, drive, UNC, empty, dot, NUL, sibling prefix, mixed separators; '..hidden.pdf' stays inside. Suite 7 files / 61 tests."
+    },
+    {
+      "step": "Step F: F4.1 read-only pre-check of library_items.status",
+      "command": "scratchpad script (outside repo), local host only",
+      "result": "PASS",
+      "notes": "0 rows outside ('published','archived')"
+    },
+    {
+      "step": "Step F: Migration 0006 generated and reviewed",
+      "command": "npm run db:generate",
+      "result": "PASS",
+      "notes": "0006_large_the_hand.sql = single ALTER TABLE library_items ADD CONSTRAINT library_items_status_check CHECK (status in ('published','archived'))"
+    },
+    {
+      "step": "Step F: Migration applied, re-run is a no-op",
+      "command": "npm run db:migrate (x3)",
+      "result": "PASS",
+      "notes": "applied once; later runs no-op"
+    },
+    {
+      "step": "Step F: 0005 files unchanged",
+      "command": "sha256sum 0005 sql + snapshot at F-1 and F-8; git status --porcelain -- backend/src/db",
+      "result": "PASS",
+      "notes": "hashes identical; porcelain lists exactly schema.ts, _journal.json, 0005 and 0006 sql/snapshot"
+    },
+    {
+      "step": "Step F: Strict plan attach 400/403/404/422/200, no attachments row created",
+      "command": "npm run smoke (uploads)",
+      "result": "PASS",
+      "notes": "legacy shape, storageKey extra key and {} -> 400 VALIDATION_ERROR; managerB attaching managerA upload to own plan 403; unknown id 404; request evidence 422 ATTACHMENT_NOT_ELIGIBLE; admin any 200; zero rows for client keys/id; plan holds only the attached id"
+    },
+    {
+      "step": "Step F: Traversal canary over HTTP",
+      "command": "npm run smoke (uploads)",
+      "result": "PASS",
+      "notes": "row with storage_key '../smoke-canary-{runId}.txt' -> 404 without sentinel; control upload 200; row and canary removed in finally"
+    },
+    {
+      "step": "Step F: No other-manager user row via the library; createdByName",
+      "command": "npm run smoke (library)",
+      "result": "PASS",
+      "notes": "managerA bootstrap has no managerC user row; itemC.createdByName equals admin-bootstrap name; teacher/student items carry no createdByName"
+    },
+    {
+      "step": "Step F: Concurrency never 500",
+      "command": "npm run smoke (library)",
+      "result": "PASS",
+      "notes": "parallel creates [201,409]; parallel attaches both 200 with one activity row; 5 attach-vs-detach rounds attach in {200,409}, detach in {200,204}; end state one link"
+    },
+    {
+      "step": "Step F: CHECK violation",
+      "command": "npm run smoke (library)",
+      "result": "PASS",
+      "notes": "direct insert with status 'bogus' fails with 23514; no row left"
+    },
+    {
+      "step": "Step F: Plan + library overlap keeps plan access",
+      "command": "npm run smoke (library)",
+      "result": "PASS",
+      "notes": "enrolled student/teacher 200, unrelated student 403, still 200/403 after archive + detach"
+    },
+    {
+      "step": "Step F: Full smoke incl. Phase 02 uploads/credits and Phase 03 auth",
+      "command": "npm run smoke",
+      "result": "PASS",
+      "notes": "16/16 domains, 656 checks"
+    },
+    {
+      "step": "Step F: Static gates",
+      "command": "npm run typecheck; npm run lint; git diff --check",
+      "result": "PASS",
+      "notes": "all exit 0"
+    },
+    {
+      "step": "Step F: Browser parity incl. creator name (API) and demo fence",
+      "command": "npm run e2e",
+      "result": "PASS",
+      "notes": "curriculum-library.spec.ts asserts 'by {createdByName}'; demo regression asserts 'by Priya Raman' and apiCalls []"
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "Migration SQL hand review against the A3 checklist",
+      "result": "PASS",
+      "notes": "Only CREATE TABLE, CREATE INDEX, ADD CONSTRAINT on the two new tables"
+    },
+    {
+      "check": "AC-11 visual agent-probe (desktop + 390px)",
+      "result": "PENDING",
+      "notes": "No browser tool available to the execute agent; to run in EVL"
+    }
+  ]
+}

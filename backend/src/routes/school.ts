@@ -8,8 +8,10 @@ import {
   courses,
   creditEntries,
   enrollments,
+  lessonLibraryItems,
   lessonPlans,
   lessons,
+  libraryItems,
   ratings,
   requests,
   settings,
@@ -19,6 +21,7 @@ import {
   users,
 } from "../db/schema";
 import { adminIds } from "../lib/scope";
+import { lessonLibraryLinkRecord, libraryItemRecord } from "./library";
 
 /** Mirrors `SCHOOL_SCHEMA_VERSION` in `frontend/app/lib/school/types.ts`. */
 export const SCHOOL_SCHEMA_VERSION = 3;
@@ -41,6 +44,8 @@ export const BOOTSTRAP_COLLECTION_KEYS = [
   "assignments",
   "credits",
   "activity",
+  "libraryItems",
+  "lessonLibraryItems",
 ] as const;
 
 /** Settings keys, checked against `SchoolSettings` in `tests/contract.test.ts`. */
@@ -87,6 +92,8 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
         activityRows,
         settingsRows,
         adminRows,
+        libraryItemRows,
+        lessonLibraryRows,
       ] = await Promise.all([
         app.db.select().from(users),
         app.db.select().from(teacherProfiles),
@@ -106,6 +113,8 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
         app.db.select().from(activity),
         app.db.select().from(settings),
         adminIds(app.db),
+        app.db.select().from(libraryItems),
+        app.db.select().from(lessonLibraryItems),
       ]);
 
       const adminIdSet = new Set(adminRows);
@@ -276,6 +285,34 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
 
       const visibleActivity = isAdmin ? activityRows : [];
 
+      // Curriculum Library. Managers browse every published item plus their own and any
+      // archived item still linked to a team lesson; teachers and students only see items
+      // linked to their own lessons that are not cancelled (no browse access).
+      let visibleLessonLibraryRows = lessonLibraryRows;
+      let visibleLibraryItemRows = libraryItemRows;
+      if (!isAdmin) {
+        const linkLessonIds = new Set(
+          visibleLessons
+            .filter(
+              (row) => actor.role === "manager" || row.status !== "cancelled",
+            )
+            .map((row) => row.id),
+        );
+        visibleLessonLibraryRows = lessonLibraryRows.filter((row) =>
+          linkLessonIds.has(row.lessonId),
+        );
+        const linkedItemIds = new Set(
+          visibleLessonLibraryRows.map((row) => row.libraryItemId),
+        );
+        visibleLibraryItemRows = libraryItemRows.filter((row) =>
+          actor.role === "manager"
+            ? row.status === "published" ||
+              row.createdBy === actor.sub ||
+              linkedItemIds.has(row.id)
+            : linkedItemIds.has(row.id),
+        );
+      }
+
       // Any user referenced by a visible record must be resolvable by name on screen.
       const referencedUserIds = new Set<string>([actor.sub, ...adminIdSet]);
       if (actor.role === "teacher" || actor.role === "student") {
@@ -302,6 +339,10 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
         if (row.authorId) referencedUserIds.add(row.authorId);
       });
       visibleCredits.forEach((row) => referencedUserIds.add(row.actorId));
+      // Library creators are shown by name (not by user row) on staff screens only, so a
+      // manager bootstrap never pulls another manager's user row because of the library.
+      const canSeeCreatorNames = isAdmin || actor.role === "manager";
+      const nameById = new Map(userRows.map((row) => [row.id, row.name]));
 
       const visibleUsers = isAdmin
         ? userRows
@@ -320,6 +361,7 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
       visibleRequests.forEach((row) => {
         if (row.attachmentId) attachmentIds.add(row.attachmentId);
       });
+      visibleLibraryItemRows.forEach((row) => attachmentIds.add(row.attachmentId));
       const visibleAttachments = attachmentRows.filter((row) =>
         attachmentIds.has(row.id),
       );
@@ -582,6 +624,17 @@ export const schoolRoutes: FastifyPluginAsync = async (app) => {
               summary: row.summary,
               createdAt: iso(row.createdAt) ?? "",
             })),
+          ),
+          libraryItems: toRecord(
+            visibleLibraryItemRows.map((row) =>
+              libraryItemRecord(
+                row,
+                canSeeCreatorNames ? nameById.get(row.createdBy) : undefined,
+              ),
+            ),
+          ),
+          lessonLibraryItems: toRecord(
+            visibleLessonLibraryRows.map(lessonLibraryLinkRecord),
           ),
         },
       };

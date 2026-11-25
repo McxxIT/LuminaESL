@@ -3,7 +3,7 @@ name: context:all-auth
 description: "JWT + refresh-cookie auth, role scoping, and demo-vs-API mode — the auth group entrypoint/router"
 keywords: auth, jwt, refresh token, cookie, login, roles, manager scope, demo mode, NEXT_PUBLIC_DEMO_MODE, isDemoMode, isApiDataMode, password
 related: [context:all-database, context:all-uxui]
-date: 17-11-26
+date: 24-11-26
 ---
 
 # Auth Context
@@ -30,7 +30,7 @@ It does not cover: table definitions (see `process/context/database/`), UI layou
 
 ## Quick Routing
 
-- use `process/context/auth/jwt-cookie-flow.md` for tokens, refresh rotation, cookie settings, env vars
+- use `process/context/auth/jwt-cookie-flow.md` for tokens, refresh rotation, cookie settings, env vars, password change/reset, refresh-token revocation and pruning, auth rate limits, and the production CORS guard
 - use `process/context/auth/roles-and-scope.md` for role guards and manager team scoping
 - use `process/context/auth/demo-vs-api-mode.md` for mode flags, demo accounts, and keeping mock data out of API calls
 
@@ -46,6 +46,10 @@ It does not cover: table definitions (see `process/context/database/`), UI layou
 - token TTLs, cookie flags, or refresh logic change
 - a role is added/removed or scope rules change
 - mode flags or demo accounts change
+
+## Known Auth Gaps (open, in `process/features/launch-readiness/backlog/`)
+
+- Access JWT stays valid up to 15 min after reset/change/pause/archive (and after a pause or an admin email change it also keeps team-write authority for a paused manager); `trustProxy` unconditional and per-process limiter store; no recovery path for a locked-out single admin and admin-on-admin reset has no step-up; public `POST /auth/register` sits outside the invite model, no per-sender invite limit, no production first-admin path; (the shared default password is gone: accounts are `invited` and set their own through an emailed link); `/auth/refresh` and change-password are not fully atomic; no production cap on limiter env. Manager team edits are now shipped (`PATCH /users/:id` has a name + pause/reactivate manager branch; `manager-edit-team-member-403` resolved). Details: `jwt-cookie-flow.md`, `roles-and-scope.md` and the `*_NOTE_24-11-26.md` notes.
 
 ## Canonical Notes
 

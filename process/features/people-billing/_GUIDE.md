@@ -41,10 +41,13 @@ B2 people slice is API-backed: manager/teacher/student create and update, status
 ## Risks
 
 - High-risk class: billing/credits and auth/identity. Per `process/development-protocols/orchestration.md` section High-Risk Execution Handoff, use `vc-risk-evidence-pack` before closing.
-- Credits ledger is append-only (`purchase|booking|refund|adjustment`); balance read/debit is not row-locked and the booking balance check truncates fractional hours (see lessons-scheduling).
+- Credits ledger is append-only (`purchase|booking|refund|adjustment`). Balance reads and debits are
+  serialized per student by `lockStudentCredits` (`pg_advisory_xact_lock`, Nov 20, 2026); the numeric balance
+  is exact. See `database/booking-and-credit-integrity.md`.
 - Scope leaks: every users/students/teachers/requests route must use `lib/scope.ts` checks; a missed check exposes another manager's team.
 - Settings is a singleton (id 1) affecting cancellation/refund policy platform-wide.
 - Demo accounts use `Password123!` in API mode only; keep demo UI auth separate from real auth.
+- Accounts created through the UI are `invited` and set their own password by emailed link (no shared default); see `process/context/auth/jwt-cookie-flow.md`.
 - Schema changes require synced Drizzle migrations.
 
 ## Folder Contents

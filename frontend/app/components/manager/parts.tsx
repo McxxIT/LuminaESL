@@ -12,7 +12,7 @@ export function ScorePill({ performance }: { performance: Pick<TeacherPerformanc
   return <span className={`teacher-tier-pill tier-${tier} manager-score-pill`} title={`Performance score ${performance.score}/100`}>{performance.score} · {performance.tier}</span>;
 }
 
-const userStatusLabel: Record<UserStatus, string> = { active: "Active", paused: "Paused", archived: "Archived" };
+const userStatusLabel: Record<UserStatus, string> = { active: "Active", paused: "Paused", archived: "Archived", invited: "Invited" };
 
 export function UserStatusBadge({ status }: { status: UserStatus }) {
   return <span className={`manager-status manager-status-${status}`}>{userStatusLabel[status]}</span>;

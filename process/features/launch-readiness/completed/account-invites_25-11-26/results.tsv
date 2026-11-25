@@ -1,0 +1,10 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-25T15:00	0	0	0	0	ACTIVE	baseline	account-invites PVL baseline (single validate agent stalled; split into 3 parallel dimension reviews)
+1	2026-11-25T15:40	19	0	19	0	ACTIVE	RUNNING	PVL pass 1 CONDITIONAL: schema/env 3 concerns, security 6, tests/frontend 10; routed to plan supplement
+2	2026-11-25T19:30	17	0	17	17	ACTIVE	RUNNING	supplement cycle 1 applied (S1-S17); re-validate from V1
+3	2026-11-25T20:00	0	0	0	0	SATURATED	HALTED_SUCCESS	PVL re-run: Gate PASS (S1-S17 verified, 3 deviations accepted, P1/P2 minor fixes)
+4	2026-11-25T23:00	0	0	0	0	ACTIVE	baseline	EVL baseline: execute reports all exit gates green (be 12/98, fe 11/62, smoke 17/817, e2e 30+5, npm ci ok); vc-tester confirm pending
+5	2026-11-26T00:30	2	0	2	0	ACTIVE	RUNNING	EVL confirm #1 (vc-tester): all 14 gates green (be 12/98, fe 11/62, smoke 17/817, e2e 30+5); review: approved-with-concerns, 2 Medium fix-before-commit (set-password lock order, create-form copy) -> execute supplement
+6	2026-11-26T01:30	2	0	2	2	ACTIVE	RUNNING	EVL fix cycle 1 applied (lock order user->token in set-password; mode-aware create copy); execute gates green (smoke 17/835); vc-tester re-run pending
+7	2026-11-26T02:30	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL confirm #2 (vc-tester): all 14 gates green after fix cycle 1 (be 12/98, fe 11/62, smoke 17/835 no 500s, e2e 30+5); AC-19 real SMTP pending Step F
+8	2026-11-26	0	0	0	0	SATURATED	HALTED_SUCCESS	Step F real SMTP delivery user-confirmed; AC-19 PASSED

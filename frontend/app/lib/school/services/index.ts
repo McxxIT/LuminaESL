@@ -14,3 +14,4 @@ export * from "./uploads";
 export * from "./quality";
 export * from "./homework";
 export * from "./profile";
+export * from "./library";

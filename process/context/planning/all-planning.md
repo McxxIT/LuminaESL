@@ -26,6 +26,7 @@ This file is the canonical planning context entrypoint for lumina-esl.
 |---|---|
 | Backend cutover (frontend local store to API) | `process/features/backend-cutover/active/{slug}_{dd-mm-yy}/` |
 | Curriculum (courses, units, lesson plans, planned Curriculum Library) | `process/features/curriculum/active/{slug}_{dd-mm-yy}/` |
+| Launch readiness (6-phase v1 finish program: DB alignment, security/billing, auth, library, polish/Vitest, CI/Docker) | `process/features/launch-readiness/active/{slug}_{dd-mm-yy}/` |
 | Lessons and scheduling (bookings, slots, lessons, ratings, room codes, homework, notifications) | `process/features/lessons-scheduling/active/{slug}_{dd-mm-yy}/` |
 | People and billing (users/roles, managers, approvals, enrollments, profiles, credits) | `process/features/people-billing/active/{slug}_{dd-mm-yy}/` |
 | Cross-cutting or small | `process/general-plans/active/{slug}_{dd-mm-yy}/` |

@@ -58,6 +58,7 @@ const env: Env = {
   CORS_ORIGIN: "http://localhost:3000",
   UPLOAD_DIR: "uploads",
   RATE_LIMIT_MAX: 300,
+  AUTH_RATE_LIMIT_MAX: 30,
 };
 
 describe("school contract", () => {
@@ -81,7 +82,7 @@ describe("school contract", () => {
     // removed collection/setting key; the runtime assertion keeps the test honest.
     expect(collectionContract).toBeNull();
     expect(settingsContract).toBeNull();
-    expect(BOOTSTRAP_COLLECTION_KEYS).toHaveLength(16);
+    expect(BOOTSTRAP_COLLECTION_KEYS).toHaveLength(18);
     expect(BOOTSTRAP_SETTINGS_KEYS).toHaveLength(7);
   });
 
@@ -140,6 +141,30 @@ describe("school contract", () => {
     expect(response.statusCode).toBe(401);
   });
 
+  it("keeps credit administration staff-managed", async () => {
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/api/v1/credits",
+      payload: { studentId: "00000000-0000-0000-0000-000000000000", hours: 1, reason: "purchase" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    // A student token passes authentication but must be rejected by the role
+    // gate before the handler touches the database (Phase 02 policy).
+    const studentToken = app.jwt.sign({
+      sub: "00000000-0000-0000-0000-000000000001",
+      role: "student",
+      email: "student@example.test",
+    });
+    const student = await app.inject({
+      method: "POST",
+      url: "/api/v1/credits",
+      headers: { authorization: `Bearer ${studentToken}` },
+      payload: { studentId: "00000000-0000-0000-0000-000000000001", hours: 1, reason: "purchase" },
+    });
+    expect(student.statusCode).toBe(403);
+  });
+
   it("exposes uploads and notification state behind authentication", async () => {
     const uploads = await app.inject({ method: "POST", url: "/api/v1/uploads" });
     expect(uploads.statusCode).toBe(401);
@@ -154,5 +179,109 @@ describe("school contract", () => {
       payload: { readIds: [] },
     });
     expect(patch.statusCode).toBe(401);
+  });
+
+  it("should return 401 anonymous and 403 for a student token on the new auth routes", async () => {
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/auth/change-password" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/users/:id/reset-password" })).toBe(true);
+
+    const change = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/change-password",
+      payload: { currentPassword: "Password123!", newPassword: "Different456!" },
+    });
+    expect(change.statusCode).toBe(401);
+
+    const target = "00000000-0000-0000-0000-000000000002";
+    const anonymous = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${target}/reset-password`,
+      payload: { newPassword: "Different456!" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const studentToken = app.jwt.sign({
+      sub: "00000000-0000-0000-0000-000000000001",
+      role: "student",
+      email: "student@example.test",
+    });
+    const student = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${target}/reset-password`,
+      headers: { authorization: `Bearer ${studentToken}` },
+      payload: { newPassword: "Different456!" },
+    });
+    expect(student.statusCode).toBe(403);
+  });
+
+  it("should return 401 for an anonymous PATCH /users/:id", async () => {
+    expect(app.hasRoute({ method: "PATCH", url: "/api/v1/users/:id" })).toBe(true);
+    const anonymous = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/users/00000000-0000-0000-0000-000000000005",
+      payload: { name: "Nobody" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+  });
+
+  it("registers the Curriculum Library routes behind authentication", async () => {
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/library" })).toBe(true);
+    expect(app.hasRoute({ method: "PATCH", url: "/api/v1/library/:id" })).toBe(true);
+    expect(
+      app.hasRoute({ method: "POST", url: "/api/v1/lessons/:id/library-items" }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({
+        method: "DELETE",
+        url: "/api/v1/lessons/:id/library-items/:libraryItemId",
+      }),
+    ).toBe(true);
+
+    const id = "00000000-0000-0000-0000-000000000003";
+    const calls = [
+      { method: "POST" as const, url: "/api/v1/library", payload: {} },
+      { method: "PATCH" as const, url: `/api/v1/library/${id}`, payload: {} },
+      {
+        method: "POST" as const,
+        url: `/api/v1/lessons/${id}/library-items`,
+        payload: { libraryItemId: id },
+      },
+      {
+        method: "DELETE" as const,
+        url: `/api/v1/lessons/${id}/library-items/${id}`,
+      },
+    ];
+    for (const call of calls) {
+      const response = await app.inject(call);
+      expect(response.statusCode).toBe(401);
+    }
+  });
+
+  it("registers the invitation routes: set-password is public, the rest need a session", async () => {
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/users/:id/invite" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/v1/auth/set-password" })).toBe(true);
+
+    // Public route: an empty body is a validation error, never a 401.
+    const setPassword = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/set-password",
+      payload: {},
+    });
+    expect(setPassword.statusCode).toBe(400);
+    expect(setPassword.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+
+    const resend = await app.inject({
+      method: "POST",
+      url: "/api/v1/users/00000000-0000-0000-0000-000000000004/invite",
+    });
+    expect(resend.statusCode).toBe(401);
+
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "Nobody", email: "nobody@example.com", role: "student" },
+    });
+    expect(create.statusCode).toBe(401);
+    expect(BOOTSTRAP_COLLECTION_KEYS).toHaveLength(18);
   });
 });
