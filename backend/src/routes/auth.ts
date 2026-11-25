@@ -13,28 +13,28 @@ import {
   teacherProfiles,
   users,
   type User,
-} from "../db/schema";
-import { logActivity } from "../lib/activity";
-import { AppError, conflict, unauthorized } from "../lib/errors";
+} from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
+import { AppError, conflict, unauthorized } from "../lib/errors.js";
 import {
   consumeInvite,
   findInviteUserId,
   lockUserForInvite,
-} from "../lib/invites";
+} from "../lib/invites.js";
 import {
   changePasswordSchema,
   hashPassword,
   passwordSchema,
   verifyPassword,
-} from "../lib/password";
+} from "../lib/password.js";
 import {
   REFRESH_COOKIE,
   REFRESH_COOKIE_PATH,
   pruneRefreshTokens,
   refreshCookieOptions,
   revokeUserRefreshTokens,
-} from "../lib/refresh-tokens";
-import { hashToken } from "../lib/tokens";
+} from "../lib/refresh-tokens.js";
+import { hashToken } from "../lib/tokens.js";
 
 /** The global refresh-token sweep (a table scan) runs at most this often. */
 const GLOBAL_PRUNE_INTERVAL_MS = 60 * 60 * 1000;

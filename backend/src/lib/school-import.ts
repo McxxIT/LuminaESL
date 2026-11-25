@@ -19,9 +19,9 @@ import {
   studentProfiles,
   teacherProfiles,
   users,
-} from "../db/schema";
-import type { DbOrTx } from "./db-handle";
-import { unusablePasswordHash } from "./password";
+} from "../db/schema.js";
+import type { DbOrTx } from "./db-handle.js";
+import { unusablePasswordHash } from "./password.js";
 
 /**
  * One-time import of a browser school store (`SchoolData` v3) into Postgres.

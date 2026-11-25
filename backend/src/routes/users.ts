@@ -7,8 +7,8 @@ import {
   teacherProfiles,
   users,
   type User,
-} from "../db/schema";
-import type { DbOrTx } from "../lib/db-handle";
+} from "../db/schema.js";
+import type { DbOrTx } from "../lib/db-handle.js";
 import {
   AppError,
   badRequest,
@@ -16,8 +16,8 @@ import {
   forbidden,
   isUniqueViolation,
   notFound,
-} from "../lib/errors";
-import { logActivity, type ActivityAction } from "../lib/activity";
+} from "../lib/errors.js";
+import { logActivity, type ActivityAction } from "../lib/activity.js";
 import {
   deliverInvite,
   expireOpenInvites,
@@ -25,25 +25,25 @@ import {
   lockUserForInvite,
   resolveInviteCooldown,
   type InviteOutcome,
-} from "../lib/invites";
-import { parsePagination } from "../lib/pagination";
+} from "../lib/invites.js";
+import { parsePagination } from "../lib/pagination.js";
 import {
   hashPassword,
   isUnusablePasswordHash,
   passwordSchema,
   resetPasswordSchema,
   unusablePasswordHash,
-} from "../lib/password";
-import { revokeUserRefreshTokens } from "../lib/refresh-tokens";
+} from "../lib/password.js";
+import { revokeUserRefreshTokens } from "../lib/refresh-tokens.js";
 import {
   emailChangeSummary,
   planUserPatchEffects,
   userPatchAccess,
-} from "../lib/user-edit-policy";
+} from "../lib/user-edit-policy.js";
 import {
   assertCanViewUser,
   managerTeam,
-} from "../lib/scope";
+} from "../lib/scope.js";
 
 const userColumns = {
   id: users.id,

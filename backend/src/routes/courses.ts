@@ -19,12 +19,12 @@ import {
   lessons,
   requests,
   type LessonPlanSection,
-} from "../db/schema";
-import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors";
-import { logActivity } from "../lib/activity";
-import { parsePagination } from "../lib/pagination";
-import { assertCourseEditable } from "../lib/scope";
-import type { TokenPayload } from "../types/fastify";
+} from "../db/schema.js";
+import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
+import { logActivity } from "../lib/activity.js";
+import { parsePagination } from "../lib/pagination.js";
+import { assertCourseEditable } from "../lib/scope.js";
+import type { TokenPayload } from "../types/fastify.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 const unitParams = z.object({

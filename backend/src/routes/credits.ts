@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { creditEntries, users } from "../db/schema";
-import { logActivity } from "../lib/activity";
-import { getCreditBalance, lockStudentCredits } from "../lib/credits";
-import { badRequest, forbidden } from "../lib/errors";
-import { parsePagination } from "../lib/pagination";
-import { managerOwnsStudent, managerTeam, teacherStudentIds } from "../lib/scope";
+import { creditEntries, users } from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
+import { getCreditBalance, lockStudentCredits } from "../lib/credits.js";
+import { badRequest, forbidden } from "../lib/errors.js";
+import { parsePagination } from "../lib/pagination.js";
+import { managerOwnsStudent, managerTeam, teacherStudentIds } from "../lib/scope.js";
 
 const listQuerySchema = z.object({
   studentId: z.string().uuid().optional(),

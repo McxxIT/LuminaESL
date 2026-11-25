@@ -1,5 +1,5 @@
-import { activity } from "../db/schema";
-import type { DbOrTx } from "./db-handle";
+import { activity } from "../db/schema.js";
+import type { DbOrTx } from "./db-handle.js";
 
 type UserStatus = "active" | "paused" | "inactive" | "archived";
 type CourseStatus = "draft" | "published" | "archived";

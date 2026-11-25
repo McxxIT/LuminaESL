@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { activity } from "../db/schema";
-import { parsePagination } from "../lib/pagination";
+import { activity } from "../db/schema.js";
+import { parsePagination } from "../lib/pagination.js";
 
 const listQuerySchema = z.object({
   action: z.string().trim().min(1).max(80).optional(),

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
-import { logActivity } from "../lib/activity";
-import { conflict } from "../lib/errors";
+import { logActivity } from "../lib/activity.js";
+import { conflict } from "../lib/errors.js";
 import {
   applyImportPlan,
   buildImportPlan,
@@ -8,7 +8,7 @@ import {
   importPayloadSchema,
   loadExistingSchool,
   type ImportPlan,
-} from "../lib/school-import";
+} from "../lib/school-import.js";
 
 /**
  * One-time import of a browser school store into Postgres (D2).

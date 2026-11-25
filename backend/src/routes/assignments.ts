@@ -1,15 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { assignments, users } from "../db/schema";
-import { logActivity } from "../lib/activity";
-import { badRequest, forbidden, notFound } from "../lib/errors";
-import { parsePagination } from "../lib/pagination";
+import { assignments, users } from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
+import { badRequest, forbidden, notFound } from "../lib/errors.js";
+import { parsePagination } from "../lib/pagination.js";
 import {
   managerOwnsStudent,
   managerOwnsTeacher,
   managerTeam,
-} from "../lib/scope";
+} from "../lib/scope.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 

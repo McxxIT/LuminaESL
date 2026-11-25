@@ -19,9 +19,9 @@ import {
   studentProfiles,
   teacherProfiles,
   users,
-} from "../db/schema";
-import { adminIds } from "../lib/scope";
-import { lessonLibraryLinkRecord, libraryItemRecord } from "./library";
+} from "../db/schema.js";
+import { adminIds } from "../lib/scope.js";
+import { lessonLibraryLinkRecord, libraryItemRecord } from "./library.js";
 
 /** Mirrors `SCHOOL_SCHEMA_VERSION` in `frontend/app/lib/school/types.ts`. */
 export const SCHOOL_SCHEMA_VERSION = 3;

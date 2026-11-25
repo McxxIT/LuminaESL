@@ -6,7 +6,7 @@ import {
   lessons,
   slotOpenings,
   users,
-} from "../db/schema";
+} from "../db/schema.js";
 import {
   ACTIVE_LESSON_CONFLICT_MESSAGE,
   badRequest,
@@ -15,12 +15,12 @@ import {
   isActiveLessonSlotConflict,
   notFound,
   unprocessable,
-} from "../lib/errors";
-import { logActivity } from "../lib/activity";
-import { getCreditBalance, lockStudentCredits } from "../lib/credits";
-import { resolveLessonDefaults } from "../lib/lesson-defaults";
-import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
-import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time";
+} from "../lib/errors.js";
+import { logActivity } from "../lib/activity.js";
+import { getCreditBalance, lockStudentCredits } from "../lib/credits.js";
+import { resolveLessonDefaults } from "../lib/lesson-defaults.js";
+import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope.js";
+import { addMinutes, isValidClockTime, LESSON_MINUTES } from "../lib/time.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

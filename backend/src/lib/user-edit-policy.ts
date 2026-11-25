@@ -3,7 +3,7 @@
  * `userPatchAccess` before any read, then `planUserPatchEffects` on the row it
  * locked inside its transaction.
  */
-import type { Role } from "./roles";
+import type { Role } from "./roles.js";
 
 export type PatchStatus = "active" | "paused" | "archived";
 

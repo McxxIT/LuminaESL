@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
-import type { Env } from "../config/env";
-import { refreshTokens } from "../db/schema";
-import type { DbOrTx } from "./db-handle";
+import type { Env } from "../config/env.js";
+import { refreshTokens } from "../db/schema.js";
+import type { DbOrTx } from "./db-handle.js";
 
 /** Name of the httpOnly cookie that carries the opaque refresh token. */
 export const REFRESH_COOKIE = "refresh_token";

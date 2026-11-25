@@ -10,16 +10,16 @@ import {
   users,
   type LessonLibraryItem,
   type LibraryItem,
-} from "../db/schema";
-import { logActivity } from "../lib/activity";
+} from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
 import {
   AppError,
   conflict,
   forbidden,
   isUniqueViolation,
   notFound,
-} from "../lib/errors";
-import { managerOwnsTeacher } from "../lib/scope";
+} from "../lib/errors.js";
+import { managerOwnsTeacher } from "../lib/scope.js";
 
 /**
  * Curriculum Library: one global, school-wide library of reusable files.

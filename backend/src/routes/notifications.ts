@@ -1,13 +1,13 @@
 import type { FastifyPluginAsync } from "fastify";
 import { desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { activity, notificationState } from "../db/schema";
+import { activity, notificationState } from "../db/schema.js";
 import {
   MAX_NOTIFICATION_READ_IDS,
   NOTIFICATION_CATEGORIES,
   normalizeReadIds,
-} from "../lib/notifications";
-import { parsePagination } from "../lib/pagination";
+} from "../lib/notifications.js";
+import { parsePagination } from "../lib/pagination.js";
 
 const stateSchema = z
   .object({

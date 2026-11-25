@@ -1,15 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { studentProfiles, users, type User } from "../db/schema";
-import { badRequest, forbidden, notFound } from "../lib/errors";
-import { logActivity } from "../lib/activity";
-import { parsePagination } from "../lib/pagination";
+import { studentProfiles, users, type User } from "../db/schema.js";
+import { badRequest, forbidden, notFound } from "../lib/errors.js";
+import { logActivity } from "../lib/activity.js";
+import { parsePagination } from "../lib/pagination.js";
 import {
   assertCanViewUser,
   managerOwnsStudent,
   managerTeam,
-} from "../lib/scope";
+} from "../lib/scope.js";
 
 const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),

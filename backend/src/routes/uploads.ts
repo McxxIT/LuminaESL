@@ -5,10 +5,10 @@ import { randomUUID } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { attachments } from "../db/schema";
-import { badRequest, notFound } from "../lib/errors";
-import { assertCanAccessAttachment } from "../lib/scope";
-import { resolveUploadPath } from "../lib/upload-path";
+import { attachments } from "../db/schema.js";
+import { badRequest, notFound } from "../lib/errors.js";
+import { assertCanAccessAttachment } from "../lib/scope.js";
+import { resolveUploadPath } from "../lib/upload-path.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 

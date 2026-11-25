@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
-import type { Env, MailEncryption } from "../config/env";
+import type { Env, MailEncryption } from "../config/env.js";
 
 export type MailerKind = "smtp" | "log" | "array";
 

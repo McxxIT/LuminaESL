@@ -1,10 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { settings } from "../db/schema";
-import { logActivity } from "../lib/activity";
-import { badRequest } from "../lib/errors";
-import { isValidClockTime } from "../lib/time";
+import { settings } from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
+import { badRequest } from "../lib/errors.js";
+import { isValidClockTime } from "../lib/time.js";
 
 const timeSchema = z
   .string()

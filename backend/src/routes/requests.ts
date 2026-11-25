@@ -7,13 +7,13 @@ import {
   requests,
   settings,
   slotOpenings,
-} from "../db/schema";
-import { logActivity } from "../lib/activity";
-import { lockStudentCredits, isLessonCharged } from "../lib/credits";
-import { badRequest, conflict, forbidden, notFound } from "../lib/errors";
-import { parsePagination } from "../lib/pagination";
-import { managerOwnsTeacher, managerTeam } from "../lib/scope";
-import { isValidClockTime } from "../lib/time";
+} from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
+import { lockStudentCredits, isLessonCharged } from "../lib/credits.js";
+import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
+import { parsePagination } from "../lib/pagination.js";
+import { managerOwnsTeacher, managerTeam } from "../lib/scope.js";
+import { isValidClockTime } from "../lib/time.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

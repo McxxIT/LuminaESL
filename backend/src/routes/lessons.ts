@@ -13,10 +13,10 @@ import {
   studentProfiles,
   slotOpenings,
   users,
-} from "../db/schema";
-import { logActivity } from "../lib/activity";
-import { getCreditBalance, isLessonCharged, lockStudentCredits } from "../lib/credits";
-import { resolveLessonDefaults } from "../lib/lesson-defaults";
+} from "../db/schema.js";
+import { logActivity } from "../lib/activity.js";
+import { getCreditBalance, isLessonCharged, lockStudentCredits } from "../lib/credits.js";
+import { resolveLessonDefaults } from "../lib/lesson-defaults.js";
 import {
   ACTIVE_LESSON_CONFLICT_MESSAGE,
   badRequest,
@@ -25,16 +25,16 @@ import {
   isActiveLessonSlotConflict,
   isUniqueViolation,
   notFound,
-} from "../lib/errors";
-import { parsePagination } from "../lib/pagination";
-import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope";
+} from "../lib/errors.js";
+import { parsePagination } from "../lib/pagination.js";
+import { managerOwnsStudent, managerOwnsTeacher, managerTeam } from "../lib/scope.js";
 import {
   addMinutes,
   hoursUntil,
   isValidClockTime,
   LESSON_MINUTES,
   slotStartDate,
-} from "../lib/time";
+} from "../lib/time.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

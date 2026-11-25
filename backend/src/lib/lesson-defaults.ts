@@ -5,8 +5,8 @@ import {
   enrollments,
   lessonPlans,
   lessons,
-} from "../db/schema";
-import type { DbOrTx } from "./db-handle";
+} from "../db/schema.js";
+import type { DbOrTx } from "./db-handle.js";
 
 export type LessonDefaults = {
   enrollmentId: string | null;

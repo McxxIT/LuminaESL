@@ -1,12 +1,12 @@
 import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
-import type { Env } from "../config/env";
-import { authTokens, users, type User } from "../db/schema";
-import type { DbOrTx } from "./db-handle";
-import { AppError, conflict, notFound } from "./errors";
-import { renderInviteEmail } from "./invite-email";
-import type { Mailer, MailerKind } from "./mailer";
-import type { Role } from "./roles";
-import { generateToken, hashToken } from "./tokens";
+import type { Env } from "../config/env.js";
+import { authTokens, users, type User } from "../db/schema.js";
+import type { DbOrTx } from "./db-handle.js";
+import { AppError, conflict, notFound } from "./errors.js";
+import { renderInviteEmail } from "./invite-email.js";
+import type { Mailer, MailerKind } from "./mailer.js";
+import type { Role } from "./roles.js";
+import { generateToken, hashToken } from "./tokens.js";
 
 /** Invitation links expire this many hours after they are issued. */
 export const INVITE_TTL_HOURS = 72;

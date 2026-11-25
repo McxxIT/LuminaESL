@@ -1,6 +1,6 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "../db/schema";
+import type * as schema from "../db/schema.js";
 import {
   courses,
   courseUnits,
@@ -13,9 +13,9 @@ import {
   studentProfiles,
   teacherProfiles,
   users,
-} from "../db/schema";
-import { forbidden, notFound } from "./errors";
-import type { TokenPayload } from "../types/fastify";
+} from "../db/schema.js";
+import { forbidden, notFound } from "./errors.js";
+import type { TokenPayload } from "../types/fastify.js";
 
 export type Db = PostgresJsDatabase<typeof schema>;
 

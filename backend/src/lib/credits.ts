@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
-import { creditEntries } from "../db/schema";
-import type { DbOrTx } from "./db-handle";
+import { creditEntries } from "../db/schema.js";
+import type { DbOrTx } from "./db-handle.js";
 
 /**
  * Serializes every credit mutation for one student.

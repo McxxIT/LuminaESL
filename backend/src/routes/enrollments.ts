@@ -5,15 +5,15 @@ import {
   courses,
   enrollments,
   users,
-} from "../db/schema";
-import { badRequest, forbidden, notFound } from "../lib/errors";
-import { logActivity } from "../lib/activity";
-import { parsePagination } from "../lib/pagination";
+} from "../db/schema.js";
+import { badRequest, forbidden, notFound } from "../lib/errors.js";
+import { logActivity } from "../lib/activity.js";
+import { parsePagination } from "../lib/pagination.js";
 import {
   managerOwnsStudent,
   managerOwnsTeacher,
   managerTeam,
-} from "../lib/scope";
+} from "../lib/scope.js";
 
 const idParams = z.object({ id: z.string().uuid() });
 
