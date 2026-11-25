@@ -1,6 +1,6 @@
 import fp from "fastify-plugin";
-import { forbidden, unauthorized } from "../lib/errors";
-import type { Role } from "../lib/roles";
+import { forbidden, unauthorized } from "../lib/errors.js";
+import type { Role } from "../lib/roles.js";
 
 export default fp(
   async (app) => {
