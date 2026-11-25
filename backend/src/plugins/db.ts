@@ -1,13 +1,13 @@
 import fp from "fastify-plugin";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import * as schema from "../db/schema";
+import * as schema from "../db/schema.js";
 
 /**
- * Postgres `numeric` (OID 1700) arrives as a string by default. The ledger column
- * `credit_entries.hours` and `sum(hours)` aggregates are numeric, so parse them to
- * JS numbers. `from` is required: postgres.js registers parsers only from it.
- * bigint/int8 keep the driver default.
+- Postgres `numeric` (OID 1700) arrives as a string by default. The ledger column
+- `credit_entries.hours` and `sum(hours)` aggregates are numeric, so parse them to
+- JS numbers. `from` is required: postgres.js registers parsers only from it.
+- bigint/int8 keep the driver default.
  */
 export const pgTypes = {
   numeric: {
