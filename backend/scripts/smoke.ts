@@ -1614,7 +1614,8 @@ async function invitesScenario(): Promise<void> {
   expectStatus(await call(tok("admin"), "POST", `/users/${safety.id}/reset-password`, { newPassword: newPassword }), 409, "reset-password on an invited user");
   expectStatus(await call(tok("admin"), "PATCH", `/users/${safety.id}`, { email: emailFor("inv15b") }), 200, "email change on an invited user");
   expectStatus(await setPasswordWith(safetyToken, newPassword), 400, "the link after an email change");
-  check((await openInviteCount(safety.id)) === 0, "an email change expires open invites");
+  check((await openInviteCount(safety.id)) === 1, "an email change expires the old invite and issues one new invite");
+  check(outboxFor(emailFor("inv15b")).length === 1, "the new invitation goes to the new address");
   const invitedList = await call(tok("admin"), "GET", `/users?status=invited&q=${encodeURIComponent(`smoke-${runId}`)}`);
   expectStatus(invitedList, 200, "list invited users");
   const items = fieldArr(invitedList.body, "items");
@@ -1649,6 +1650,279 @@ async function invitesScenario(): Promise<void> {
     .leftJoin(users, eq(users.id, authTokens.userId))
     .where(isNull(users.id));
   check(orphanTokens.length === 0, "no invite token survives a failed create");
+}
+
+// ---------------------------------------------------------------- team edits (manager-team-edits)
+
+async function userRowOf(userId: string): Promise<{ name: string; email: string; status: string; role: string }> {
+  const [row] = await db
+    .select({ name: users.name, email: users.email, status: users.status, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) throw new Error("team-edits: user row missing");
+  return row;
+}
+async function userActivityOf(userId: string): Promise<{ action: string; summary: string }[]> {
+  return db
+    .select({ action: schema.activity.action, summary: schema.activity.summary })
+    .from(schema.activity)
+    .where(and(eq(schema.activity.targetType, "user"), eq(schema.activity.targetId, userId)));
+}
+async function userActionCount(userId: string, action: string): Promise<number> {
+  return (await userActivityOf(userId)).filter((row) => row.action === action).length;
+}
+function sameBody(a: Res, b: Res): boolean {
+  return JSON.stringify(a.body) === JSON.stringify(b.body);
+}
+async function inviteStillValid(token: string): Promise<boolean> {
+  const row = await inviteTokenRow(token);
+  return Boolean(row && row.usedAt === null && row.expiresAt.getTime() > Date.now());
+}
+
+async function teamEditsScenario(): Promise<void> {
+  check(mailer.kind === "array", "team-edits run on the array mailer only");
+  const mA = tok("managerA");
+  const admin = tok("admin");
+  const patch = (token: string, id: string, body: unknown) => call(token, "PATCH", `/users/${id}`, body);
+  const touched: string[] = [];
+
+  await createUser("teTeacher", "teacher", uid("managerA"));
+  await createUser("teStudent", "student", uid("managerA"));
+  await createUser("teOtherT", "teacher", uid("managerB"));
+  await createUser("teOtherS", "student", uid("managerB"));
+  await createUser("teStudentB", "student", uid("managerB"));
+  touched.push(uid("teTeacher"), uid("teStudent"), uid("teOtherT"), uid("teOtherS"), uid("teStudentB"));
+  // Enrolled-only student: managerB's roster, enrolled with managerA's teacher.
+  const enrolled = await call(admin, "POST", "/enrollments", { studentId: uid("teStudentB"), teacherId: uid("teacherA"), courseId });
+  expectStatus(enrolled, 201, "admin enrolls managerB's student with teacherA");
+
+  // 1. Rename (roster teacher, roster student, enrolled-only student).
+  for (const label of ["teTeacher", "teStudent", "teStudentB"]) {
+    const newName = `Smoke ${label} renamed ${runId}`;
+    const res = await patch(mA, uid(label), { name: newName });
+    expectStatus(res, 200, `managerA renames ${label}`);
+    check(str(res.body, "name") === newName, `${label}: the response carries the new name`);
+    check((await userActionCount(uid(label), "user.renamed")) === 1, `${label}: exactly one user.renamed row`);
+  }
+  const renamedSummary = (await userActivityOf(uid("teTeacher"))).find((row) => row.action === "user.renamed")?.summary ?? "";
+  check(renamedSummary.includes(" → "), "user.renamed keeps the arrow summary");
+  const managerBoot = await bootstrapOf("managerA");
+  check(managerBoot.users?.[uid("teTeacher")]?.name === `Smoke teTeacher renamed ${runId}`, "managerA bootstrap shows the renamed teacher");
+  check(managerBoot.users?.[uid("teStudent")]?.name === `Smoke teStudent renamed ${runId}`, "managerA bootstrap shows the renamed student");
+  expectStatus(await patch(mA, uid("teTeacher"), { name: `Smoke teTeacher renamed ${runId}` }), 200, "unchanged name");
+  check((await userActionCount(uid("teTeacher"), "user.renamed")) === 1, "an unchanged name writes no activity row");
+
+  // 2. Scope: identical 403 for unknown and foreign targets; self path kept.
+  const unknownRes = await patch(mA, randomUUID(), { name: "Smoke nobody" });
+  expectStatus(unknownRes, 403, "managerA renames an unknown id");
+  for (const target of [uid("teOtherT"), uid("teOtherS"), uid("managerB"), uid("admin")]) {
+    const res = await patch(mA, target, { name: "Smoke not yours" });
+    expectStatus(res, 403, "managerA renames outside the team");
+    check(sameBody(res, unknownRes), "unknown and foreign ids answer the identical 403 body");
+  }
+  check((await userRowOf(uid("teOtherT"))).name === `Smoke teOtherT ${runId}`, "a foreign teacher keeps their name");
+  expectStatus(await patch(mA, uid("managerA"), { name: `Smoke managerA self ${runId}` }), 200, "managerA renames self");
+  expectStatus(await patch(tok("teTeacher"), uid("teStudent"), { name: "x" }), 403, "teacher renames student");
+  expectStatus(await patch(tok("teStudent"), uid("teTeacher"), { name: "x" }), 403, "student renames teacher");
+
+  // 3. Restricted fields: 403 before any write; unknown keys are stripped.
+  const tId = uid("teTeacher");
+  const tName = (await userRowOf(tId)).name;
+  expectStatus(await patch(mA, tId, { email: emailFor("te-steal") }), 403, "manager changes an email");
+  expectStatus(await patch(mA, tId, { avatarColor: "#123456" }), 403, "manager changes an avatar color");
+  expectStatus(await patch(mA, tId, { name: "Smoke should not apply", email: emailFor("te-steal") }), 403, "manager sends name and email");
+  check((await userRowOf(tId)).name === tName, "name is not applied when the email is refused");
+  expectStatus(await patch(mA, tId, { status: "archived" }), 403, "manager archives");
+  check((await userRowOf(tId)).status === "active", "status unchanged after a refused archive");
+  expectStatus(await patch(mA, uid("teOtherT"), { email: emailFor("te-steal") }), 403, "manager email change on a foreign id");
+  expectStatus(await patch(mA, randomUUID(), { avatarColor: "#123456" }), 403, "manager avatar change on an unknown id");
+  // Stored emails are lowercased (zod), so compare against the normalised form.
+  check((await userRowOf(tId)).email === emailFor("teTeacher").toLowerCase(), "email unchanged after every refused attempt");
+  const withRole = await patch(mA, tId, { name: `Smoke teTeacher role ${runId}`, role: "admin" });
+  expectStatus(withRole, 200, "manager sends name plus role");
+  check((await userRowOf(tId)).role === "teacher" && (await userRowOf(tId)).name === `Smoke teTeacher role ${runId}`, "role ignored, name applied");
+  expectStatus(await patch(mA, tId, { name: `Smoke teTeacher mgr ${runId}`, managerId: uid("managerB") }), 200, "manager sends name plus managerId");
+  check((await userRowOf(tId)).name === `Smoke teTeacher mgr ${runId}`, "name applied with managerId stripped");
+  for (const body of [{ managerId: uid("managerB") }, { role: "admin" }, {}]) {
+    const own = await patch(mA, tId, body);
+    expectStatus(own, 400, `manager body ${JSON.stringify(Object.keys(body))} after stripping`);
+    expectStatus(await patch(mA, randomUUID(), body), 400, "the same body at an unknown id");
+  }
+  expectStatus(await patch(mA, tId, { name: `Smoke teTeacher back ${runId}` }), 200, "managerA still owns the teacher after the stripped managerId");
+
+  // 4. Pause / reactivate own-team people; refresh revoked on pause.
+  for (const label of ["teTeacher", "teStudent"]) {
+    const id = uid(label);
+    const session = await signIn(emailFor(label), password, `${label} signs in`);
+    expectStatus(await patch(mA, id, { status: "paused" }), 200, `managerA pauses ${label}`);
+    check((await activeTokenCount(id)) === 0, `${label}: pause revokes refresh tokens`);
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: session.cookie }), 401, `${label}: old refresh cookie after pause`);
+    expectStatus(await authCall({ path: "/auth/login", body: { email: emailFor(label), password } }), 401, `${label}: login while paused`);
+    check((await userActionCount(id, "user.paused")) === 1, `${label}: one user.paused row`);
+    expectStatus(await patch(tok("managerB"), id, { status: "active" }), 403, `managerB reactivates ${label}`);
+    check((await userRowOf(id)).status === "paused", `${label}: still paused after a foreign attempt`);
+    expectStatus(await patch(mA, id, { status: "active" }), 200, `managerA reactivates ${label}`);
+    await signIn(emailFor(label), password, `${label} signs in after reactivation`);
+    check((await userActionCount(id, "user.active")) === 1, `${label}: one user.active row`);
+  }
+  await createUser("teSpare", "student", uid("managerA"));
+  touched.push(uid("teSpare"));
+  expectStatus(await call(admin, "DELETE", `/users/${uid("teSpare")}`), 200, "admin archives a team student");
+  expectStatus(await patch(mA, uid("teSpare"), { status: "active" }), 403, "manager restores an archived member");
+  check((await userRowOf(uid("teSpare"))).status === "archived", "archive not undone by a manager");
+  expectStatus(await patch(mA, uid("teSpare"), { name: "Smoke archived rename" }), 403, "manager renames an archived member");
+  const teamInvited = await adminInvite("teInvited", "teacher", { managerId: uid("managerA") });
+  touched.push(teamInvited.id);
+  // Stored and mailed addresses are lowercased; fixture labels are camelCase.
+  const teamInvitedEmail = teamInvited.email.toLowerCase();
+  expectStatus(await patch(mA, teamInvited.id, { name: `Smoke teInvited renamed ${runId}` }), 200, "manager renames an invited member");
+  for (const status of ["paused", "active"] as const) {
+    const res = await patch(mA, teamInvited.id, { status });
+    expectStatus(res, 409, `manager sets ${status} on an invited member`);
+    check(errorCode(res) === "ACCOUNT_NOT_ACTIVATED", `manager ${status} on invited answers ACCOUNT_NOT_ACTIVATED`);
+  }
+  const invitedOutbox = outboxFor(teamInvitedEmail).length;
+  expectStatus(await patch(mA, teamInvited.id, { email: emailFor("te-invited-steal") }), 403, "manager changes an invited member's email");
+  check(outboxFor(emailFor("te-invited-steal")).length === 0 && outboxFor(teamInvitedEmail).length === invitedOutbox, "no invite sent on a refused manager email change");
+
+  // 5. Admin email change on an ACTIVE person.
+  await createUser("teActive", "teacher", uid("managerA"));
+  const activeId = uid("teActive");
+  touched.push(activeId);
+  const s1 = await signIn(emailFor("teActive"), password, "teActive session 1");
+  const s2 = await signIn(emailFor("teActive"), password, "teActive session 2");
+  const activeNew = emailFor("te-active-new");
+  const changed = await patch(admin, activeId, { email: activeNew });
+  expectStatus(changed, 200, "admin changes an active person's email");
+  check(!("invite" in obj(changed.body, "email change")), "no invite for an active person");
+  check((await activeTokenCount(activeId)) === 0, "an admin email change revokes refresh tokens");
+  for (const session of [s1, s2]) {
+    expectStatus(await authCall({ path: "/auth/refresh", cookie: session.cookie }), 401, "old refresh cookie after the email change");
+  }
+  expectStatus(await authCall({ path: "/auth/login", body: { email: emailFor("teActive"), password } }), 401, "login at the old address");
+  const fresh = await signIn(activeNew, password, "login at the new address");
+  check((await userActionCount(activeId, "user.email_changed")) === 1, "one user.email_changed row");
+  const changedSummary = (await userActivityOf(activeId)).find((row) => row.action === "user.email_changed")?.summary ?? "";
+  check(!changedSummary.includes("@") && changedSummary.includes("signed out"), "email_changed summary has no address and says signed out");
+  const tokensBefore = await activeTokenCount(activeId);
+  expectStatus(await patch(admin, activeId, { email: activeNew, name: `Smoke teActive renamed ${runId}` }), 200, "admin sends the same email with a new name");
+  check((await activeTokenCount(activeId)) === tokensBefore && tokensBefore > 0, "an unchanged email revokes nothing");
+  check((await userActionCount(activeId, "user.email_changed")) === 1, "an unchanged email writes no email_changed row");
+  const selfNew = emailFor("te-active-self");
+  expectStatus(await patch(fresh.token, activeId, { email: selfNew }), 200, "a person changes their own email");
+  check((await activeTokenCount(activeId)) === tokensBefore, "a self email change keeps the person signed in");
+  check((await userActionCount(activeId, "user.email_changed")) === 2, "a self email change writes one row");
+  await createUser("tePaused", "student", uid("managerA"));
+  touched.push(uid("tePaused"));
+  expectStatus(await patch(admin, uid("tePaused"), { status: "paused" }), 200, "admin pauses tePaused");
+  const outboxSize = mailer.outbox.length;
+  const pausedChange = await patch(admin, uid("tePaused"), { email: emailFor("te-paused-new") });
+  expectStatus(pausedChange, 200, "admin changes a paused person's email");
+  check(!("invite" in obj(pausedChange.body, "paused change")) && mailer.outbox.length === outboxSize, "no invite for a paused person");
+
+  // 6. Admin email change on an INVITED person: re-invite to the new address.
+  const inv = await adminInvite("teInv", "teacher", { managerId: uid("managerA") });
+  touched.push(inv.id);
+  const invEmail = inv.email.toLowerCase();
+  check(outboxFor(invEmail).length === 1, "first invite went to the old address");
+  const oldToken = latestInviteToken(invEmail);
+  const invNew = emailFor("te-inv-new");
+  const reinvited = await patch(admin, inv.id, { email: invNew });
+  expectStatus(reinvited, 200, "admin changes an invited person's email");
+  const reinvite = inviteOf(reinvited);
+  check(reinvite.sent === true && reinvite.mode === "array" && typeof reinvite.link === "string", "the response carries the new invite with the admin link");
+  check(str(reinvited.body, "email") === invNew, "the response carries the new email");
+  check(outboxFor(invNew).length === 1 && outboxFor(invEmail).length === 1, "one mail to the new address, none more to the old");
+  const oldRes = await setPasswordWith(oldToken, password);
+  expectStatus(oldRes, 400, "the old link after the email change");
+  check(errorCode(oldRes) === INVALID_TOKEN_CODE, "the old link answers INVALID_OR_EXPIRED_TOKEN");
+  check((await openInviteCount(inv.id)) === 1, "exactly one open invite");
+  check((await userActionCount(inv.id, "user.email_changed")) === 1 && (await userActionCount(inv.id, "user.invite_resent")) === 1, "one email_changed and one invite_resent row");
+  // Cooldown bypassed: two changes back to back.
+  const invNew2 = emailFor("te-inv-new2");
+  const invNew3 = emailFor("te-inv-new3");
+  expectStatus(await patch(admin, inv.id, { email: invNew2 }), 200, "second email change without waiting");
+  expectStatus(await patch(admin, inv.id, { email: invNew3 }), 200, "third email change without waiting");
+  check(outboxFor(invNew2).length === 1 && outboxFor(invNew3).length === 1, "each new address got one mail");
+  check((await openInviteCount(inv.id)) === 1, "still exactly one open invite");
+  // Mail failure after commit.
+  const invNew4 = emailFor("te-inv-new4");
+  mailer.failNext(new Error("Simulated SMTP rejection"));
+  const failed = await patch(admin, inv.id, { email: invNew4 });
+  expectStatus(failed, 200, "email change with a mail failure");
+  check(inviteOf(failed).sent === false && inviteOf(failed).error === GENERIC_MAIL_ERROR, "a failed send reports the generic error");
+  check(!JSON.stringify(failed.body).includes("Simulated"), "SMTP detail never reaches the client");
+  check((await userRowOf(inv.id)).email === invNew4 && (await openInviteCount(inv.id)) === 1, "email and token committed despite the failed send");
+  await sleep(RESEND_WAIT_MS);
+  const recovered = await call(admin, "POST", `/users/${inv.id}/invite`);
+  expectStatus(recovered, 200, "resend after the failed send");
+  check(inviteOf(recovered).sent === true, "the resend succeeds");
+  expectStatus(await setPasswordWith(latestInviteToken(invNew4), password), 204, "the new link sets a password");
+  await signIn(invNew4, password, "login at the new invited address");
+  // Archived never-activated, and archive together with the email change.
+  const invArch = await adminInvite("teInvArch", "student");
+  touched.push(invArch.id);
+  expectStatus(await call(admin, "DELETE", `/users/${invArch.id}`), 200, "admin archives an invited user");
+  const archChange = await patch(admin, invArch.id, { email: emailFor("te-arch-new") });
+  expectStatus(archChange, 200, "email change on an archived never-activated user");
+  check(!("invite" in obj(archChange.body, "archived change")) && outboxFor(emailFor("te-arch-new")).length === 0, "no mail for an archived user");
+  const invArch2 = await adminInvite("teInvArch2", "student");
+  touched.push(invArch2.id);
+  const archBoth = await patch(admin, invArch2.id, { email: emailFor("te-arch2-new"), status: "archived" });
+  expectStatus(archBoth, 200, "email change plus archive on an invited user");
+  check(!("invite" in obj(archBoth.body, "archive plus email")) && outboxFor(emailFor("te-arch2-new")).length === 0, "archive plus email sends no mail");
+  check((await openInviteCount(invArch2.id)) === 0, "archive plus email expires the open invite");
+
+  // 7. Duplicate email and the concurrent race.
+  const takenEmail = emailFor("teStudent");
+  const activeTokens = await activeTokenCount(activeId);
+  const activeRows = (await userActivityOf(activeId)).length;
+  const dupActive = await patch(admin, activeId, { email: takenEmail });
+  expectStatus(dupActive, 409, "duplicate email on an active user");
+  check((await userRowOf(activeId)).email === selfNew, "active user unchanged after a duplicate");
+  check((await activeTokenCount(activeId)) === activeTokens, "active user's refresh tokens intact after a duplicate");
+  check((await userActivityOf(activeId)).length === activeRows, "a rolled-back edit leaves no activity row");
+  const dupInv = await adminInvite("teDupInv", "student");
+  touched.push(dupInv.id);
+  const dupToken = latestInviteToken(dupInv.email.toLowerCase());
+  expectStatus(await patch(admin, dupInv.id, { email: takenEmail }), 409, "duplicate email on an invited user");
+  check((await openInviteCount(dupInv.id)) === 1 && (await inviteStillValid(dupToken)), "invited user keeps its working invite after a duplicate");
+  await createUser("teRace", "student", uid("managerA"));
+  touched.push(uid("teRace"));
+  const raceEmail = emailFor("te-race");
+  const raceRows = {
+    [uid("teRace")]: (await userActivityOf(uid("teRace"))).length,
+    [dupInv.id]: (await userActivityOf(dupInv.id)).length,
+  };
+  const [raceA, raceB] = await Promise.all([
+    patch(admin, uid("teRace"), { email: raceEmail }),
+    patch(admin, dupInv.id, { email: raceEmail }),
+  ]);
+  const statuses = [raceA.status, raceB.status].sort();
+  check(statuses[0] === 200 && statuses[1] === 409, `race answers one 200 and one 409, got ${statuses.join(",")}`);
+  const loserId = raceA.status === 409 ? uid("teRace") : dupInv.id;
+  const loserOriginal = loserId === dupInv.id ? dupInv.email.toLowerCase() : emailFor("teRace").toLowerCase();
+  check((await userRowOf(loserId)).email === loserOriginal, "the race loser keeps its email");
+  check((await userActivityOf(loserId)).length === raceRows[loserId], "the race loser gets no activity row");
+  if (loserId === dupInv.id) {
+    check(await inviteStillValid(dupToken), "the invited loser keeps its working invite");
+  }
+
+  // 8. Activity hygiene: no address in any summary for this domain's targets.
+  for (const id of touched) {
+    for (const row of await userActivityOf(id)) {
+      check(!row.summary.includes("@"), `activity ${row.action} summary contains no address`);
+    }
+  }
+
+  // 9. Regression: manager profile edits keep their own scope.
+  expectStatus(await call(mA, "PATCH", `/teachers/${uid("teTeacher")}`, { headline: "Smoke team headline" }), 200, "manager edits own teacher profile");
+  expectStatus(await call(mA, "PATCH", `/teachers/${uid("teOtherT")}`, { headline: "Not yours" }), 403, "manager edits a foreign teacher profile");
+  expectStatus(await call(mA, "PATCH", `/students/${uid("teStudent")}`, { goal: "Smoke team goal" }), 200, "manager edits own student profile");
+  expectStatus(await call(mA, "PATCH", `/students/${uid("teOtherS")}`, { goal: "Not yours" }), 403, "manager edits a foreign student profile");
+  expectStatus(await patch(admin, uid("teOtherT"), { avatarColor: "#224466" }), 200, "admin changes another user's avatar");
+  check((await userActionCount(uid("teOtherT"), "user.updated")) === 1, "an avatar change writes one user.updated row");
 }
 
 async function scenario(domain: string, body: () => Promise<void>): Promise<void> {
@@ -1997,6 +2271,7 @@ async function main(): Promise<number> {
   await scenario("library", libraryScenario);
   await scenario("auth", authScenario);
   await scenario("invites", invitesScenario);
+  await scenario("team-edits", teamEditsScenario);
 
   const failed = outcomes.filter((outcome) => outcome.error);
   const total = outcomes.reduce((sum, outcome) => sum + outcome.checks, 0);

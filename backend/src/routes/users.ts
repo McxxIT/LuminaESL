@@ -17,7 +17,7 @@ import {
   isUniqueViolation,
   notFound,
 } from "../lib/errors";
-import { logActivity } from "../lib/activity";
+import { logActivity, type ActivityAction } from "../lib/activity";
 import {
   deliverInvite,
   expireOpenInvites,
@@ -36,9 +36,12 @@ import {
 } from "../lib/password";
 import { revokeUserRefreshTokens } from "../lib/refresh-tokens";
 import {
+  emailChangeSummary,
+  planUserPatchEffects,
+  userPatchAccess,
+} from "../lib/user-edit-policy";
+import {
   assertCanViewUser,
-  managerOwnsStudent,
-  managerOwnsTeacher,
   managerTeam,
 } from "../lib/scope";
 
@@ -424,125 +427,144 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     async (request) => {
       const { id } = idParams.parse(request.params);
       const body = updateUserSchema.parse(request.body);
+      const actor = request.user;
+      const isSelf = actor.sub === id;
 
-      const isSelf = request.user.sub === id;
-      const isAdmin = request.user.role === "admin";
-      if (!isSelf && !isAdmin) throw forbidden();
-      if (body.status && !isAdmin) {
-        const [target] = await app.db
-          .select({ role: users.role })
-          .from(users)
-          .where(eq(users.id, id))
-          .limit(1);
-        const canManageTeamMember =
-          request.user.role === "manager" &&
-          target &&
-          ((target.role === "teacher" &&
-            (await managerOwnsTeacher(app.db, request.user.sub, id))) ||
-            (target.role === "student" &&
-              (await managerOwnsStudent(app.db, request.user.sub, id))));
-        if (!canManageTeamMember) {
-          throw forbidden("Only admins can change this account status");
-        }
-      }
-      if (Object.keys(body).length === 0) {
+      // Static access rules, before any database read (no existence oracle).
+      const bodyKeys = Object.keys(body).filter(
+        (key) => body[key as keyof typeof body] !== undefined,
+      );
+      const access = userPatchAccess({
+        actorRole: actor.role,
+        isSelf,
+        bodyKeys,
+        bodyStatus: body.status,
+      });
+      if (access.kind === "deny") throw forbidden(access.message);
+      if (bodyKeys.length === 0) {
         throw badRequest("No fields to update");
       }
 
-      const [before] = await app.db
-        .select({
-          name: users.name,
-          status: users.status,
-          passwordHash: users.passwordHash,
-        })
-        .from(users)
-        .where(eq(users.id, id))
-        .limit(1);
-      if (!before) throw notFound("User not found");
-      // A never-activated account (unusable hash) cannot be made active or
-      // paused by any path; it must accept an invitation instead.
-      if (
-        (body.status === "active" || body.status === "paused") &&
-        isUnusablePasswordHash(before.passwordHash)
-      ) {
-        throw notActivated();
-      }
-
-      const updates: Partial<typeof users.$inferInsert> = {
-        updatedAt: new Date(),
-      };
-      if (body.name !== undefined) updates.name = body.name;
-      if (body.email !== undefined) {
-        const [existing] = await app.db
-          .select({ id: users.id })
-          .from(users)
-          .where(and(eq(users.email, body.email), sql`${users.id} <> ${id}`))
-          .limit(1);
-        if (existing) throw conflict("Email is already registered");
-        updates.email = body.email;
-      }
-      if (body.avatarColor !== undefined) {
-        updates.avatarColor = body.avatarColor;
-      }
-      if (body.status !== undefined) updates.status = body.status;
-
-      const updated = await app.db.transaction(async (tx) => {
-        const [row] = await tx
-          .update(users)
-          .set(updates)
-          .where(eq(users.id, id))
-          .returning();
-        if (!row) throw notFound("User not found");
-        const emailChangedWhileInvited =
-          body.email !== undefined && row.status === "invited";
-        if (
-          emailChangedWhileInvited ||
-          body.status === "archived" ||
-          body.status === "paused"
-        ) {
-          await expireOpenInvites(tx, row.id, new Date());
+      const now = new Date();
+      const result = await app.db.transaction(async (tx) => {
+        // 1. Row lock first; every decision below reads this locked row.
+        const before = await lockUserForInvite(tx, id);
+        if (!before) {
+          if (access.kind === "manager-team") throw forbidden();
+          throw notFound("User not found");
         }
-        return row;
+        // 2. Ownership inside the transaction; archived members stay admin-only.
+        if (access.kind === "manager-team") {
+          if (!(await managerOwnsInTx(tx, actor.sub, before))) throw forbidden();
+          if (before.status === "archived") throw forbidden();
+        }
+        // 3. A never-activated account (unusable hash) cannot be made active or
+        // paused by any path; it must accept an invitation instead.
+        const passwordUnusable = isUnusablePasswordHash(before.passwordHash);
+        if ((body.status === "active" || body.status === "paused") && passwordUnusable) {
+          throw notActivated();
+        }
+
+        const effects = planUserPatchEffects({
+          actorRole: actor.role,
+          isSelf,
+          before: {
+            status: before.status,
+            email: before.email,
+            name: before.name,
+            passwordUnusable,
+          },
+          body,
+        });
+        if (effects.emailChanged && body.email !== undefined) {
+          const [existing] = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(and(eq(users.email, body.email), sql`${users.id} <> ${id}`))
+            .limit(1);
+          if (existing) throw conflict("Email is already registered");
+        }
+
+        const updates: Partial<typeof users.$inferInsert> = { updatedAt: now };
+        if (body.name !== undefined) updates.name = body.name;
+        if (body.email !== undefined) updates.email = body.email;
+        if (body.avatarColor !== undefined) updates.avatarColor = body.avatarColor;
+        if (body.status !== undefined) updates.status = body.status;
+
+        let row: User | undefined;
+        try {
+          [row] = await tx.update(users).set(updates).where(eq(users.id, id)).returning();
+        } catch (error) {
+          // No further statement runs on this transaction after a PG error.
+          if (isUniqueViolation(error)) throw conflict("Email is already registered");
+          throw error;
+        }
+        if (!row) throw notFound("User not found");
+
+        // 4. Invites, then sessions (the users row is already locked).
+        let token: string | null = null;
+        if (effects.reinvite) {
+          // issueInvite expires the older open invites itself.
+          token = await issueInvite(tx, id, { now, cooldownSeconds: 0 });
+        } else if (effects.expireInvites) {
+          await expireOpenInvites(tx, id, now);
+        }
+        if (effects.revokeSessions) {
+          await revokeUserRefreshTokens(tx, id, now);
+        }
+
+        // 5. Activity on the same transaction.
+        const record = (action: ActivityAction, summary: string) =>
+          logActivity(tx, {
+            actorId: actor.sub,
+            action,
+            targetType: "user",
+            targetId: id,
+            summary,
+          });
+        if (effects.statusChanged && body.status !== undefined) {
+          await record(`user.${body.status}`, row.name);
+        }
+        if (effects.nameChanged) {
+          await record("user.renamed", `${before.name} → ${row.name}`);
+        }
+        if (effects.emailChanged) {
+          const outcome = effects.reinvite
+            ? "invited"
+            : actor.role === "admin" && !isSelf && before.status === "active"
+              ? "signed-out"
+              : "plain";
+          await record(
+            "user.email_changed",
+            emailChangeSummary({ name: row.name, outcome }),
+          );
+        }
+        if (effects.reinvite) {
+          await record("user.invite_resent", row.name);
+        }
+        if (
+          effects.avatarChanged &&
+          !effects.statusChanged &&
+          !effects.emailChanged &&
+          !effects.nameChanged
+        ) {
+          await record("user.updated", `${row.name} (avatarColor)`);
+        }
+        return { row, token };
       });
 
-      const newStatus = body.status;
-      const statusChanged =
-        newStatus !== undefined && before.status !== updated.status;
-      if (statusChanged && before.status === "active") {
-        // Defense in depth: /auth/refresh already rejects inactive accounts.
-        await revokeUserRefreshTokens(app.db, updated.id);
-      }
-      if (statusChanged && newStatus !== undefined) {
-        await logActivity(app.db, {
-          actorId: request.user.sub,
-          action: `user.${newStatus}`,
-          targetType: "user",
-          targetId: updated.id,
-          summary: updated.name,
-        });
-      }
-      if (body.name !== undefined && before.name !== updated.name) {
-        await logActivity(app.db, {
-          actorId: request.user.sub,
-          action: "user.renamed",
-          targetType: "user",
-          targetId: updated.id,
-          summary: `${before.name} → ${updated.name}`,
-        });
-      } else if (
-        !statusChanged &&
-        (body.email !== undefined || body.avatarColor !== undefined)
-      ) {
-        await logActivity(app.db, {
-          actorId: request.user.sub,
-          action: "user.updated",
-          targetType: "user",
-          targetId: updated.id,
-          summary: `${updated.name} (${Object.keys(body).join(", ")})`,
-        });
-      }
+      if (!result.token) return publicUser(result.row);
 
-      return publicUser(updated);
+      // Mail only after the transaction committed, to the new address.
+      const invite: InviteOutcome = await deliverInvite({
+        mailer: app.mailer,
+        env: app.config,
+        log: request.log,
+        user: { name: result.row.name, email: result.row.email },
+        token: result.token,
+        actorRole: actor.role,
+      });
+      return { ...publicUser(result.row), invite };
     },
   );
 

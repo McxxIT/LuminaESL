@@ -213,6 +213,17 @@ describe("school contract", () => {
     });
     expect(student.statusCode).toBe(403);
   });
+
+  it("should return 401 for an anonymous PATCH /users/:id", async () => {
+    expect(app.hasRoute({ method: "PATCH", url: "/api/v1/users/:id" })).toBe(true);
+    const anonymous = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/users/00000000-0000-0000-0000-000000000005",
+      payload: { name: "Nobody" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+  });
+
   it("registers the Curriculum Library routes behind authentication", async () => {
     expect(app.hasRoute({ method: "POST", url: "/api/v1/library" })).toBe(true);
     expect(app.hasRoute({ method: "PATCH", url: "/api/v1/library/:id" })).toBe(true);

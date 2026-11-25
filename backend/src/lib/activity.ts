@@ -51,6 +51,7 @@ export type ActivityAction =
   | "teacher.reassigned"
   | "teacher.updated"
   | "user.created"
+  | "user.email_changed"
   | "user.invite_accepted"
   | "user.invite_resent"
   | "user.password_changed"
