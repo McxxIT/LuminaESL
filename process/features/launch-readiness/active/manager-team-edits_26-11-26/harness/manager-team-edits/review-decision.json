@@ -1,0 +1,28 @@
+{
+  "task": "manager-team-edits — managers rename and pause/reactivate own-team teachers/students; admin email change signs out an active user or re-invites an invited one",
+  "reviewer": "vc-code-reviewer (independent agent, fresh context) on 2026-11-24; model substitution noted: the requested Claude Sonnet reviewer was unavailable (pay-as-you-go credits exhausted), so the review ran on the session default model with the identical reviewer prompt",
+  "reviewVerdict": "approved-with-concerns",
+  "decision": "on-hold — user chose not to commit yet; no source change made after the review",
+  "rationale": "No blocking defect. The authorization matrix, the single-transaction rewrite, the invite lifecycle, refresh revocation and activity hygiene are correct as written and were confirmed independently by both the EVL agent (claims a-g) and the reviewer. Two real non-blocking frontend defects were found and confirmed in the source by the orchestrator: (1) the API branch of updateTeacher/updateStudent never applies assertManagerKeepsEmail, so a manager's email change is silently discarded in API mode while the UI reports success, contradicting the local branch and the report's claim; (2) savedAccountOnly throws after a successful invited-email change, discarding the returned invite, so InviteResultModal never opens although the invitation committed and the link exists. The user chose to stop before committing rather than fix them now.",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "N1 (real, confirmed) — frontend/app/lib/school/services/people.ts:166-176 and :280-295: the API branch of updateTeacher/updateStudent does not call assertManagerKeepsEmail (the local branch does at :183 / :295); with frontend/app/lib/school/api/school.ts:86-88 dropping email for non-admins, a manager's email change is silently discarded in API mode while the UI says the record was updated. Fix: apply the guard in the API branch against the current school user.",
+    "N2 (real, confirmed) — frontend/app/lib/school/api/school.ts:100-109 with :142-157 / :174-183: savedAccountOnly throws after a successful account PATCH, discarding saved.invite. When the profile PATCH fails after an invited-email change, the invitation has committed and the link was returned but InviteResultModal never opens and the message never mentions an invitation. Fix: carry invite on the rethrown error (or return { invite, warning }) and open the modal.",
+    "N3 — school.ts:106 fixed copy 'Name and email were saved, but the profile details were not' is false for a manager, who only ever sends a name. Plan-mandated copy; misleading.",
+    "N4 — backend/src/lib/user-edit-policy.ts:52-57, 77-82: passwordUnusable is in UserPatchBefore and never read by planUserPatchEffects; the route computes it separately at users.ts:463-466. Dead parameter implying the policy enforces the never-activated rule.",
+    "N5 — user-edit-policy.ts:96-97: expireInvites is true for status 'paused' even when the target is already paused, so a redundant UPDATE auth_tokens runs; pinned by backend/tests/user-edit-policy.test.ts:194-198.",
+    "N6 — frontend/app/components/manager/PeopleForms.tsx:92, 142: the note is a <small> inside <label>, so it joins the input's accessible name rather than describing it; aria-describedby is the correct shape. Announced, so acceptable.",
+    "N7 — users.ts:457-460 with managerOwnsInTx (:196-207): a manager can pause (not only rename) an enrollment-only student who is not on their roster. Intended per U6 but only the rename case is proven by smoke (teStudentB); the pause authority is untested.",
+    "N8 — backend/src/plugins/auth.ts:7-13: authenticate never checks account status, so a paused or archived MANAGER keeps team-write authority (rename, pause) for up to 15 minutes. Widen access-token-revocation_NOTE_24-11-26.md accordingly.",
+    "N9 — the report frontmatter status and section 7.1 were out of step with the pack while the EVL check was pending; corrected in the report after the EVL run.",
+    "N10 — harness/manager-team-edits/review-decision.json was absent when the EVL ran; written as this file."
+  ],
+  "residuals": [
+    "15-minute access JWT — ship as recorded. Pre-existing (plugins/auth.ts verifies the signature only); this change strictly improves the posture by revoking refresh tokens inside the transaction on pause and on an admin email change. Widen the note per N8.",
+    "Sub-second ownership reassignment race — ship as recorded. Consequence bounded to a rename or pause of a teacher/student, actor-logged and reversible; enrollment-derived ownership cannot be FOR SHARE-locked without a design change. Correctly not counted as PASS.",
+    "Manager can reactivate an admin-paused member — ship, but the weakest residual: it lets a manager reverse a deliberate admin control with only an activity row as trace. U2 is a locked user decision, so not this change's defect; the admin-pause marker follow-up should not slip past launch.",
+    "Admin invited-email cooldown 0 — ship as recorded. The mitigation is real (global limiter at backend/src/app.ts:120, 300/min/IP default) but coarse: a compromised admin gets roughly 300 mails/min to arbitrary addresses, so per-sender-invite-limit is the residual's actual bound and should land before launch, not after."
+  ],
+  "notes": "EVL: all 10 gates PASS with margins and claims a-g CONFIRMED; its FAIL line referred only to this file being absent. No hard-stop event in either run. Tree left uncommitted at the user's request.",
+  "timestamp": "2026-11-24T23:20:00Z"
+}
