@@ -15,9 +15,15 @@ priority: low-medium (school scale; accepted for v1)
 ## Gap
 
 - `app.authenticate` only verifies the JWT signature. After an admin reset, a self password change,
-  or a pause/archive, refresh tokens are revoked immediately, but an already-issued access token
-  stays valid for `ACCESS_TOKEN_TTL` (15 minutes).
+  a pause/archive, or an admin changing an active person's email, refresh tokens are revoked immediately, but an
+  already-issued access token stays valid for `ACCESS_TOKEN_TTL` (15 minutes).
 - The reset modal copy already says "lose access within 15 minutes".
+
+## Widenings from the manager-team-edits fix (26-11-26)
+
+- `PATCH /users/:id` now revokes refresh tokens inside its single transaction on a pause and on an admin email change of an ACTIVE person. The access-token window above applies to both.
+- `authenticate` never checks account status, so a **paused or archived MANAGER keeps team-write authority** (rename, pause/reactivate) for up to 15 minutes after the pause commits. The actor is still activity-logged; the window is the residual.
+- A manager pause of a member has the same shape: the member keeps read/write access for up to 15 minutes.
 
 ## Options
 

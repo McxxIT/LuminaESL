@@ -21,6 +21,6 @@ priority: low
 6. An invited teacher is labeled "(paused)" in scheduling pickers.
 7. No route-level negative test that a manager never receives a copyable link in production mode.
 8. No manager duplicate-email 409 test.
-9. A manager cannot fix an invitee's mistyped email (covered by `manager-edit-team-member-403_NOTE_25-11-26.md`).
+9. A manager cannot fix an invitee's mistyped email. CLOSED for the admin side by the manager-team-edits fix: an admin changing an INVITED person's email now expires the old invite and mails a new one automatically (decision U4, 26-11-26). It stays admin-only by decision U1, so this is a product boundary, not a gap.
 10. Plan ideas not scheduled: bulk invite send, injectable clock for invite expiry tests.
 11. Related existing notes affected by this fix: `admin-password-recovery` (the `auth_tokens` table leaves room for a `reset` purpose), `access-token-revocation` (set-password revokes refresh tokens only), `refresh-and-password-change-atomicity` (set-password is one transaction), `trust-proxy-and-limiter-store` (invite link base comes from `APP_URL`, never headers; set-password is IP-limited).

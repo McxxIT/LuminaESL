@@ -7,14 +7,20 @@ feature: launch-readiness
 
 # Manager cannot edit an existing team member in API mode
 
-status: OPEN, user-chosen follow-up before Phase 06 (next up)
-item: account-invites review (also plan known gap `manager-patch-team-member-email`; `users.ts` blocks managers from PATCHing team users, so the team-member status branch is unreachable)
-priority: HIGH-ish. Managers can now create team members but not fix them afterwards.
+status: RESOLVED 26-11-26 by the manager-team-edits fix (plan `manager-team-edits_PLAN_26-11-26.md`, commits `68c9c30` / `fe0cc49`); archived with that task folder
+item: account-invites review (also plan known gap `manager-patch-team-member-email`; `users.ts` blocked managers from PATCHing team users, so the team-member status branch was unreachable)
+priority: HIGH-ish (was). Managers can now rename and pause/reactivate own-team teachers and students.
 
-## Gap
+## Resolution
 
-- The account-invites fix let managers create and invite teachers and students on their own team. The frontend edit flow for an existing member still PATCHes `/users/:id`, which only an admin or the user themself may call, so the manager gets `403` in API mode.
-- Consequence: a manager also cannot correct an invitee's mistyped email.
+- `PATCH /users/:id` now has a manager-team branch (name only, plus pause/reactivate) inside one transaction with the target row locked; email, avatar colour, role, team and archive stay admin-only and are denied with 403 before any database read. See `process/context/auth/roles-and-scope.md`.
+- A manager still cannot fix an invitee's mistyped email: that stays admin-only by decision U1. The admin path is now safe and automatic — an admin changing an INVITED person's email expires the old invite and mails a new one (U4).
+- Residuals recorded as their own notes: `manager-list-visibility-mismatch_NOTE_26-11-26.md`, `manager-ownership-reassign-race_NOTE_26-11-26.md`, `user-edit-two-call-atomicity_NOTE_26-11-26.md`.
+
+## Gap (historical)
+
+- The account-invites fix let managers create and invite teachers and students on their own team. The frontend edit flow for an existing member still PATCHed `/users/:id`, which only an admin or the user themself could call, so the manager got `403` in API mode.
+- Consequence: a manager also could not correct an invitee's mistyped email.
 
 ## Options
 

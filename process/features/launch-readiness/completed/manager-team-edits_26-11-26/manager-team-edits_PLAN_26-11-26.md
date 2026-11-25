@@ -14,11 +14,11 @@ metadata:
 Date: 26-11-26
 **Related program:** lumina-v1-finish (standalone fix that runs after the account-invites fix and BEFORE Phase 06)
 **Umbrella plan (context only, not modified by this plan):** process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md
-**Backlog item closed:** process/features/launch-readiness/backlog/manager-edit-team-member-403_NOTE_25-11-26.md (HIGH-ish). Also closes item 9 of `account-invites-review-residuals_NOTE_25-11-26.md` for the manager side (a manager cannot fix an invitee's mistyped email: stays admin-only BY DECISION U1; the admin path is made safe and automatic by U4).
+**Backlog item closed:** `process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-edit-team-member-403_NOTE_25-11-26.md` (HIGH-ish; moved here from backlog when resolved). Also closes item 9 of `account-invites-review-residuals_NOTE_25-11-26.md` for the manager side (a manager cannot fix an invitee's mistyped email: stays admin-only BY DECISION U1; the admin path is made safe and automatic by U4).
 Complexity: COMPLEX (authorization/identity + session handling + public API contract + transactional rewrite of an existing route + both workspaces; NO schema change, NO new dependency)
-Status: VALIDATED (PLAN written 26-11-26; PVL cycle 1 supplement applied 26-11-26; PVL re-validate Gate: PASS 26-11-26; EXECUTE pending)
-**Report destination:** process/features/launch-readiness/active/manager-team-edits_26-11-26/manager-team-edits_REPORT_26-11-26.md
-**High-risk evidence pack:** process/features/launch-readiness/active/manager-team-edits_26-11-26/harness/manager-team-edits/ (5 JSON artifacts, same shape as `lumina-v1-finish_23-11-26/harness/phase-03-auth/`: adversarial-validation, context-snippets, review-decision, risk-gate, verification)
+Status: VERIFIED 26-11-26 — Steps A-E executed, EVL green, review APPROVE WITH CONCERNS, review findings N1/N2 fixed and committed (`68c9c30`, `fe0cc49`, `5ee5f9f`); archived in `process/features/launch-readiness/completed/manager-team-edits_26-11-26/`
+**Report destination:** process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_REPORT_26-11-26.md
+**High-risk evidence pack:** process/features/launch-readiness/completed/manager-team-edits_26-11-26/harness/manager-team-edits/ (5 JSON artifacts, same shape as `lumina-v1-finish_23-11-26/harness/phase-03-auth/`: adversarial-validation, context-snippets, review-decision, risk-gate, verification)
 
 TL;DR: Today a manager editing a teacher or student on their own team gets `403` in API mode, because `PATCH /users/:id` is admin-or-self only. After this fix a manager can change ONLY the name of an own-team teacher/student and pause or reactivate them (archive stays admin-only; email, avatar, role and team stay admin). In the same rewrite the route becomes one transaction with the target row locked: an admin changing an ACTIVE person's email signs them out, an admin changing an INVITED person's email expires the old invite and mails a new one to the new address, and a duplicate-email race answers `409` instead of `500`. No schema change. No real email is sent by any gate.
 
@@ -474,7 +474,7 @@ High-risk classes present (auth/identity, public API contract, session handling)
 
 ## Resume and Execution Handoff
 
-- Selected plan file path: `process/features/launch-readiness/active/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md`
+- Selected plan file path: `process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md`
 - Last completed step: Step 3 PLAN (26-11-26); Steps 0-2 recorded in Phase Loop Progress (SPEC skipped by user decision, INNOVATE compressed by user decisions U1-U6)
 - Validate-contract status: written 26-11-26, Gate: PASS (generated-by: outer-pvl); next EXECUTE
 - Supporting context files loaded: `process/context/{all-context,tests/all-tests,auth/{roles-and-scope,jwt-cookie-flow},uxui/school-data-layer}.md`; backlog notes `manager-edit-team-member-403`, `account-invites-review-residuals`, `per-sender-invite-limit`, `access-token-revocation`; the account-invites plan (format and rigor reference); `phase-blast-radius-registry.md`. Code anchors verified 26-11-26: `users.ts:25,37,40-43,64-89,91-96,98-167,173-207,376-419,421-547` (PATCH 421-547; the `!isSelf && !isAdmin` block at 428-430; team-member status branch 431-447 unreachable for managers; email duplicate pre-check 475-483 outside any catch; revoke/activity on `app.db` at 513/516/525/536), `lib/invites.ts:88-99,102-120,129-177,249-287`, `lib/scope.ts:104-132`, `lib/errors.ts:45-52`, `lib/refresh-tokens.ts` `revokeUserRefreshTokens(db: DbOrTx,...)`, `lib/activity.ts:13-60`, `teachers.ts:149-230`, `students.ts:177-260`, `schema.ts:95` (`users.email` unique), `smoke.ts:243-262,433-440,925-937,1156-1188,1195-1199,1370-1414,1983-1999`, `api/school.ts:51,72-96,113-124,140-143`, `people.ts:35-39,119-179,265-281,333-350,356-363,377-390`, `permissions.ts:66-71,96-104`, `PeopleForms.tsx:63,83,130,190-201`, `ManagerTeachers.tsx:72,85,100-104,154-160,203-215`, `ManagerStudents.tsx:101,129,178-186,225-229`, `AdminManagers.tsx:50,110,116`, `notifications.ts:136,248`, `account-invites.spec.ts` (fixture and selector style).
@@ -626,7 +626,7 @@ Targets (minimums, exact totals recorded by EVL): backend vitest >= 13 files / >
 ### High-risk pack
 
 Required: yes (auth/identity, public API contract, session handling; manual-first, minimum tier Hybrid).
-Location: `process/features/launch-readiness/active/manager-team-edits_26-11-26/harness/manager-team-edits/` with `risk-gate.json` (`mustStopBeforeFinalize: true`), `context-snippets.json` (file:line for the users.ts PATCH, user-edit-policy.ts, invites lock/issue, activity.ts), `verification.json` (happy path plus boundary cases: manager 403, archived, race 409, invited reinvite, unchanged email), `review-decision.json` (explicit APPROVE/REJECT with rationale), `adversarial-validation.json` (manager email takeover, undo of an admin archive, ownership oracle, TOCTOU, mail bombing). The execute-agent writes it before closeout and states explicitly if it is missing; the work is not "ready" until `review-decision.json` is present.
+Location: `process/features/launch-readiness/completed/manager-team-edits_26-11-26/harness/manager-team-edits/` with `risk-gate.json` (`mustStopBeforeFinalize: true`), `context-snippets.json` (file:line for the users.ts PATCH, user-edit-policy.ts, invites lock/issue, activity.ts), `verification.json` (happy path plus boundary cases: manager 403, archived, race 409, invited reinvite, unchanged email), `review-decision.json` (explicit APPROVE/REJECT with rationale), `adversarial-validation.json` (manager email takeover, undo of an admin archive, ownership oracle, TOCTOU, mail bombing). The execute-agent writes it before closeout and states explicitly if it is missing; the work is not "ready" until `review-decision.json` is present.
 
 ### Backlog artifacts to create during durable capture
 
@@ -660,7 +660,7 @@ Cost guard: not triggered (at most 5 agents).
 
 SESSION GOAL: manager-team-edits - managers rename and pause/reactivate own-team teachers/students via PATCH /users/:id; an admin email change signs out an active user or re-invites an invited one; the route becomes one transaction.
 Charter + umbrella plan: N/A - standalone pre-Phase-06 fix (context only: process/features/launch-readiness/active/lumina-v1-finish_23-11-26/lumina-v1-finish-umbrella_PLAN_23-11-26.md, not modified).
-Plan: process/features/launch-readiness/active/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md
+Plan: process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md
 Autonomy: per feedback_autonomous_phase_execution.md - no approval pauses; subagent delegation stays mandatory (vc-execute-agent opus for Steps A-E; EVL by a spawned vc-tester); the orchestrator never edits source or runs gates in its own shell.
 Hard stop conditions / safety constraints:
 - Any real email send (smoke uses the array mailer, e2e the log mailer).
@@ -668,7 +668,7 @@ Hard stop conditions / safety constraints:
 - Reading or printing backend environment files, or any token, invite link or email body.
 - Port 4000 (or 3000/3100) already listening before npm run e2e: stop and ask.
 - Widening manager rights beyond name + pause/reactivate of own-team teachers/students (email, avatar, archive, restore, other teams = stop and ask).
-Next phase: EXECUTE: process/features/launch-readiness/active/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md (Steps A-E, red-first)
+Next phase: EXECUTE: process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md (Steps A-E, red-first)
 Validate contract: inline in the plan (## Validate Contract, Gate: PASS)
 Execute start: npm run test --workspace @lumina/backend (A1 red) | npm run smoke (17 domains green after the 1617 edit, then 18) | npm run e2e (ports free first) | probe: 1440x950 + 390x844 screenshots | high-risk pack: yes (harness/manager-team-edits/)
 

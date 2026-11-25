@@ -1,6 +1,6 @@
 {
   "task": "manager-team-edits — managers rename and pause/reactivate own-team teachers/students; admin email change signs out an active user or re-invites an invited one; PATCH /users/:id becomes one transaction",
-  "planPath": "process/features/launch-readiness/active/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md",
+  "planPath": "process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md",
   "riskLevel": "high",
   "riskClasses": [
     "auth or identity",

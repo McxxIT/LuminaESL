@@ -49,7 +49,7 @@ It does not cover: table definitions (see `process/context/database/`), UI layou
 
 ## Known Auth Gaps (open, in `process/features/launch-readiness/backlog/`)
 
-- Access JWT stays valid up to 15 min after reset/change/pause/archive; `trustProxy` unconditional and per-process limiter store; no recovery path for a locked-out single admin and admin-on-admin reset has no step-up; public `POST /auth/register` sits outside the invite model, no per-sender invite limit, no production first-admin path, managers cannot PATCH team members (403); (the shared default password is gone: accounts are `invited` and set their own through an emailed link); `/auth/refresh` and change-password are not fully atomic; no production cap on limiter env. Details: `jwt-cookie-flow.md` and the `*_NOTE_24-11-26.md` notes.
+- Access JWT stays valid up to 15 min after reset/change/pause/archive (and after a pause or an admin email change it also keeps team-write authority for a paused manager); `trustProxy` unconditional and per-process limiter store; no recovery path for a locked-out single admin and admin-on-admin reset has no step-up; public `POST /auth/register` sits outside the invite model, no per-sender invite limit, no production first-admin path; (the shared default password is gone: accounts are `invited` and set their own through an emailed link); `/auth/refresh` and change-password are not fully atomic; no production cap on limiter env. Manager team edits are now shipped (`PATCH /users/:id` has a name + pause/reactivate manager branch; `manager-edit-team-member-403` resolved). Details: `jwt-cookie-flow.md`, `roles-and-scope.md` and the `*_NOTE_24-11-26.md` notes.
 
 ## Canonical Notes
 

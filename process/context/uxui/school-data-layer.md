@@ -27,6 +27,8 @@ Local-branch rules are unit-tested with Vitest in `frontend/tests/` (memory adap
 
 `result.ts`: `ok()/fail()`, `ServiceError`, `run()` (sync) and `runAsync()` (async) convert `ServiceError`, `PermissionError`, `ApiError` into `{ok:false,error}` so screens show a toast instead of catching.
 
+People edits (`services/people.ts`) return `PersonEditResult` (`{ invite?, warning? }` from `api/school.ts`): an admin editing an invited person gets the mailed `invite`, and a two-call edit whose profile PATCH fails after the account PATCH returns a `warning` naming what was saved instead of throwing, so the invite modal still opens. The manager email rule is enforced in BOTH branches — the local branch reads the draft, the API branch reads `getSchoolSnapshot()` (`assertManagerKeepsStoredEmail`) and refuses before any request, because `api/school.ts` never sends `email` for a non-admin session.
+
 ## Pattern (see `services/bookings.ts` `bookLesson`)
 
 ```

@@ -12,10 +12,10 @@ metadata:
 # Manager Team Edits — Execution Report
 
 Date: 26-11-26
-**Plan:** `process/features/launch-readiness/active/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md`
+**Plan:** `process/features/launch-readiness/completed/manager-team-edits_26-11-26/manager-team-edits_PLAN_26-11-26.md`
 **Feature:** launch-readiness (standalone pre-Phase-06 fix)
-**Branch:** `developing` (uncommitted at the time of writing; commit checkpoint follows the review decision)
-**Status:** CODE DONE + EVL VERIFIED, review APPROVE WITH CONCERNS, review follow-up N1 + N2 **fixed 26-11-26**, commit checkpoint taken
+**Branch:** `developing`
+**Status:** CODE DONE + EVL VERIFIED, review APPROVE WITH CONCERNS, review follow-up N1 + N2 **fixed 26-11-26**, committed (`68c9c30`, `fe0cc49`, `5ee5f9f`) and **archived** to `process/features/launch-readiness/completed/manager-team-edits_26-11-26/`
 
 TL;DR: `PATCH /users/:id` is now one transaction with the target row locked. A manager can rename and pause/reactivate their own team's teachers and students; email, avatar color, archive and other teams stay admin-only and the deny is indistinguishable for unknown, foreign, admin, manager and non-teacher/student targets. An admin email change revokes the active person's sessions or re-issues the invitation to an invited person (old link dead at commit). The frontend manager path works end to end, the Email field is locked with an admin-only note, and the admin sees the new invitation. No schema change, no dependency change, no real mail.
 
@@ -126,7 +126,7 @@ Recorded, never counted as PASS:
 
 ## 5. Evidence pack
 
-`process/features/launch-readiness/active/manager-team-edits_26-11-26/harness/manager-team-edits/`
+`process/features/launch-readiness/completed/manager-team-edits_26-11-26/harness/manager-team-edits/`
 
 | Artifact | Content |
 |---|---|
